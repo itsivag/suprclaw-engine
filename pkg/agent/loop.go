@@ -42,9 +42,9 @@ type AgentLoop struct {
 	state          *state.Manager
 	contextBuilder *ContextBuilder
 	tools          *tools.ToolRegistry
-	mcpManager     *mcp.Manager     // MCP server manager for resource cleanup
-	mcpConfig      *config.Config   // Config for lazy MCP initialization
-	mcpInitOnce    sync.Once        // Ensures MCP is initialized only once
+	mcpManager     *mcp.Manager   // MCP server manager for resource cleanup
+	mcpConfig      *config.Config // Config for lazy MCP initialization
+	mcpInitOnce    sync.Once      // Ensures MCP is initialized only once
 	running        atomic.Bool
 	summarizing    sync.Map // Tracks which sessions are currently being summarized
 	channelManager *channels.Manager
@@ -191,6 +191,18 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				})
 		}
 	})
+
+	// Ensure MCP connections are cleaned up on all exit paths
+	defer func() {
+		if al.mcpManager != nil {
+			if err := al.mcpManager.Close(); err != nil {
+				logger.ErrorCF("agent", "Failed to close MCP manager",
+					map[string]interface{}{
+						"error": err.Error(),
+					})
+			}
+		}
+	}()
 
 	for al.running.Load() {
 		select {
