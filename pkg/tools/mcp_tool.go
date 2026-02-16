@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	mcpPkg "github.com/sipeed/picoclaw/pkg/mcp"
 )
 
 // MCPManager defines the interface for MCP manager operations
@@ -23,7 +22,7 @@ type MCPTool struct {
 }
 
 // NewMCPTool creates a new MCP tool wrapper
-func NewMCPTool(manager *mcpPkg.Manager, serverName string, tool *mcp.Tool) *MCPTool {
+func NewMCPTool(manager MCPManager, serverName string, tool *mcp.Tool) *MCPTool {
 	return &MCPTool{
 		manager:    manager,
 		serverName: serverName,

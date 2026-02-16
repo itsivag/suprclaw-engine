@@ -26,15 +26,6 @@ func (m *MockMCPManager) CallTool(ctx context.Context, serverName, toolName stri
 	}, nil
 }
 
-// newMCPToolForTest creates an MCP tool for testing with mock manager
-func newMCPToolForTest(manager MCPManager, serverName string, tool *mcp.Tool) *MCPTool {
-	return &MCPTool{
-		manager:    manager,
-		serverName: serverName,
-		tool:       tool,
-	}
-}
-
 // TestNewMCPTool verifies MCP tool creation
 func TestNewMCPTool(t *testing.T) {
 	manager := &MockMCPManager{}
@@ -48,11 +39,11 @@ func TestNewMCPTool(t *testing.T) {
 					"type":        "string",
 					"description": "Test input",
 				},
+				},
 			},
-		},
-	}
+		}
 
-	mcpTool := newMCPToolForTest(manager, "test_server", tool)
+	mcpTool := NewMCPTool(manager, "test_server", tool)
 
 	if mcpTool == nil {
 		t.Fatal("NewMCPTool should not return nil")
@@ -95,7 +86,7 @@ func TestMCPTool_Name(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := &MockMCPManager{}
 			tool := &mcp.Tool{Name: tt.toolName}
-			mcpTool := newMCPToolForTest(manager, tt.serverName, tool)
+			mcpTool := NewMCPTool(manager, tt.serverName, tool)
 
 			result := mcpTool.Name()
 			if result != tt.expected {
@@ -134,7 +125,7 @@ func TestMCPTool_Description(t *testing.T) {
 				Name:        "test_tool",
 				Description: tt.toolDescription,
 			}
-			mcpTool := newMCPToolForTest(manager, tt.serverName, tool)
+			mcpTool := NewMCPTool(manager, tt.serverName, tool)
 
 			result := mcpTool.Description()
 
@@ -182,7 +173,7 @@ func TestMCPTool_Parameters(t *testing.T) {
 				Name:        "test_tool",
 				InputSchema: tt.inputSchema,
 			}
-			mcpTool := newMCPToolForTest(manager, "test_server", tool)
+			mcpTool := NewMCPTool(manager, "test_server", tool)
 
 			params := mcpTool.Parameters()
 
@@ -222,7 +213,7 @@ func TestMCPTool_Execute_Success(t *testing.T) {
 		Name:        "search_repos",
 		Description: "Search GitHub repositories",
 	}
-	mcpTool := newMCPToolForTest(manager, "github", tool)
+	mcpTool := NewMCPTool(manager, "github", tool)
 
 	ctx := context.Background()
 	args := map[string]interface{}{
@@ -251,7 +242,7 @@ func TestMCPTool_Execute_ManagerError(t *testing.T) {
 	}
 
 	tool := &mcp.Tool{Name: "test_tool"}
-	mcpTool := newMCPToolForTest(manager, "test_server", tool)
+	mcpTool := NewMCPTool(manager, "test_server", tool)
 
 	ctx := context.Background()
 	result := mcpTool.Execute(ctx, map[string]interface{}{})
@@ -284,7 +275,7 @@ func TestMCPTool_Execute_ServerError(t *testing.T) {
 	}
 
 	tool := &mcp.Tool{Name: "test_tool"}
-	mcpTool := newMCPToolForTest(manager, "test_server", tool)
+	mcpTool := NewMCPTool(manager, "test_server", tool)
 
 	ctx := context.Background()
 	result := mcpTool.Execute(ctx, map[string]interface{}{})
@@ -319,7 +310,7 @@ func TestMCPTool_Execute_MultipleContent(t *testing.T) {
 	}
 
 	tool := &mcp.Tool{Name: "multi_output"}
-	mcpTool := newMCPToolForTest(manager, "test_server", tool)
+	mcpTool := NewMCPTool(manager, "test_server", tool)
 
 	ctx := context.Background()
 	result := mcpTool.Execute(ctx, map[string]interface{}{})
@@ -407,7 +398,7 @@ func TestExtractContentText_EmptyContent(t *testing.T) {
 func TestMCPTool_InterfaceCompliance(t *testing.T) {
 	manager := &MockMCPManager{}
 	tool := &mcp.Tool{Name: "test"}
-	mcpTool := newMCPToolForTest(manager, "test_server", tool)
+	mcpTool := NewMCPTool(manager, "test_server", tool)
 
 	// Verify it implements Tool interface
 	var _ Tool = mcpTool
@@ -431,7 +422,7 @@ func TestMCPTool_Parameters_MapSchema(t *testing.T) {
 		Name:        "test_tool",
 		InputSchema: schema,
 	}
-	mcpTool := newMCPToolForTest(manager, "test_server", tool)
+	mcpTool := NewMCPTool(manager, "test_server", tool)
 
 	params := mcpTool.Parameters()
 
