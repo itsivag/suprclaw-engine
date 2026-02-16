@@ -32,22 +32,23 @@ import (
 )
 
 type AgentLoop struct {
-	bus            *bus.MessageBus
-	provider       providers.LLMProvider
-	workspace      string
-	model          string
-	contextWindow  int // Maximum context window size in tokens
-	maxIterations  int
-	sessions       *session.SessionManager
-	state          *state.Manager
-	contextBuilder *ContextBuilder
-	tools          *tools.ToolRegistry
-	mcpManager     *mcp.Manager   // MCP server manager for resource cleanup
-	mcpConfig      *config.Config // Config for lazy MCP initialization
-	mcpInitOnce    sync.Once      // Ensures MCP is initialized only once
-	running        atomic.Bool
-	summarizing    sync.Map // Tracks which sessions are currently being summarized
-	channelManager *channels.Manager
+	bus             *bus.MessageBus
+	provider        providers.LLMProvider
+	workspace       string
+	model           string
+	contextWindow   int // Maximum context window size in tokens
+	maxIterations   int
+	sessions        *session.SessionManager
+	state           *state.Manager
+	contextBuilder  *ContextBuilder
+	tools           *tools.ToolRegistry
+	mcpManager      *mcp.Manager           // MCP server manager for resource cleanup
+	mcpConfig       *config.Config         // Config for lazy MCP initialization
+	mcpInitOnce     sync.Once              // Ensures MCP is initialized only once
+	subagentManager *tools.SubagentManager // Subagent manager for MCP tool registration
+	running         atomic.Bool
+	summarizing     sync.Map // Tracks which sessions are currently being summarized
+	channelManager  *channels.Manager
 }
 
 // processOptions configures how a message is processed
@@ -105,22 +106,8 @@ func createToolRegistry(workspace string, restrict bool, cfg *config.Config, msg
 	})
 	registry.Register(messageTool)
 
-	// Register MCP tools from all connected servers
-	if mcpManager != nil {
-		servers := mcpManager.GetServers()
-		for serverName, conn := range servers {
-			for _, tool := range conn.Tools {
-				mcpTool := tools.NewMCPTool(mcpManager, serverName, tool)
-				registry.Register(mcpTool)
-				logger.DebugCF("agent", "Registered MCP tool",
-					map[string]interface{}{
-						"server": serverName,
-						"tool":   tool.Name,
-						"name":   mcpTool.Name(),
-					})
-			}
-		}
-	}
+	// Note: MCP tools are registered dynamically in Run() after servers are loaded
+	// This ensures we use the agent's lifecycle context for MCP connections
 
 	return registry
 }
@@ -162,19 +149,20 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 	contextBuilder.SetToolsRegistry(toolsRegistry)
 
 	return &AgentLoop{
-		bus:            msgBus,
-		provider:       provider,
-		workspace:      workspace,
-		model:          cfg.Agents.Defaults.Model,
-		contextWindow:  cfg.Agents.Defaults.MaxTokens, // Restore context window for summarization
-		maxIterations:  cfg.Agents.Defaults.MaxToolIterations,
-		sessions:       sessionsManager,
-		state:          stateManager,
-		contextBuilder: contextBuilder,
-		tools:          toolsRegistry,
-		mcpManager:     mcpManager,
-		mcpConfig:      cfg, // Store config for lazy initialization in Run()
-		summarizing:    sync.Map{},
+		bus:             msgBus,
+		provider:        provider,
+		workspace:       workspace,
+		model:           cfg.Agents.Defaults.Model,
+		contextWindow:   cfg.Agents.Defaults.MaxTokens, // Restore context window for summarization
+		maxIterations:   cfg.Agents.Defaults.MaxToolIterations,
+		sessions:        sessionsManager,
+		state:           stateManager,
+		contextBuilder:  contextBuilder,
+		tools:           toolsRegistry,
+		mcpManager:      mcpManager,
+		mcpConfig:       cfg, // Store config for lazy initialization in Run()
+		subagentManager: subagentManager,
+		summarizing:     sync.Map{},
 	}
 }
 
@@ -188,6 +176,34 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			logger.WarnCF("agent", "Failed to load MCP servers, MCP tools will not be available",
 				map[string]interface{}{
 					"error": err.Error(),
+				})
+		} else {
+			// Register for both main agent and subagents
+			servers := al.mcpManager.GetServers()
+			toolCount := 0
+			for serverName, conn := range servers {
+				for _, tool := range conn.Tools {
+					mcpTool := tools.NewMCPTool(al.mcpManager, serverName, tool)
+					al.tools.Register(mcpTool)
+
+					// Also register for subagent
+					if al.subagentManager != nil {
+						al.subagentManager.RegisterTool(tools.NewMCPTool(al.mcpManager, serverName, tool))
+					}
+
+					toolCount++
+					logger.DebugCF("agent", "Registered MCP tool",
+						map[string]interface{}{
+							"server": serverName,
+							"tool":   tool.Name,
+							"name":   mcpTool.Name(),
+						})
+				}
+			}
+			logger.InfoCF("agent", "MCP tools registered successfully",
+				map[string]interface{}{
+					"server_count": len(servers),
+					"tool_count":   toolCount,
 				})
 		}
 	})
