@@ -353,35 +353,7 @@ func DefaultConfig() *Config {
 			},
 			MCP: MCPConfig{
 				Enabled: false,
-				Servers: map[string]MCPServerConfig{
-					"filesystem": {
-						Enabled: false,
-						Command: "npx",
-						Args:    []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
-						Env:     map[string]string{},
-					},
-					"github": {
-						Enabled: false,
-						Command: "npx",
-						Args:    []string{"-y", "@modelcontextprotocol/server-github"},
-						Env: map[string]string{
-							"GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN",
-						},
-					},
-					"brave-search": {
-						Enabled: false,
-						Command: "npx",
-						Args:    []string{"-y", "@modelcontextprotocol/server-brave-search"},
-						Env: map[string]string{
-							"BRAVE_API_KEY": "YOUR_BRAVE_API_KEY",
-						},
-					},
-					"postgres": {
-						Enabled: false,
-						Command: "npx",
-						Args:    []string{"-y", "@modelcontextprotocol/server-postgres", "postgresql://user:password@localhost/dbname"},
-					},
-				},
+				Servers: map[string]MCPServerConfig{},
 			},
 		},
 		Heartbeat: HeartbeatConfig{
