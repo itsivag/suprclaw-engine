@@ -43,7 +43,8 @@ type AgentLoop struct {
 	contextBuilder  *ContextBuilder
 	tools           *tools.ToolRegistry
 	mcpManager      *mcp.Manager           // MCP server manager for resource cleanup
-	mcpConfig       *config.Config         // Config for lazy MCP initialization
+	mcpConfig       config.MCPConfig       // MCP config for lazy initialization (minimal dependency)
+	workspacePath   string                 // Workspace path for resolving relative envFile paths
 	mcpInitOnce     sync.Once              // Ensures MCP is initialized only once
 	subagentManager *tools.SubagentManager // Subagent manager for MCP tool registration
 	running         atomic.Bool
@@ -160,7 +161,8 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		contextBuilder:  contextBuilder,
 		tools:           toolsRegistry,
 		mcpManager:      mcpManager,
-		mcpConfig:       cfg, // Store config for lazy initialization in Run()
+		mcpConfig:       cfg.Tools.MCP,    // Store only MCP config (minimal dependency)
+		workspacePath:   workspace,        // Store workspace path for envFile resolution
 		subagentManager: subagentManager,
 		summarizing:     sync.Map{},
 	}
@@ -172,7 +174,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 	// Initialize MCP servers using the agent's lifecycle context
 	// This ensures MCP connections are cancelled when the agent stops
 	al.mcpInitOnce.Do(func() {
-		if err := al.mcpManager.LoadFromConfig(ctx, al.mcpConfig); err != nil {
+		if err := al.mcpManager.LoadFromMCPConfig(ctx, al.mcpConfig, al.workspacePath); err != nil {
 			logger.WarnCF("agent", "Failed to load MCP servers, MCP tools will not be available",
 				map[string]interface{}{
 					"error": err.Error(),

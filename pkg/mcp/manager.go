@@ -114,29 +114,32 @@ func NewManager() *Manager {
 
 // LoadFromConfig loads MCP servers from configuration
 func (m *Manager) LoadFromConfig(ctx context.Context, cfg *config.Config) error {
-	if !cfg.Tools.MCP.Enabled {
+	return m.LoadFromMCPConfig(ctx, cfg.Tools.MCP, cfg.WorkspacePath())
+}
+
+// LoadFromMCPConfig loads MCP servers from MCP configuration and workspace path.
+// This is the minimal dependency version that doesn't require the full Config object.
+func (m *Manager) LoadFromMCPConfig(ctx context.Context, mcpCfg config.MCPConfig, workspacePath string) error {
+	if !mcpCfg.Enabled {
 		logger.InfoCF("mcp", "MCP integration is disabled", nil)
 		return nil
 	}
 
-	if len(cfg.Tools.MCP.Servers) == 0 {
+	if len(mcpCfg.Servers) == 0 {
 		logger.InfoCF("mcp", "No MCP servers configured", nil)
 		return nil
 	}
 
 	logger.InfoCF("mcp", "Initializing MCP servers",
 		map[string]interface{}{
-			"count": len(cfg.Tools.MCP.Servers),
+			"count": len(mcpCfg.Servers),
 		})
 
-	// Get workspace path for resolving relative envFile paths
-	workspacePath := cfg.WorkspacePath()
-
 	var wg sync.WaitGroup
-	errs := make(chan error, len(cfg.Tools.MCP.Servers))
+	errs := make(chan error, len(mcpCfg.Servers))
 	enabledCount := 0
 
-	for name, serverCfg := range cfg.Tools.MCP.Servers {
+	for name, serverCfg := range mcpCfg.Servers {
 		if !serverCfg.Enabled {
 			logger.DebugCF("mcp", "Skipping disabled server",
 				map[string]interface{}{
