@@ -284,8 +284,16 @@ func (m *Manager) ConnectServer(ctx context.Context, name string, cfg config.MCP
 		// Create command with context
 		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
 
-		// Set environment variables
-		env := cmd.Environ()
+		// Build environment variables with proper override semantics
+		// Use a map to ensure config variables override file variables
+		envMap := make(map[string]string)
+
+		// Start with parent process environment
+		for _, e := range cmd.Environ() {
+			if idx := strings.Index(e, "="); idx > 0 {
+				envMap[e[:idx]] = e[idx+1:]
+			}
+		}
 
 		// Load environment variables from file if specified
 		if cfg.EnvFile != "" {
@@ -294,7 +302,7 @@ func (m *Manager) ConnectServer(ctx context.Context, name string, cfg config.MCP
 				return fmt.Errorf("failed to load env file %s: %w", cfg.EnvFile, err)
 			}
 			for k, v := range envVars {
-				env = append(env, fmt.Sprintf("%s=%s", k, v))
+				envMap[k] = v
 			}
 			logger.DebugCF("mcp", "Loaded environment variables from file",
 				map[string]interface{}{
@@ -305,16 +313,16 @@ func (m *Manager) ConnectServer(ctx context.Context, name string, cfg config.MCP
 		}
 
 		// Environment variables from config override those from file
-		if len(cfg.Env) > 0 {
-			for k, v := range cfg.Env {
-				env = append(env, fmt.Sprintf("%s=%s", k, v))
-			}
+		for k, v := range cfg.Env {
+			envMap[k] = v
 		}
 
-		// Set environment if we added any variables
-		if len(env) > len(cmd.Environ()) {
-			cmd.Env = env
+		// Convert map to slice
+		env := make([]string, 0, len(envMap))
+		for k, v := range envMap {
+			env = append(env, fmt.Sprintf("%s=%s", k, v))
 		}
+		cmd.Env = env
 
 		transport = &mcp.CommandTransport{Command: cmd}
 	default:
