@@ -103,6 +103,7 @@ type ServerConnection struct {
 type Manager struct {
 	servers map[string]*ServerConnection
 	mu      sync.RWMutex
+	closed  bool
 }
 
 // NewManager creates a new MCP manager
@@ -403,7 +404,14 @@ func (m *Manager) GetServer(name string) (*ServerConnection, bool) {
 
 // CallTool calls a tool on a specific server
 func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arguments map[string]interface{}) (*mcp.CallToolResult, error) {
-	conn, ok := m.GetServer(serverName)
+	m.mu.RLock()
+	if m.closed {
+		m.mu.RUnlock()
+		return nil, fmt.Errorf("manager is closed")
+	}
+	conn, ok := m.servers[serverName]
+	m.mu.RUnlock()
+
 	if !ok {
 		return nil, fmt.Errorf("server %s not found", serverName)
 	}
@@ -425,6 +433,11 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.closed {
+		return nil
+	}
+	m.closed = true
 
 	logger.InfoCF("mcp", "Closing all MCP server connections",
 		map[string]interface{}{
