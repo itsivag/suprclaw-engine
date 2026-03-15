@@ -938,7 +938,6 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 
 	case mediaType == "text/html" || looksLikeHTML(bodyStr):
 		switch strings.ToLower(t.format) {
-
 		case "markdown":
 			var err error
 			text, err = utils.HtmlToMarkdown(bodyStr)

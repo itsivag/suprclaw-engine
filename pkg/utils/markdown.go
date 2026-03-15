@@ -166,7 +166,6 @@ func (c *converter) walk(n *html.Node) {
 
 	// Opening Tags
 	switch n.Data {
-
 	// Buffer emphasis content so we can TrimSpace the inner text,
 	// avoiding the regex-across-boundaries bug.
 	case "b", "strong":
@@ -291,7 +290,6 @@ func (c *converter) walk(n *html.Node) {
 
 	// Closing Tags
 	switch n.Data {
-
 	// Pop buffer, trim, wrap with the correct marker.
 	case "b", "strong", "i", "em", "del", "s":
 		if len(c.emphStack) == 0 {
