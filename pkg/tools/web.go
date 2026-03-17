@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
@@ -29,7 +30,6 @@ const (
 
 	defaultMaxChars = 50000
 	maxRedirects    = 5
-	format          = "plaintext"
 )
 
 // Pre-compiled regexes for HTML text extraction
@@ -790,20 +790,27 @@ type privateHostWhitelist struct {
 
 func NewWebFetchTool(maxChars int, format string, fetchLimitBytes int64) (*WebFetchTool, error) {
 	// createHTTPClient cannot fail with an empty proxy string.
-	return NewWebFetchToolWithProxy(maxChars, "", format, fetchLimitBytes, nil)
+	return NewWebFetchToolWithConfig(maxChars, "", format, fetchLimitBytes, nil)
 }
 
 // allowPrivateWebFetchHosts controls whether loopback/private hosts are allowed.
 // This is false in normal runtime to reduce SSRF exposure, and tests can override it temporarily.
 var allowPrivateWebFetchHosts atomic.Bool
 
-func NewWebFetchToolWithProxy(maxChars int, proxy string, format string, fetchLimitBytes int64) (*WebFetchTool, error) {
-	return NewWebFetchToolWithConfig(maxChars, proxy, fetchLimitBytes, nil)
+func NewWebFetchToolWithProxy(
+	maxChars int,
+	proxy string,
+	format string,
+	fetchLimitBytes int64,
+	privateHostWhitelist []string,
+) (*WebFetchTool, error) {
+	return NewWebFetchToolWithConfig(maxChars, proxy, format, fetchLimitBytes, privateHostWhitelist)
 }
 
 func NewWebFetchToolWithConfig(
 	maxChars int,
 	proxy string,
+	format string,
 	fetchLimitBytes int64,
 	privateHostWhitelist []string,
 ) (*WebFetchTool, error) {
@@ -933,7 +940,26 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 	bodyStr := string(body)
 	contentType := resp.Header.Get("Content-Type")
 
-	mediaType, _, _ := mime.ParseMediaType(contentType)
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		// The most common error here is "mime: no media type" if the header is empty.
+		logger.WarnCF("tool", "Failed to parse Content-Type", map[string]any{
+			"raw_header": contentType,
+			"error":      err.Error(),
+		})
+
+		// security fallback
+		mediaType = "application/octet-stream"
+	}
+
+	charset, hasCharset := params["charset"]
+	if hasCharset {
+		// If the charset is not utf-8, we might have to convert the bodyStr
+		// before passing it to the HTML/Markdown parser
+		if strings.ToLower(charset) != "utf-8" {
+			logger.WarnCF("tool", "Note: the content is not in UTF-8", map[string]any{"charset": charset})
+		}
+	}
 
 	var text, extractor string
 

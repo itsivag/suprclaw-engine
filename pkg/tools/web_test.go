@@ -17,6 +17,7 @@ import (
 
 const (
 	testFetchLimit = int64(10 * 1024 * 1024)
+	format         = "plaintext"
 )
 
 // TestWebTool_WebFetch_Success verifies successful URL fetching
@@ -476,7 +477,7 @@ func TestWebTool_WebFetch_PrivateHostAllowedByExactWhitelist(t *testing.T) {
 	defer server.Close()
 
 	host, _ := serverHostAndPort(t, server.URL)
-	tool, err := NewWebFetchToolWithConfig(50000, "", testFetchLimit, []string{host})
+	tool, err := NewWebFetchToolWithConfig(50000, "", format, testFetchLimit, []string{host})
 	if err != nil {
 		t.Fatalf("Failed to create web fetch tool: %v", err)
 	}
@@ -501,7 +502,7 @@ func TestWebTool_WebFetch_PrivateHostAllowedByCIDRWhitelist(t *testing.T) {
 	defer server.Close()
 
 	host, _ := serverHostAndPort(t, server.URL)
-	tool, err := NewWebFetchToolWithConfig(50000, "", testFetchLimit, []string{singleHostCIDR(t, host)})
+	tool, err := NewWebFetchToolWithConfig(50000, "", format, testFetchLimit, []string{singleHostCIDR(t, host)})
 	if err != nil {
 		t.Fatalf("Failed to create web fetch tool: %v", err)
 	}
@@ -778,7 +779,7 @@ func TestWebTool_WebFetch_MissingDomain(t *testing.T) {
 }
 
 func TestNewWebFetchToolWithProxy(t *testing.T) {
-	tool, err := NewWebFetchToolWithProxy(1024, "http://127.0.0.1:7890", format, testFetchLimit)
+	tool, err := NewWebFetchToolWithProxy(1024, "http://127.0.0.1:7890", format, testFetchLimit, nil)
 	if err != nil {
 		logger.ErrorCF("agent", "Failed to create web fetch tool", map[string]any{"error": err.Error()})
 	} else if tool.maxChars != 1024 {
@@ -789,7 +790,7 @@ func TestNewWebFetchToolWithProxy(t *testing.T) {
 		t.Fatalf("proxy = %q, want %q", tool.proxy, "http://127.0.0.1:7890")
 	}
 
-	tool, err = NewWebFetchToolWithProxy(0, "http://127.0.0.1:7890", format, testFetchLimit)
+	tool, err = NewWebFetchToolWithProxy(0, "http://127.0.0.1:7890", format, testFetchLimit, nil)
 	if err != nil {
 		logger.ErrorCF("agent", "Failed to create web fetch tool", map[string]any{"error": err.Error()})
 	}
@@ -800,7 +801,7 @@ func TestNewWebFetchToolWithProxy(t *testing.T) {
 }
 
 func TestNewWebFetchToolWithConfig_InvalidPrivateHostWhitelist(t *testing.T) {
-	_, err := NewWebFetchToolWithConfig(1024, "", testFetchLimit, []string{"not-an-ip-or-cidr"})
+	_, err := NewWebFetchToolWithConfig(1024, "", format, testFetchLimit, []string{"not-an-ip-or-cidr"})
 	if err == nil {
 		t.Fatal("expected invalid whitelist entry to fail")
 	}
