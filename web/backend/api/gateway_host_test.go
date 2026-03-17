@@ -48,8 +48,8 @@ func TestBuildWsURLUsesRequestHostWhenLauncherPublicSaved(t *testing.T) {
 	req := httptest.NewRequest("GET", "http://launcher.local/api/pico/token", nil)
 	req.Host = "192.168.1.9:18800"
 
-	if got := h.buildWsURL(req, cfg); got != "ws://192.168.1.9:18790/pico/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://192.168.1.9:18790/pico/ws")
+	if got := h.buildWsURL(req, cfg); got != "ws://192.168.1.9:18800/pico/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://192.168.1.9:18800/pico/ws")
 	}
 }
 
@@ -71,8 +71,8 @@ func TestBuildWsURLUsesWSSWhenForwardedProtoIsHTTPS(t *testing.T) {
 	req.Host = "chat.example.com"
 	req.Header.Set("X-Forwarded-Proto", "https")
 
-	if got := h.buildWsURL(req, cfg); got != "wss://chat.example.com:18790/pico/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://chat.example.com:18790/pico/ws")
+	if got := h.buildWsURL(req, cfg); got != "wss://chat.example.com:18800/pico/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://chat.example.com:18800/pico/ws")
 	}
 }
 
@@ -88,8 +88,8 @@ func TestBuildWsURLUsesWSSWhenRequestIsTLS(t *testing.T) {
 	req.Host = "secure.example.com"
 	req.TLS = &tls.ConnectionState{}
 
-	if got := h.buildWsURL(req, cfg); got != "wss://secure.example.com:18790/pico/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://secure.example.com:18790/pico/ws")
+	if got := h.buildWsURL(req, cfg); got != "wss://secure.example.com:18800/pico/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "wss://secure.example.com:18800/pico/ws")
 	}
 }
 
@@ -106,7 +106,7 @@ func TestBuildWsURLPrefersForwardedHTTPOverTLS(t *testing.T) {
 	req.TLS = &tls.ConnectionState{}
 	req.Header.Set("X-Forwarded-Proto", "http")
 
-	if got := h.buildWsURL(req, cfg); got != "ws://chat.example.com:18790/pico/ws" {
-		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://chat.example.com:18790/pico/ws")
+	if got := h.buildWsURL(req, cfg); got != "ws://chat.example.com:18800/pico/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://chat.example.com:18800/pico/ws")
 	}
 }
