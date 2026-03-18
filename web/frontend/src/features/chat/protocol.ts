@@ -40,6 +40,7 @@ export function handlePicoMessage(
           },
         ],
         isTyping: false,
+        typingStatus: "",
       }))
       break
     }
@@ -63,8 +64,14 @@ export function handlePicoMessage(
       updateChatStore({ isTyping: true })
       break
 
+    case "typing.status": {
+      const text = (payload.text as string) || ""
+      updateChatStore({ typingStatus: text })
+      break
+    }
+
     case "typing.stop":
-      updateChatStore({ isTyping: false })
+      updateChatStore({ isTyping: false, typingStatus: "" })
       break
 
     case "error":

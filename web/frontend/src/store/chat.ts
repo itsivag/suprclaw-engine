@@ -22,6 +22,7 @@ export interface ChatStoreState {
   messages: ChatMessage[]
   connectionState: ConnectionState
   isTyping: boolean
+  typingStatus: string
   activeSessionId: string
   hasHydratedActiveSession: boolean
 }
@@ -32,6 +33,7 @@ const DEFAULT_CHAT_STATE: ChatStoreState = {
   messages: [],
   connectionState: "disconnected",
   isTyping: false,
+  typingStatus: "",
   activeSessionId: getInitialActiveSessionId(),
   hasHydratedActiveSession: false,
 }

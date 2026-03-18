@@ -51,3 +51,24 @@ type OutboundMediaMessage struct {
 	ChatID  string      `json:"chat_id"`
 	Parts   []MediaPart `json:"parts"`
 }
+
+type StatusKind string
+
+const (
+	StatusKindToolStart StatusKind = "tool_start"
+	StatusKindIteration StatusKind = "iteration"
+	StatusKindError     StatusKind = "error"
+)
+
+// OutboundStatusUpdate carries live agent status updates (tool names, iteration steps)
+// from the agent loop to channels for in-place display.
+type OutboundStatusUpdate struct {
+	Channel   string
+	ChatID    string
+	Kind      StatusKind
+	Text      string     // pre-formatted display string
+	ToolNames []string   // e.g. ["web_search", "read_file"] — populated for tool_start
+	StepName  string     // human-readable step label
+	Iteration int        // 1-based iteration number
+	MaxIter   int        // max iterations configured
+}

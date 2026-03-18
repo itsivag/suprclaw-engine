@@ -1009,6 +1009,20 @@ func (al *AgentLoop) runLLMIteration(
 				"max":       agent.MaxIterations,
 			})
 
+		if agent.StatusUpdates {
+			stepName := "Planning"
+			if iteration > 1 {
+				stepName = "Reasoning"
+			}
+			al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
+				Kind:      bus.StatusKindIteration,
+				StepName:  stepName,
+				Iteration: iteration,
+				MaxIter:   agent.MaxIterations,
+				Text:      fmt.Sprintf("%s (step %d/%d)...", stepName, iteration, agent.MaxIterations),
+			})
+		}
+
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()
 
@@ -1211,6 +1225,21 @@ func (al *AgentLoop) runLLMIteration(
 				"iteration": iteration,
 			})
 
+		if agent.StatusUpdates {
+			names := make([]string, len(normalizedToolCalls))
+			for i, tc := range normalizedToolCalls {
+				names[i] = tc.Name
+			}
+			al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
+				Kind:      bus.StatusKindToolStart,
+				ToolNames: names,
+				StepName:  "Tool execution",
+				Iteration: iteration,
+				MaxIter:   agent.MaxIterations,
+				Text:      fmt.Sprintf("🔧 %s", strings.Join(names, ", ")),
+			})
+		}
+
 		// Build assistant message with tool calls
 		assistantMsg := providers.Message{
 			Role:             "assistant",
@@ -1325,6 +1354,14 @@ func (al *AgentLoop) runLLMIteration(
 		}
 		wg.Wait()
 
+		if agent.StatusUpdates {
+			al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
+				Kind:     bus.StatusKindIteration,
+				StepName: "Processing results",
+				Text:     "Processing results...",
+			})
+		}
+
 		// Process results in original order (send to user, save to session)
 		for _, r := range agentResults {
 			// Send ForUser content to user immediately if not Silent
@@ -1392,6 +1429,17 @@ func (al *AgentLoop) runLLMIteration(
 	}
 
 	return finalContent, iteration, nil
+}
+
+// publishStatus publishes a live status update to the bus for channel display.
+// It is a no-op for internal channels and when SendResponse is false.
+func (al *AgentLoop) publishStatus(ctx context.Context, opts processOptions, update bus.OutboundStatusUpdate) {
+	if constants.IsInternalChannel(opts.Channel) || !opts.SendResponse {
+		return
+	}
+	update.Channel = opts.Channel
+	update.ChatID = opts.ChatID
+	_ = al.bus.PublishOutboundStatus(ctx, update)
 }
 
 // selectCandidates returns the model candidates and resolved model name to use

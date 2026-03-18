@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-export function TypingIndicator() {
+export function TypingIndicator({ statusText }: { statusText?: string }) {
   const { t } = useTranslation()
   const thinkingSteps = [
     t("chat.thinking.step1"),
@@ -18,6 +18,9 @@ export function TypingIndicator() {
     }, 3000)
     return () => clearInterval(interval)
   }, [thinkingSteps.length])
+
+  const displayText = statusText || thinkingSteps[stepIndex]
+  const displayKey = statusText ?? String(stepIndex)
 
   return (
     <div className="flex w-full flex-col gap-1.5">
@@ -36,10 +39,10 @@ export function TypingIndicator() {
         </div>
 
         <p
-          key={stepIndex}
+          key={displayKey}
           className="text-muted-foreground animate-[fadeSlideIn_0.4s_ease-out] text-xs"
         >
-          {thinkingSteps[stepIndex]}
+          {displayText}
         </p>
       </div>
     </div>

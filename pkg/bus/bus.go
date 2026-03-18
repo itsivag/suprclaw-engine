@@ -15,9 +15,10 @@ var ErrBusClosed = errors.New("message bus closed")
 const defaultBusBufferSize = 64
 
 type MessageBus struct {
-	inbound       chan InboundMessage
-	outbound      chan OutboundMessage
-	outboundMedia chan OutboundMediaMessage
+	inbound        chan InboundMessage
+	outbound       chan OutboundMessage
+	outboundMedia  chan OutboundMediaMessage
+	outboundStatus chan OutboundStatusUpdate
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -27,10 +28,11 @@ type MessageBus struct {
 
 func NewMessageBus() *MessageBus {
 	return &MessageBus{
-		inbound:       make(chan InboundMessage, defaultBusBufferSize),
-		outbound:      make(chan OutboundMessage, defaultBusBufferSize),
-		outboundMedia: make(chan OutboundMediaMessage, defaultBusBufferSize),
-		done:          make(chan struct{}),
+		inbound:        make(chan InboundMessage, defaultBusBufferSize),
+		outbound:       make(chan OutboundMessage, defaultBusBufferSize),
+		outboundMedia:  make(chan OutboundMediaMessage, defaultBusBufferSize),
+		outboundStatus: make(chan OutboundStatusUpdate, defaultBusBufferSize),
+		done:           make(chan struct{}),
 	}
 }
 
@@ -86,6 +88,14 @@ func (mb *MessageBus) OutboundMediaChan() <-chan OutboundMediaMessage {
 	return mb.outboundMedia
 }
 
+func (mb *MessageBus) PublishOutboundStatus(ctx context.Context, msg OutboundStatusUpdate) error {
+	return publish(ctx, mb, mb.outboundStatus, msg)
+}
+
+func (mb *MessageBus) OutboundStatusChan() <-chan OutboundStatusUpdate {
+	return mb.outboundStatus
+}
+
 func (mb *MessageBus) Close() {
 	mb.closeOnce.Do(func() {
 		// notify all blocked publishers to exit
@@ -102,6 +112,7 @@ func (mb *MessageBus) Close() {
 		close(mb.inbound)
 		close(mb.outbound)
 		close(mb.outboundMedia)
+		close(mb.outboundStatus)
 
 		// clean up any remaining messages in channels
 		drained := 0
@@ -112,6 +123,9 @@ func (mb *MessageBus) Close() {
 			drained++
 		}
 		for range mb.outboundMedia {
+			drained++
+		}
+		for range mb.outboundStatus {
 			drained++
 		}
 

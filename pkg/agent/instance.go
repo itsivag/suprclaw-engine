@@ -41,6 +41,10 @@ type AgentInstance struct {
 	SkillsFilter              []string
 	Candidates                []providers.FallbackCandidate
 
+	// StatusUpdates controls whether the agent publishes live status updates
+	// (tool names, iteration steps) to the bus for channel display.
+	StatusUpdates bool
+
 	// Router is non-nil when model routing is configured and the light model
 	// was successfully resolved. It scores each incoming message and decides
 	// whether to route to LightCandidates or stay with Candidates.
@@ -237,6 +241,7 @@ func NewAgentInstance(
 		Candidates:                candidates,
 		Router:                    router,
 		LightCandidates:           lightCandidates,
+		StatusUpdates:             defaults.StatusUpdates,
 	}
 }
 

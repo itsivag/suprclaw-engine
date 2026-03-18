@@ -15,6 +15,7 @@ const (
 	TypeMediaCreate   = "media.create"
 	TypeTypingStart   = "typing.start"
 	TypeTypingStop    = "typing.stop"
+	TypeTypingStatus  = "typing.status"
 	TypeError         = "error"
 	TypePong          = "pong"
 )

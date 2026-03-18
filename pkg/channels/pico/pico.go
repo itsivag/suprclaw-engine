@@ -197,6 +197,14 @@ func (c *PicoChannel) SendPlaceholder(ctx context.Context, chatID string) (strin
 	return msgID, nil
 }
 
+// BroadcastStatus implements channels.StatusBroadcaster.
+// It sends a typing.status WebSocket event to all connected clients for the session,
+// giving the browser instant feedback about the current agent operation.
+func (c *PicoChannel) BroadcastStatus(ctx context.Context, chatID, text string) error {
+	msg := newMessage(TypeTypingStatus, map[string]any{"text": text})
+	return c.broadcastToSession(chatID, msg)
+}
+
 // broadcastToSession sends a message to all connections with a matching session.
 func (c *PicoChannel) broadcastToSession(chatID string, msg PicoMessage) error {
 	// chatID format: "pico:<sessionID>"

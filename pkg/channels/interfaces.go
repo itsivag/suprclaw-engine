@@ -50,3 +50,9 @@ type PlaceholderRecorder interface {
 type CommandRegistrarCapable interface {
 	RegisterCommands(ctx context.Context, defs []commands.Definition) error
 }
+
+// StatusBroadcaster — channels that can push live status text to the client's
+// typing indicator area (separate from placeholder editing).
+type StatusBroadcaster interface {
+	BroadcastStatus(ctx context.Context, chatID, text string) error
+}

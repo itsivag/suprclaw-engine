@@ -234,6 +234,7 @@ type AgentDefaults struct {
 	SummarizeMessageThreshold int            `json:"summarize_message_threshold"     env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
 	SummarizeTokenPercent     int            `json:"summarize_token_percent"         env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
 	MaxMediaSize              int            `json:"max_media_size,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
+	StatusUpdates             bool           `json:"status_updates,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_STATUS_UPDATES"`
 	Routing                   *RoutingConfig `json:"routing,omitempty"`
 }
 

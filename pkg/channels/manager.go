@@ -352,6 +352,7 @@ func (m *Manager) StartAll(ctx context.Context) error {
 	// Start the dispatcher that reads from the bus and routes to workers
 	go m.dispatchOutbound(dispatchCtx)
 	go m.dispatchOutboundMedia(dispatchCtx)
+	go m.dispatchOutboundStatus(dispatchCtx)
 
 	// Start the TTL janitor that cleans up stale typing/placeholder entries
 	go m.runTTLJanitor(dispatchCtx)
@@ -637,6 +638,68 @@ func (m *Manager) dispatchOutboundMedia(ctx context.Context) {
 		"Unknown channel for outbound media message",
 		"Channel has no active worker, skipping media message",
 	)
+}
+
+// handleStatusUpdate delivers a live status update to the appropriate channel.
+// It first checks for StatusBroadcaster (WebSocket push), then updates any
+// live placeholder in-place via PlaceholderCapable+MessageEditor. Both checks
+// are independent; failures are logged at debug level only.
+func (m *Manager) handleStatusUpdate(ctx context.Context, channelName string, msg bus.OutboundStatusUpdate) {
+	m.mu.RLock()
+	ch, ok := m.channels[channelName]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	// Primary: WebSocket push (e.g. Pico)
+	if sb, ok := ch.(StatusBroadcaster); ok {
+		if err := sb.BroadcastStatus(ctx, msg.ChatID, msg.Text); err != nil {
+			logger.DebugCF("channels", "BroadcastStatus failed", map[string]any{
+				"channel": channelName,
+				"error":   err.Error(),
+			})
+		}
+	}
+
+	// Secondary: edit placeholder in-place (Load, not LoadAndDelete — preserve for final response)
+	if _, ok := ch.(PlaceholderCapable); ok {
+		if editor, ok := ch.(MessageEditor); ok {
+			key := channelName + ":" + msg.ChatID
+			if v, loaded := m.placeholders.Load(key); loaded {
+				if entry, ok := v.(placeholderEntry); ok && entry.id != "" {
+					if err := editor.EditMessage(ctx, msg.ChatID, entry.id, msg.Text); err != nil {
+						logger.DebugCF("channels", "Status placeholder edit failed", map[string]any{
+							"channel": channelName,
+							"error":   err.Error(),
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
+// dispatchOutboundStatus reads status updates from the bus and routes them
+// to the appropriate channel handler. Internal channels are skipped.
+func (m *Manager) dispatchOutboundStatus(ctx context.Context) {
+	logger.InfoC("channels", "Outbound status dispatcher started")
+	for {
+		select {
+		case <-ctx.Done():
+			logger.InfoC("channels", "Outbound status dispatcher stopped")
+			return
+		case msg, ok := <-m.bus.OutboundStatusChan():
+			if !ok {
+				logger.InfoC("channels", "Outbound status dispatcher stopped")
+				return
+			}
+			if constants.IsInternalChannel(msg.Channel) {
+				continue
+			}
+			m.handleStatusUpdate(ctx, msg.Channel, msg)
+		}
+	}
 }
 
 // runMediaWorker processes outbound media messages for a single channel.

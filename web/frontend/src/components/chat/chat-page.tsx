@@ -27,6 +27,7 @@ export function ChatPage() {
     messages,
     connectionState,
     isTyping,
+    typingStatus,
     activeSessionId,
     sendMessage,
     switchSession,
@@ -159,7 +160,7 @@ export function ChatPage() {
             </div>
           ))}
 
-          {isTyping && <TypingIndicator />}
+          {isTyping && <TypingIndicator statusText={typingStatus} />}
         </div>
       </div>
 
