@@ -1,201 +1,90 @@
-<div align="center">
-  <h1>SuprClaw: Ultra-Efficient AI Assistant in Go</h1>
+# SuprClaw
 
-  <h3>$10 Hardware · 10MB RAM · 1s Boot</h3>
-  <p>
-    <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-    <img src="https://img.shields.io/badge/Arch-x86__64%2C%20ARM64%2C%20MIPS%2C%20RISC--V-blue" alt="Hardware">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <br>
-    <a href="https://suprclaw.io"><img src="https://img.shields.io/badge/Website-suprclaw.io-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
-    <a href="https://docs.suprclaw.io/"><img src="https://img.shields.io/badge/Docs-Official-007acc?style=flat&logo=read-the-docs&logoColor=white" alt="Docs"></a>
-    <a href="https://deepwiki.com/sipeed/suprclaw"><img src="https://img.shields.io/badge/Wiki-DeepWiki-FFA500?style=flat&logo=wikipedia&logoColor=white" alt="Wiki"></a>
-    <br>
-    <a href="https://x.com/SipeedIO"><img src="https://img.shields.io/badge/X_(Twitter)-SipeedIO-black?style=flat&logo=x&logoColor=white" alt="Twitter"></a>
-<a href="https://discord.gg/V4sAZ9XWpN"><img src="https://img.shields.io/badge/Discord-Community-4c60eb?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
-  </p>
+**Ultra-lightweight personal AI assistant written in Go.**
 
+Runs on $10 hardware with <10MB RAM. Single binary, 1-second boot, works across x86_64, ARM64, MIPS, and RISC-V.
 
-</div>
+![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
-> **SuprClaw** is an independent open-source project initiated by [Sipeed](https://sipeed.com). It is written entirely in **Go** — not a fork of OpenClaw, NanoBot, or any other project.
+## Features
 
-🦐 SuprClaw is an ultra-lightweight personal AI Assistant inspired by [NanoBot](https://github.com/HKUDS/nanobot), refactored from the ground up in Go through a self-bootstrapping process, where the AI agent itself drove the entire architectural migration and code optimization.
+- **<10MB RAM** — 99% lighter than Electron-based alternatives
+- **1s boot** — even on 0.6GHz single-core hardware
+- **Single binary** — no runtime dependencies, drop-in deployment
+- **Multi-arch** — x86_64, ARM64, MIPS, RISC-V
+- **Self-hosted** — no telemetry, no tracking, all data stays local
+- **Multi-channel** — Telegram, Discord, WhatsApp, Matrix, LINE, and more
+- **Scheduled tasks** — built-in cron and heartbeat system
+- **Sandboxed** — agent restricted to workspace by default
 
-⚡️ Runs on $10 hardware with <10MB RAM: That's 99% less memory than OpenClaw and 98% cheaper than a Mac mini!
+---
 
+## Install
 
-> [!CAUTION]
-> **🚨 SECURITY & OFFICIAL CHANNELS / 安全声明**
->
-> * **NO CRYPTO:** SuprClaw has **NO** official token/coin. All claims on `pump.fun` or other trading platforms are **SCAMS**.
->
-> * **OFFICIAL DOMAIN:** The **ONLY** official website is **[suprclaw.io](https://suprclaw.io)**, and company website is **[sipeed.com](https://sipeed.com)**
-> * **Warning:** Many `.ai/.org/.com/.net/...` domains are registered by third parties.
-> * **Warning:** suprclaw is in early development now and may have unresolved network security issues. Do not deploy to production environments before the v1.0 release.
-> * **Note:** suprclaw has recently merged a lot of PRs, which may result in a larger memory footprint (10–20MB) in the latest versions. We plan to prioritize resource optimization as soon as the current feature set reaches a stable state.
+### Precompiled binary
 
-## 📢 News
+Download from the [releases](https://github.com/itsivag/suprclaw-engine/releases) page.
 
-2026-02-16 🎉 SuprClaw hit 12K stars in one week! Thank you all for your support! SuprClaw is growing faster than we ever imagined. Given the high volume of PRs, we urgently need community maintainers. Our volunteer roles and roadmap are officially posted [here](ROADMAP.md) —we can’t wait to have you on board!
-
-2026-02-13 🎉 SuprClaw hit 5000 stars in 4days! Thank you for the community! There are so many PRs & issues coming in (during Chinese New Year holidays), we are finalizing the Project Roadmap and setting up the Developer Group to accelerate SuprClaw's development.
-🚀 Call to Action: Please submit your feature requests in GitHub Discussions. We will review and prioritize them during our upcoming weekly meeting.
-
-2026-02-09 🎉 SuprClaw Launched! Built in 1 day to bring AI Agents to $10 hardware with <10MB RAM. 🦐 SuprClaw，Let's Go！
-
-## ✨ Features
-
-🪶 **Ultra-Lightweight**: <10MB Memory footprint — 99% smaller than Clawdbot - core functionality.
-
-💰 **Minimal Cost**: Efficient enough to run on $10 Hardware — 98% cheaper than a Mac mini.
-
-⚡️ **Lightning Fast**: 400X Faster startup time, boot in 1 second even in 0.6GHz single core.
-
-🌍 **True Portability**: Single self-contained binary across RISC-V, ARM, MIPS, and x86, One-click to Go!
-
-🤖 **AI-Bootstrapped**: Autonomous Go-native implementation — 95% Agent-generated core with human-in-the-loop refinement.
-
-|                               | OpenClaw      | NanoBot                  | **SuprClaw**                              |
-| ----------------------------- | ------------- | ------------------------ | ----------------------------------------- |
-| **Language**                  | TypeScript    | Python                   | **Go**                                    |
-| **RAM**                       | >1GB          | >100MB                   | **< 10MB**                                |
-| **Startup**</br>(0.8GHz core) | >500s         | >30s                     | **<1s**                                   |
-| **Cost**                      | Mac Mini 599$ | Most Linux SBC </br>~50$ | **Any Linux Board**</br>**As low as 10$** |
-
-## 🦾 Demonstration
-
-### 🛠️ Standard Assistant Workflows
-
-- 🧩 **Full-Stack Engineer** — Develop • Deploy • Scale
-- 🗂️ **Logging & Planning Management** — Schedule • Automate • Memory
-- 🔎 **Web Search & Learning** — Discovery • Insights • Trends
-
-### 📱 Run on old Android Phones
-
-Give your decade-old phone a second life! Turn it into a smart AI Assistant with SuprClaw. Quick Start:
-
-1. **Install Termux** (Available on F-Droid or Google Play).
-2. **Execute cmds**
+### From source
 
 ```bash
-# Note: Replace v0.1.1 with the latest version from the Releases page
-wget https://github.com/sipeed/suprclaw/releases/download/v0.1.1/suprclaw-linux-arm64
-chmod +x suprclaw-linux-arm64
-pkg install proot
-termux-chroot ./suprclaw-linux-arm64 onboard
-```
-
-And then follow the instructions in the "Quick Start" section to complete the configuration!
-
-### 🐜 Innovative Low-Footprint Deploy
-
-SuprClaw can be deployed on almost any Linux device!
-
-- $9.9 [LicheeRV-Nano](https://www.aliexpress.com/item/1005006519668532.html) E(Ethernet) or W(WiFi6) version, for Minimal Home Assistant
-- $30~50 [NanoKVM](https://www.aliexpress.com/item/1005007369816019.html), or $100 [NanoKVM-Pro](https://www.aliexpress.com/item/1005010048471263.html) for Automated Server Maintenance
-- $50 [MaixCAM](https://www.aliexpress.com/item/1005008053333693.html) or $100 [MaixCAM2](https://www.kickstarter.com/projects/zepan/maixcam2-build-your-next-gen-4k-ai-camera) for Smart Monitoring
-
-<https://private-user-images.githubusercontent.com/83055338/547056448-e7b031ff-d6f5-4468-bcca-5726b6fecb5c.mp4>
-
-🌟 More Deployment Cases Await！
-
-## 📦 Install
-
-### Install with precompiled binary
-
-Download the firmware for your platform from the [release](https://github.com/sipeed/suprclaw/releases) page.
-
-### Install from source (latest features, recommended for development)
-
-```bash
-git clone https://github.com/sipeed/suprclaw.git
-
-cd suprclaw
+git clone https://github.com/itsivag/suprclaw-engine.git
+cd suprclaw-engine
 make deps
-
-# Build, no need to install
 make build
-
-# Build for multiple platforms
-make build-all
-
-# Build for Raspberry Pi Zero 2 W (32-bit: make build-linux-arm; 64-bit: make build-linux-arm64)
-make build-pi-zero
-
-# Build And Install
-make install
 ```
 
-**Raspberry Pi Zero 2 W:** Use the binary that matches your OS: 32-bit Raspberry Pi OS → `make build-linux-arm` (output: `build/suprclaw-linux-arm`); 64-bit → `make build-linux-arm64` (output: `build/suprclaw-linux-arm64`). Or run `make build-pi-zero` to build both.
+Build targets:
+```bash
+make build-all          # All platforms
+make build-linux-arm64  # ARM64
+make build-linux-arm    # ARM 32-bit
+make install            # Build and install to PATH
+```
 
-## 🐳 Docker Compose
-
-You can also run SuprClaw using Docker Compose without installing anything locally.
+### Docker
 
 ```bash
-# 1. Clone this repo
-git clone https://github.com/sipeed/suprclaw.git
-cd suprclaw
+# Clone
+git clone https://github.com/itsivag/suprclaw-engine.git
+cd suprclaw-engine
 
-# 2. First run — auto-generates docker/data/config.json then exits
+# First run — generates docker/data/config.json then exits
 docker compose -f docker/docker-compose.yml --profile gateway up
-# The container prints "First-run setup complete." and stops.
 
-# 3. Set your API keys
-vim docker/data/config.json   # Set provider API keys, bot tokens, etc.
+# Edit config
+vim docker/data/config.json
 
-# 4. Start
+# Start
 docker compose -f docker/docker-compose.yml --profile gateway up -d
-```
 
-> [!TIP]
-> **Docker Users**: By default, the Gateway listens on `127.0.0.1` which is not accessible from the host. If you need to access the health endpoints or expose ports, set `SUPRCLAW_GATEWAY_HOST=0.0.0.0` in your environment or update `config.json`.
-
-```bash
-# 5. Check logs
+# Logs
 docker compose -f docker/docker-compose.yml logs -f suprclaw-gateway
 
-# 6. Stop
+# Stop
 docker compose -f docker/docker-compose.yml --profile gateway down
 ```
 
-### Launcher Mode (Web Console)
+> [!TIP]
+> By default the Gateway listens on `127.0.0.1`. Set `SUPRCLAW_GATEWAY_HOST=0.0.0.0` to expose it to the host when running in Docker.
 
-The `launcher` image includes all three binaries (`suprclaw`, `suprclaw-launcher`, `suprclaw-launcher-tui`) and starts the web console by default, which provides a browser-based UI for configuration and chat.
+**Web console (launcher mode):**
 
 ```bash
 docker compose -f docker/docker-compose.yml --profile launcher up -d
 ```
 
-Open http://localhost:18800 in your browser. The launcher manages the gateway process automatically.
+Open http://localhost:18800. The launcher manages the gateway process automatically.
 
 > [!WARNING]
-> The web console does not yet support authentication. Avoid exposing it to the public internet.
+> The web console has no authentication. Do not expose it to the public internet.
 
-### Agent Mode (One-shot)
+---
 
-```bash
-# Ask a question
-docker compose -f docker/docker-compose.yml run --rm suprclaw-agent -m "What is 2+2?"
-
-# Interactive mode
-docker compose -f docker/docker-compose.yml run --rm suprclaw-agent
-```
-
-### Update
-
-```bash
-docker compose -f docker/docker-compose.yml pull
-docker compose -f docker/docker-compose.yml --profile gateway up -d
-```
-
-### 🚀 Quick Start
-
-> [!TIP]
-> Set your API Key in `~/.suprclaw/config.json`. Get API Keys: [Volcengine (CodingPlan)](https://www.volcengine.com/activity/codingplan?utm_campaign=SuprClaw&utm_content=SuprClaw&utm_medium=devrel&utm_source=OWO&utm_term=SuprClaw) (LLM) · [OpenRouter](https://openrouter.ai/keys) (LLM) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) (LLM). Web search is optional — get a free [Tavily API](https://tavily.com) (1000 free queries/month) or [Brave Search API](https://brave.com/search/api) (2000 free queries/month).
+## Quick Start
 
 **1. Initialize**
 
@@ -210,7 +99,7 @@ suprclaw onboard
   "agents": {
     "defaults": {
       "workspace": "~/.suprclaw/workspace",
-      "model_name": "gpt-5.4",
+      "model_name": "claude-sonnet-4.6",
       "max_tokens": 8192,
       "temperature": 0.7,
       "max_tool_iterations": 20
@@ -218,109 +107,42 @@ suprclaw onboard
   },
   "model_list": [
     {
-      "model_name": "ark-code-latest",
-      "model": "volcengine/ark-code-latest",
-      "api_key": "sk-your-api-key",
-      "api_base":"https://ark.cn-beijing.volces.com/api/coding/v3"
-    },
-    {
-      "model_name": "gpt-5.4",
-      "model": "openai/gpt-5.4",
-      "api_key": "your-api-key",
-      "request_timeout": 300
-    },
-    {
       "model_name": "claude-sonnet-4.6",
       "model": "anthropic/claude-sonnet-4.6",
-      "api_key": "your-anthropic-key"
+      "api_key": "sk-ant-your-key"
     }
-  ],
-  "tools": {
-    "web": {
-      "enabled": true,
-      "fetch_limit_bytes": 10485760,
-      "format": "plaintext",
-      "brave": {
-        "enabled": false,
-        "api_key": "YOUR_BRAVE_API_KEY",
-        "max_results": 5
-      },
-      "tavily": {
-        "enabled": false,
-        "api_key": "YOUR_TAVILY_API_KEY",
-        "max_results": 5
-      },
-      "duckduckgo": {
-        "enabled": true,
-        "max_results": 5
-      },
-      "perplexity": {
-        "enabled": false,
-        "api_key": "YOUR_PERPLEXITY_API_KEY",
-        "max_results": 5
-      },
-      "searxng": {
-        "enabled": false,
-        "base_url": "http://your-searxng-instance:8888",
-        "max_results": 5
-      }
-    }
-  }
+  ]
 }
 ```
 
-> **New**: The `model_list` configuration format allows zero-code provider addition. See [Model Configuration](#model-configuration-model_list) for details.
-> `request_timeout` is optional and uses seconds. If omitted or set to `<= 0`, SuprClaw uses the default timeout (120s).
-
-**3. Get API Keys**
-
-* **LLM Provider**: [OpenRouter](https://openrouter.ai/keys) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) · [Anthropic](https://console.anthropic.com) · [OpenAI](https://platform.openai.com) · [Gemini](https://aistudio.google.com/api-keys)
-* **Web Search** (optional):
-  * [Brave Search](https://brave.com/search/api) - Paid ($5/1000 queries, ~$5-6/month)
-  * [Perplexity](https://www.perplexity.ai) - AI-powered search with chat interface
-  * [SearXNG](https://github.com/searxng/searxng) - Self-hosted metasearch engine (free, no API key needed)
-  * [Tavily](https://tavily.com) - Optimized for AI Agents (1000 requests/month)
-  * DuckDuckGo - Built-in fallback (no API key required)
-
-> **Note**: See `config.example.json` for a complete configuration template.
-
-**4. Chat**
+**3. Chat**
 
 ```bash
 suprclaw agent -m "What is 2+2?"
+suprclaw agent   # interactive mode
 ```
-
-That's it! You have a working AI assistant in 2 minutes.
 
 ---
 
-## 💬 Chat Apps
+## Chat Channels
 
-Talk to your suprclaw through Telegram, Discord, WhatsApp, Matrix, QQ, DingTalk, LINE, or WeCom
+SuprClaw connects to messaging platforms via the gateway. Run `suprclaw gateway` to start.
 
-> **Note**: All webhook-based channels (LINE, WeCom, etc.) are served on a single shared Gateway HTTP server (`gateway.host`:`gateway.port`, default `127.0.0.1:18790`). There are no per-channel ports to configure. Note: Feishu uses WebSocket/SDK mode and does not use the shared HTTP webhook server.
+> All webhook-based channels share a single HTTP server at `gateway.host:gateway.port` (default `127.0.0.1:18790`).
 
-| Channel      | Setup                              |
-| ------------ | ---------------------------------- |
-| **Telegram** | Easy (just a token)                |
-| **Discord**  | Easy (bot token + intents)         |
-| **WhatsApp** | Easy (native: QR scan; or bridge URL) |
-| **Matrix**   | Medium (homeserver + bot access token) |
-| **QQ**       | Easy (AppID + AppSecret)           |
-| **DingTalk** | Medium (app credentials)           |
-| **LINE**     | Medium (credentials + webhook URL) |
-| **WeCom AI Bot** | Medium (Token + AES key)       |
+| Channel      | Difficulty                          |
+| ------------ | ----------------------------------- |
+| **Telegram** | Easy — just a bot token             |
+| **Discord**  | Easy — bot token + message intent   |
+| **WhatsApp** | Easy — QR scan (native) or bridge   |
+| **Matrix**   | Medium — homeserver + access token  |
+| **LINE**     | Medium — credentials + webhook URL  |
 
 <details>
-<summary><b>Telegram</b> (Recommended)</summary>
+<summary><b>Telegram</b></summary>
 
-**1. Create a bot**
-
-* Open Telegram, search `@BotFather`
-* Send `/newbot`, follow prompts
-* Copy the token
-
-**2. Configure**
+1. Message `@BotFather` on Telegram → `/newbot` → copy the token
+2. Get your user ID from `@userinfobot`
 
 ```json
 {
@@ -334,42 +156,14 @@ Talk to your suprclaw through Telegram, Discord, WhatsApp, Matrix, QQ, DingTalk,
 }
 ```
 
-> Get your user ID from `@userinfobot` on Telegram.
-
-**3. Run**
-
-```bash
-suprclaw gateway
-```
-
-**4. Telegram command menu (auto-registered at startup)**
-
-SuprClaw now keeps command definitions in one shared registry. On startup, Telegram will automatically register supported bot commands (for example `/start`, `/help`, `/show`, `/list`) so command menu and runtime behavior stay in sync.
-Telegram command menu registration remains channel-local discovery UX; generic command execution is handled centrally in the agent loop via the commands executor.
-
-If command registration fails (network/API transient errors), the channel still starts and SuprClaw retries registration in the background.
-
 </details>
 
 <details>
 <summary><b>Discord</b></summary>
 
-**1. Create a bot**
-
-* Go to <https://discord.com/developers/applications>
-* Create an application → Bot → Add Bot
-* Copy the bot token
-
-**2. Enable intents**
-
-* In the Bot settings, enable **MESSAGE CONTENT INTENT**
-* (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
-
-**3. Get your User ID**
-* Discord Settings → Advanced → enable **Developer Mode**
-* Right-click your avatar → **Copy User ID**
-
-**4. Configure**
+1. Create an app at https://discord.com/developers/applications → Bot → copy token
+2. Enable **MESSAGE CONTENT INTENT** in Bot settings
+3. Get your user ID: Settings → Advanced → Developer Mode → right-click avatar → Copy User ID
 
 ```json
 {
@@ -383,17 +177,9 @@ If command registration fails (network/API transient errors), the channel still 
 }
 ```
 
-**5. Invite the bot**
+Invite the bot via OAuth2 → URL Generator with scopes `bot` and permissions `Send Messages`, `Read Message History`.
 
-* OAuth2 → URL Generator
-* Scopes: `bot`
-* Bot Permissions: `Send Messages`, `Read Message History`
-* Open the generated invite URL and add the bot to your server
-
-**Optional: Group trigger mode**
-
-By default the bot responds to all messages in a server channel. To restrict responses to @-mentions only, add:
-
+Restrict to @-mentions only:
 ```json
 {
   "channels": {
@@ -404,35 +190,16 @@ By default the bot responds to all messages in a server channel. To restrict res
 }
 ```
 
-You can also trigger by keyword prefixes (e.g. `!bot`):
-
-```json
-{
-  "channels": {
-    "discord": {
-      "group_trigger": { "prefixes": ["!bot"] }
-    }
-  }
-}
-```
-
-**6. Run**
-
-```bash
-suprclaw gateway
-```
-
 </details>
 
 <details>
-<summary><b>WhatsApp</b> (native via whatsmeow)</summary>
+<summary><b>WhatsApp</b></summary>
 
-SuprClaw can connect to WhatsApp in two ways:
+**Native (recommended)** — build with `-tags whatsapp_native`:
 
-- **Native (recommended):** In-process using [whatsmeow](https://github.com/tulir/whatsmeow). No separate bridge. Set `"use_native": true` and leave `bridge_url` empty. On first run, scan the QR code with WhatsApp (Linked Devices). Session is stored under your workspace (e.g. `workspace/whatsapp/`). The native channel is **optional** to keep the default binary small; build with `-tags whatsapp_native` (e.g. `make build-whatsapp-native` or `go build -tags whatsapp_native ./cmd/...`).
-- **Bridge:** Connect to an external WebSocket bridge. Set `bridge_url` (e.g. `ws://localhost:3001`) and keep `use_native` false.
-
-**Configure (native)**
+```bash
+make build-whatsapp-native
+```
 
 ```json
 {
@@ -440,92 +207,31 @@ SuprClaw can connect to WhatsApp in two ways:
     "whatsapp": {
       "enabled": true,
       "use_native": true,
-      "session_store_path": "",
       "allow_from": []
     }
   }
 }
 ```
 
-If `session_store_path` is empty, the session is stored in `&lt;workspace&gt;/whatsapp/`. Run `suprclaw gateway`; on first run, scan the QR code printed in the terminal with WhatsApp → Linked Devices.
+On first run, scan the QR code with WhatsApp → Linked Devices. Session stored in `<workspace>/whatsapp/`.
 
-</details>
-
-<details>
-<summary><b>QQ</b></summary>
-
-**1. Create a bot**
-
-- Go to [QQ Open Platform](https://q.qq.com/#)
-- Create an application → Get **AppID** and **AppSecret**
-
-**2. Configure**
+**Bridge** — connect to an external WebSocket bridge:
 
 ```json
 {
   "channels": {
-    "qq": {
+    "whatsapp": {
       "enabled": true,
-      "app_id": "YOUR_APP_ID",
-      "app_secret": "YOUR_APP_SECRET",
-      "allow_from": []
+      "bridge_url": "ws://localhost:3001"
     }
   }
 }
 ```
 
-> Set `allow_from` to empty to allow all users, or specify QQ numbers to restrict access.
-
-**3. Run**
-
-```bash
-suprclaw gateway
-```
-
-</details>
-
-<details>
-<summary><b>DingTalk</b></summary>
-
-**1. Create a bot**
-
-* Go to [Open Platform](https://open.dingtalk.com/)
-* Create an internal app
-* Copy Client ID and Client Secret
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "dingtalk": {
-      "enabled": true,
-      "client_id": "YOUR_CLIENT_ID",
-      "client_secret": "YOUR_CLIENT_SECRET",
-      "allow_from": []
-    }
-  }
-}
-```
-
-> Set `allow_from` to empty to allow all users, or specify DingTalk user IDs to restrict access.
-
-**3. Run**
-
-```bash
-suprclaw gateway
-```
 </details>
 
 <details>
 <summary><b>Matrix</b></summary>
-
-**1. Prepare bot account**
-
-* Use your preferred homeserver (e.g. `https://matrix.org` or self-hosted)
-* Create a bot user and obtain its access token
-
-**2. Configure**
 
 ```json
 {
@@ -534,33 +240,24 @@ suprclaw gateway
       "enabled": true,
       "homeserver": "https://matrix.org",
       "user_id": "@your-bot:matrix.org",
-      "access_token": "YOUR_MATRIX_ACCESS_TOKEN",
+      "access_token": "YOUR_ACCESS_TOKEN",
       "allow_from": []
     }
   }
 }
 ```
 
-**3. Run**
-
-```bash
-suprclaw gateway
-```
-
-For full options (`device_id`, `join_on_invite`, `group_trigger`, `placeholder`, `reasoning_channel_id`), see [Matrix Channel Configuration Guide](docs/channels/matrix/README.md).
+See [Matrix Channel Guide](docs/channels/matrix/README.md) for full options.
 
 </details>
 
 <details>
 <summary><b>LINE</b></summary>
 
-**1. Create a LINE Official Account**
-
-- Go to [LINE Developers Console](https://developers.line.biz/)
-- Create a provider → Create a Messaging API channel
-- Copy **Channel Secret** and **Channel Access Token**
-
-**2. Configure**
+1. Create a Messaging API channel at https://developers.line.biz/
+2. Copy **Channel Secret** and **Channel Access Token**
+3. LINE requires HTTPS — use a reverse proxy or tunnel (e.g. `ngrok http 18790`)
+4. Set webhook URL to `https://your-domain/webhook/line` in LINE Developers Console
 
 ```json
 {
@@ -569,390 +266,93 @@ For full options (`device_id`, `join_on_invite`, `group_trigger`, `placeholder`,
       "enabled": true,
       "channel_secret": "YOUR_CHANNEL_SECRET",
       "channel_access_token": "YOUR_CHANNEL_ACCESS_TOKEN",
-      "webhook_path": "/webhook/line",
       "allow_from": []
     }
   }
 }
 ```
-
-> LINE webhook is served on the shared Gateway server (`gateway.host`:`gateway.port`, default `127.0.0.1:18790`).
-
-**3. Set up Webhook URL**
-
-LINE requires HTTPS for webhooks. Use a reverse proxy or tunnel:
-
-```bash
-# Example with ngrok (gateway default port is 18790)
-ngrok http 18790
-```
-
-Then set the Webhook URL in LINE Developers Console to `https://your-domain/webhook/line` and enable **Use webhook**.
-
-**4. Run**
-
-```bash
-suprclaw gateway
-```
-
-> In group chats, the bot responds only when @mentioned. Replies quote the original message.
 
 </details>
 
-<details>
-<summary><b>WeCom (企业微信)</b></summary>
+---
 
-SuprClaw supports three types of WeCom integration:
-
-**Option 1: WeCom Bot (Bot)** - Easier setup, supports group chats
-**Option 2: WeCom App (Custom App)** - More features, proactive messaging, private chat only
-**Option 3: WeCom AI Bot (AI Bot)** - Official AI Bot, streaming replies, supports group & private chat
-
-See [WeCom AI Bot Configuration Guide](docs/channels/wecom/wecom_aibot/README.zh.md) for detailed setup instructions.
-
-**Quick Setup - WeCom Bot:**
-
-**1. Create a bot**
-
-* Go to WeCom Admin Console → Group Chat → Add Group Bot
-* Copy the webhook URL (format: `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx`)
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "wecom": {
-      "enabled": true,
-      "token": "YOUR_TOKEN",
-      "encoding_aes_key": "YOUR_ENCODING_AES_KEY",
-      "webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY",
-      "webhook_path": "/webhook/wecom",
-      "allow_from": []
-    }
-  }
-}
-```
-
-> WeCom webhook is served on the shared Gateway server (`gateway.host`:`gateway.port`, default `127.0.0.1:18790`).
-
-**Quick Setup - WeCom App:**
-
-**1. Create an app**
-
-* Go to WeCom Admin Console → App Management → Create App
-* Copy **AgentId** and **Secret**
-* Go to "My Company" page, copy **CorpID**
-
-**2. Configure receive message**
-
-* In App details, click "Receive Message" → "Set API"
-* Set URL to `http://your-server:18790/webhook/wecom-app`
-* Generate **Token** and **EncodingAESKey**
-
-**3. Configure**
-
-```json
-{
-  "channels": {
-    "wecom_app": {
-      "enabled": true,
-      "corp_id": "wwxxxxxxxxxxxxxxxx",
-      "corp_secret": "YOUR_CORP_SECRET",
-      "agent_id": 1000002,
-      "token": "YOUR_TOKEN",
-      "encoding_aes_key": "YOUR_ENCODING_AES_KEY",
-      "webhook_path": "/webhook/wecom-app",
-      "allow_from": []
-    }
-  }
-}
-```
-
-**4. Run**
-
-```bash
-suprclaw gateway
-```
-
-> **Note**: WeCom webhook callbacks are served on the Gateway port (default 18790). Use a reverse proxy for HTTPS.
-
-**Quick Setup - WeCom AI Bot:**
-
-**1. Create an AI Bot**
-
-* Go to WeCom Admin Console → App Management → AI Bot
-* In the AI Bot settings, configure callback URL: `http://your-server:18791/webhook/wecom-aibot`
-* Copy **Token** and click "Random Generate" for **EncodingAESKey**
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "wecom_aibot": {
-      "enabled": true,
-      "token": "YOUR_TOKEN",
-      "encoding_aes_key": "YOUR_43_CHAR_ENCODING_AES_KEY",
-      "webhook_path": "/webhook/wecom-aibot",
-      "allow_from": [],
-      "welcome_message": "Hello! How can I help you?"
-    }
-  }
-}
-```
-
-**3. Run**
-
-```bash
-suprclaw gateway
-```
-
-> **Note**: WeCom AI Bot uses streaming pull protocol — no reply timeout concerns. Long tasks (>30 seconds) automatically switch to `response_url` push delivery.
-
-</details>
-
-## 🌐 Join the Agent Social Network
-
-Connect Suprclaw to the Agent Social Network simply by sending a single message via the CLI or any integrated Chat App.
-
-**Read `https://clawdchat.ai/skill.md` and follow the instructions to join [ClawdChat.ai](https://clawdchat.ai)**
-
-## ⚙️ Configuration
+## Configuration
 
 Config file: `~/.suprclaw/config.json`
 
 ### Environment Variables
 
-You can override default paths using environment variables. This is useful for portable installations, containerized deployments, or running suprclaw as a system service. These variables are independent and control different paths.
-
-| Variable          | Description                                                                                                                             | Default Path              |
-|-------------------|-----------------------------------------------------------------------------------------------------------------------------------------|---------------------------|
-| `SUPRCLAW_CONFIG` | Overrides the path to the configuration file. This directly tells suprclaw which `config.json` to load, ignoring all other locations. | `~/.suprclaw/config.json` |
-| `SUPRCLAW_HOME`   | Overrides the root directory for suprclaw data. This changes the default location of the `workspace` and other data directories.          | `~/.suprclaw`             |
-
-**Examples:**
-
-```bash
-# Run suprclaw using a specific config file
-# The workspace path will be read from within that config file
-SUPRCLAW_CONFIG=/etc/suprclaw/production.json suprclaw gateway
-
-# Run suprclaw with all its data stored in /opt/suprclaw
-# Config will be loaded from the default ~/.suprclaw/config.json
-# Workspace will be created at /opt/suprclaw/workspace
-SUPRCLAW_HOME=/opt/suprclaw suprclaw agent
-
-# Use both for a fully customized setup
-SUPRCLAW_HOME=/srv/suprclaw SUPRCLAW_CONFIG=/srv/suprclaw/main.json suprclaw gateway
-```
+| Variable                                          | Description                              | Default                   |
+| ------------------------------------------------- | ---------------------------------------- | ------------------------- |
+| `SUPRCLAW_CONFIG`                                 | Path to config file                      | `~/.suprclaw/config.json` |
+| `SUPRCLAW_HOME`                                   | Root directory for all suprclaw data     | `~/.suprclaw`             |
+| `SUPRCLAW_BUILTIN_SKILLS`                         | Override builtin skills path             | —                         |
+| `SUPRCLAW_HEARTBEAT_ENABLED`                      | Enable/disable heartbeat (`true`/`false`)| `true`                    |
+| `SUPRCLAW_HEARTBEAT_INTERVAL`                     | Heartbeat interval in minutes            | `30`                      |
+| `SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE`  | Restrict agent to workspace              | `true`                    |
 
 ### Workspace Layout
 
-SuprClaw stores data in your configured workspace (default: `~/.suprclaw/workspace`):
-
 ```
 ~/.suprclaw/workspace/
-├── sessions/          # Conversation sessions and history
-├── memory/           # Long-term memory (MEMORY.md)
-├── state/            # Persistent state (last channel, etc.)
-├── cron/             # Scheduled jobs database
-├── skills/           # Custom skills
-├── AGENTS.md         # Agent behavior guide
-├── HEARTBEAT.md      # Periodic task prompts (checked every 30 min)
-├── IDENTITY.md       # Agent identity
-├── SOUL.md           # Agent soul
-└── USER.md           # User preferences
+├── sessions/       # Conversation history
+├── memory/         # Long-term memory (MEMORY.md)
+├── state/          # Persistent state
+├── cron/           # Scheduled jobs
+├── skills/         # Custom skills
+├── AGENTS.md       # Agent behavior guide
+├── HEARTBEAT.md    # Periodic task prompts
+├── IDENTITY.md     # Agent identity
+├── SOUL.md         # Agent soul
+└── USER.md         # User preferences
 ```
 
 ### Skill Sources
 
-By default, skills are loaded from:
+Skills are loaded in this order:
 
-1. `~/.suprclaw/workspace/skills` (workspace)
-2. `~/.suprclaw/skills` (global)
-3. `<current-working-directory>/skills` (builtin)
+1. `~/.suprclaw/workspace/skills`
+2. `~/.suprclaw/skills`
+3. `<cwd>/skills`
 
-For advanced/test setups, you can override the builtin skills root with:
+### Security Sandbox
 
-```bash
-export SUPRCLAW_BUILTIN_SKILLS=/path/to/skills
-```
-
-### Unified Command Execution Policy
-
-- Generic slash commands are executed through a single path in `pkg/agent/loop.go` via `commands.Executor`.
-- Channel adapters no longer consume generic commands locally; they forward inbound text to the bus/agent path. Telegram still auto-registers supported commands at startup.
-- Unknown slash command (for example `/foo`) passes through to normal LLM processing.
-- Registered but unsupported command on the current channel (for example `/show` on WhatsApp) returns an explicit user-facing error and stops further processing.
-### 🔒 Security Sandbox
-
-SuprClaw runs in a sandboxed environment by default. The agent can only access files and execute commands within the configured workspace.
-
-#### Default Configuration
+The agent is restricted to the workspace by default:
 
 ```json
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.suprclaw/workspace",
       "restrict_to_workspace": true
     }
   }
 }
 ```
 
-| Option                  | Default                 | Description                               |
-| ----------------------- | ----------------------- | ----------------------------------------- |
-| `workspace`             | `~/.suprclaw/workspace` | Working directory for the agent           |
-| `restrict_to_workspace` | `true`                  | Restrict file/command access to workspace |
+| Tool          | Restriction when enabled               |
+| ------------- | -------------------------------------- |
+| `read_file`   | Workspace only                         |
+| `write_file`  | Workspace only                         |
+| `list_dir`    | Workspace only                         |
+| `edit_file`   | Workspace only                         |
+| `exec`        | Command paths within workspace only    |
 
-#### Protected Tools
+The `exec` tool always blocks dangerous commands regardless of workspace setting: `rm -rf`, `format`, `mkfs`, `dd if=`, `shutdown`, fork bombs, and direct disk writes.
 
-When `restrict_to_workspace: true`, the following tools are sandboxed:
-
-| Tool          | Function         | Restriction                            |
-| ------------- | ---------------- | -------------------------------------- |
-| `read_file`   | Read files       | Only files within workspace            |
-| `write_file`  | Write files      | Only files within workspace            |
-| `list_dir`    | List directories | Only directories within workspace      |
-| `edit_file`   | Edit files       | Only files within workspace            |
-| `append_file` | Append to files  | Only files within workspace            |
-| `exec`        | Execute commands | Command paths must be within workspace |
-
-#### Additional Exec Protection
-
-Even with `restrict_to_workspace: false`, the `exec` tool blocks these dangerous commands:
-
-* `rm -rf`, `del /f`, `rmdir /s` — Bulk deletion
-* `format`, `mkfs`, `diskpart` — Disk formatting
-* `dd if=` — Disk imaging
-* Writing to `/dev/sd[a-z]` — Direct disk writes
-* `shutdown`, `reboot`, `poweroff` — System shutdown
-* Fork bomb `:(){ :|:& };:`
-
-#### Known Limitation: Child Processes From Build Tools
-
-The exec safety guard only inspects the command line SuprClaw launches directly. It does not recursively inspect child
-processes spawned by allowed developer tools such as `make`, `go run`, `cargo`, `npm run`, or custom build scripts.
-
-That means a top-level command can still compile or launch other binaries after it passes the initial guard check. In
-practice, treat build scripts, Makefiles, package scripts, and generated binaries as executable code that needs the same
-level of review as a direct shell command.
-
-For higher-risk environments:
-
-* Review build scripts before execution.
-* Prefer approval/manual review for compile-and-run workflows.
-* Run SuprClaw inside a container or VM if you need stronger isolation than the built-in guard provides.
-
-#### Error Examples
-
-```
-[ERROR] tool: Tool execution failed
-{tool=exec, error=Command blocked by safety guard (path outside working dir)}
-```
-
-```
-[ERROR] tool: Tool execution failed
-{tool=exec, error=Command blocked by safety guard (dangerous pattern detected)}
-```
-
-#### Disabling Restrictions (Security Risk)
-
-If you need the agent to access paths outside the workspace:
-
-**Method 1: Config file**
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "restrict_to_workspace": false
-    }
-  }
-}
-```
-
-**Method 2: Environment variable**
-
-```bash
-export SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
-```
-
-> ⚠️ **Warning**: Disabling this restriction allows the agent to access any path on your system. Use with caution in controlled environments only.
-
-#### Security Boundary Consistency
-
-The `restrict_to_workspace` setting applies consistently across all execution paths:
-
-| Execution Path   | Security Boundary            |
-| ---------------- | ---------------------------- |
-| Main Agent       | `restrict_to_workspace` ✅   |
-| Subagent / Spawn | Inherits same restriction ✅ |
-| Heartbeat tasks  | Inherits same restriction ✅ |
-
-All paths share the same workspace restriction — there's no way to bypass the security boundary through subagents or scheduled tasks.
+> ⚠️ Set `"restrict_to_workspace": false` or `SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false` to allow full system access. Use with caution.
 
 ### Heartbeat (Periodic Tasks)
 
-SuprClaw can perform periodic tasks automatically. Create a `HEARTBEAT.md` file in your workspace:
+Create `HEARTBEAT.md` in your workspace:
 
 ```markdown
 # Periodic Tasks
 
 - Check my email for important messages
-- Review my calendar for upcoming events
-- Check the weather forecast
+- Summarize today's calendar
 ```
 
-The agent will read this file every 30 minutes (configurable) and execute any tasks using available tools.
-
-#### Async Tasks with Spawn
-
-For long-running tasks (web search, API calls), use the `spawn` tool to create a **subagent**:
-
-```markdown
-# Periodic Tasks
-
-## Quick Tasks (respond directly)
-
-- Report current time
-
-## Long Tasks (use spawn for async)
-
-- Search the web for AI news and summarize
-- Check email and report important messages
-```
-
-**Key behaviors:**
-
-| Feature                 | Description                                               |
-| ----------------------- | --------------------------------------------------------- |
-| **spawn**               | Creates async subagent, doesn't block heartbeat           |
-| **Independent context** | Subagent has its own context, no session history          |
-| **message tool**        | Subagent communicates with user directly via message tool |
-| **Non-blocking**        | After spawning, heartbeat continues to next task          |
-
-#### How Subagent Communication Works
-
-```
-Heartbeat triggers
-    ↓
-Agent reads HEARTBEAT.md
-    ↓
-For long task: spawn subagent
-    ↓                           ↓
-Continue to next task      Subagent works independently
-    ↓                           ↓
-All tasks done            Subagent uses "message" tool
-    ↓                           ↓
-Respond HEARTBEAT_OK      User receives result directly
-```
-
-The subagent has access to tools (message, web_search, etc.) and can communicate with the user independently without going through the main agent.
-
-**Configuration:**
+The agent reads this file every 30 minutes and runs the tasks. For long-running tasks, use the `spawn` tool to run them as async subagents.
 
 ```json
 {
@@ -963,577 +363,171 @@ The subagent has access to tools (message, web_search, etc.) and can communicate
 }
 ```
 
-| Option     | Default | Description                        |
-| ---------- | ------- | ---------------------------------- |
-| `enabled`  | `true`  | Enable/disable heartbeat           |
-| `interval` | `30`    | Check interval in minutes (min: 5) |
+---
 
-**Environment variables:**
+## Providers & Models
 
-* `SUPRCLAW_HEARTBEAT_ENABLED=false` to disable
-* `SUPRCLAW_HEARTBEAT_INTERVAL=60` to change interval
+SuprClaw uses a `model_list` config — add any provider with just `api_base` + `api_key`, no code changes needed.
 
-### Providers
+### Supported Providers
 
-> [!NOTE]
-> Groq provides free voice transcription via Whisper. If configured, audio messages from any channel will be automatically transcribed at the agent level.
+| Provider       | `model` prefix    | Default API Base                                   | Protocol  |
+| -------------- | ----------------- | -------------------------------------------------- | --------- |
+| OpenAI         | `openai/`         | `https://api.openai.com/v1`                        | OpenAI    |
+| Anthropic      | `anthropic/`      | `https://api.anthropic.com/v1`                     | Anthropic |
+| Google Gemini  | `gemini/`         | `https://generativelanguage.googleapis.com/v1beta` | OpenAI    |
+| Groq           | `groq/`           | `https://api.groq.com/openai/v1`                   | OpenAI    |
+| DeepSeek       | `deepseek/`       | `https://api.deepseek.com/v1`                      | OpenAI    |
+| OpenRouter     | `openrouter/`     | `https://openrouter.ai/api/v1`                     | OpenAI    |
+| Ollama         | `ollama/`         | `http://localhost:11434/v1`                        | OpenAI    |
+| Azure OpenAI   | `azure/`          | `https://{resource}.openai.azure.com`              | Azure     |
+| Cerebras       | `cerebras/`       | `https://api.cerebras.ai/v1`                       | OpenAI    |
+| LiteLLM Proxy  | `litellm/`        | `http://localhost:4000/v1`                         | OpenAI    |
+| vLLM           | `vllm/`           | `http://localhost:8000/v1`                         | OpenAI    |
+| NVIDIA         | `nvidia/`         | `https://integrate.api.nvidia.com/v1`              | OpenAI    |
+| GitHub Copilot | `github-copilot/` | `localhost:4321`                                   | gRPC      |
 
-| Provider     | Purpose                                 | Get API Key                                                  |
-| ------------ | --------------------------------------- | ------------------------------------------------------------ |
-| `gemini`     | LLM (Gemini direct)                     | [aistudio.google.com](https://aistudio.google.com)           |
-| `zhipu`      | LLM (Zhipu direct)                      | [bigmodel.cn](https://bigmodel.cn)                           |
-| `volcengine` | LLM(Volcengine direct)                  | [volcengine.com](https://www.volcengine.com/activity/codingplan?utm_campaign=SuprClaw&utm_content=SuprClaw&utm_medium=devrel&utm_source=OWO&utm_term=SuprClaw)                 |
-| `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai)                       |
-| `anthropic`  | LLM (Claude direct)                     | [console.anthropic.com](https://console.anthropic.com)       |
-| `openai`     | LLM (GPT direct)                        | [platform.openai.com](https://platform.openai.com)           |
-| `deepseek`   | LLM (DeepSeek direct)                   | [platform.deepseek.com](https://platform.deepseek.com)       |
-| `qwen`       | LLM (Qwen direct)                       | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
-| `groq`       | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com)                 |
-| `cerebras`   | LLM (Cerebras direct)                   | [cerebras.ai](https://cerebras.ai)                           |
-| `vivgrid`    | LLM (Vivgrid direct)                    | [vivgrid.com](https://vivgrid.com)                           |
-| `azure`      | LLM (Azure OpenAI)                      | [portal.azure.com](https://portal.azure.com)                 |
+> Groq also provides free **voice transcription** via Whisper — configure it once and audio messages from any channel are auto-transcribed.
 
-### Model Configuration (model_list)
+### Example Configurations
 
-> **What's New?** SuprClaw now uses a **model-centric** configuration approach. Simply specify `vendor/model` format (e.g., `zhipu/glm-4.7`) to add new providers—**zero code changes required!**
-
-This design also enables **multi-agent support** with flexible provider selection:
-
-- **Different agents, different providers**: Each agent can use its own LLM provider
-- **Model fallbacks**: Configure primary and fallback models for resilience
-- **Load balancing**: Distribute requests across multiple endpoints
-- **Centralized configuration**: Manage all providers in one place
-
-#### 📋 All Supported Vendors
-
-| Vendor              | `model` Prefix    | Default API Base                                    | Protocol  | API Key                                                          |
-| ------------------- | ----------------- |-----------------------------------------------------| --------- | ---------------------------------------------------------------- |
-| **OpenAI**          | `openai/`         | `https://api.openai.com/v1`                         | OpenAI    | [Get Key](https://platform.openai.com)                           |
-| **Anthropic**       | `anthropic/`      | `https://api.anthropic.com/v1`                      | Anthropic | [Get Key](https://console.anthropic.com)                         |
-| **智谱 AI (GLM)**   | `zhipu/`          | `https://open.bigmodel.cn/api/paas/v4`              | OpenAI    | [Get Key](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) |
-| **DeepSeek**        | `deepseek/`       | `https://api.deepseek.com/v1`                       | OpenAI    | [Get Key](https://platform.deepseek.com)                         |
-| **Google Gemini**   | `gemini/`         | `https://generativelanguage.googleapis.com/v1beta`  | OpenAI    | [Get Key](https://aistudio.google.com/api-keys)                  |
-| **Groq**            | `groq/`           | `https://api.groq.com/openai/v1`                    | OpenAI    | [Get Key](https://console.groq.com)                              |
-| **Moonshot**        | `moonshot/`       | `https://api.moonshot.cn/v1`                        | OpenAI    | [Get Key](https://platform.moonshot.cn)                          |
-| **通义千问 (Qwen)** | `qwen/`           | `https://dashscope.aliyuncs.com/compatible-mode/v1` | OpenAI    | [Get Key](https://dashscope.console.aliyun.com)                  |
-| **NVIDIA**          | `nvidia/`         | `https://integrate.api.nvidia.com/v1`               | OpenAI    | [Get Key](https://build.nvidia.com)                              |
-| **Ollama**          | `ollama/`         | `http://localhost:11434/v1`                         | OpenAI    | Local (no key needed)                                            |
-| **OpenRouter**      | `openrouter/`     | `https://openrouter.ai/api/v1`                      | OpenAI    | [Get Key](https://openrouter.ai/keys)                            |
-| **LiteLLM Proxy**   | `litellm/`        | `http://localhost:4000/v1`                          | OpenAI    | Your LiteLLM proxy key                                            |
-| **VLLM**            | `vllm/`           | `http://localhost:8000/v1`                          | OpenAI    | Local                                                            |
-| **Cerebras**        | `cerebras/`       | `https://api.cerebras.ai/v1`                        | OpenAI    | [Get Key](https://cerebras.ai)                                   |
-| **VolcEngine (Doubao)** | `volcengine/`     | `https://ark.cn-beijing.volces.com/api/v3`          | OpenAI    | [Get Key](https://www.volcengine.com/activity/codingplan?utm_campaign=SuprClaw&utm_content=SuprClaw&utm_medium=devrel&utm_source=OWO&utm_term=SuprClaw)                        |
-| **神算云**          | `shengsuanyun/`   | `https://router.shengsuanyun.com/api/v1`            | OpenAI    | -                                                                |
-| **BytePlus**        | `byteplus/`       | `https://ark.ap-southeast.bytepluses.com/api/v3`    | OpenAI    | [Get Key](https://www.byteplus.com)                        |
-| **Vivgrid**         | `vivgrid/`        | `https://api.vivgrid.com/v1`                        | OpenAI    | [Get Key](https://vivgrid.com)                                   |
-| **LongCat**         | `longcat/`        | `https://api.longcat.chat/openai`                   | OpenAI    | [Get Key](https://longcat.chat/platform)                         |
-| **ModelScope (魔搭)**| `modelscope/`    | `https://api-inference.modelscope.cn/v1`            | OpenAI    | [Get Token](https://modelscope.cn/my/tokens)                     |
-| **Azure OpenAI**    | `azure/`          | `https://{resource}.openai.azure.com`               | Azure     | [Get Key](https://portal.azure.com)                              |
-| **Antigravity**     | `antigravity/`    | Google Cloud                                        | Custom    | OAuth only                                                       |
-| **GitHub Copilot**  | `github-copilot/` | `localhost:4321`                                    | gRPC      | -                                                                |
-
-#### Basic Configuration
-
+**Anthropic:**
 ```json
 {
   "model_list": [
-    {
-      "model_name": "ark-code-latest",
-      "model": "volcengine/ark-code-latest",
-      "api_key": "sk-your-api-key"
-    },
-    {
-      "model_name": "gpt-5.4",
-      "model": "openai/gpt-5.4",
-      "api_key": "sk-your-openai-key"
-    },
     {
       "model_name": "claude-sonnet-4.6",
       "model": "anthropic/claude-sonnet-4.6",
       "api_key": "sk-ant-your-key"
-    },
-    {
-      "model_name": "glm-4.7",
-      "model": "zhipu/glm-4.7",
-      "api_key": "your-zhipu-key"
     }
   ],
-  "agents": {
-    "defaults": {
-      "model": "gpt-5.4"
-    }
-  }
+  "agents": { "defaults": { "model_name": "claude-sonnet-4.6" } }
 }
 ```
 
-#### Vendor-Specific Examples
-
-**OpenAI**
-
-```json
-{
-  "model_name": "gpt-5.4",
-  "model": "openai/gpt-5.4",
-  "api_key": "sk-..."
-}
-```
-
-**VolcEngine (Doubao)**
-
-```json
-{
-  "model_name": "ark-code-latest",
-  "model": "volcengine/ark-code-latest",
-  "api_key": "sk-..."
-}
-```
-
-**智谱 AI (GLM)**
-
-```json
-{
-  "model_name": "glm-4.7",
-  "model": "zhipu/glm-4.7",
-  "api_key": "your-key"
-}
-```
-
-**DeepSeek**
-
-```json
-{
-  "model_name": "deepseek-chat",
-  "model": "deepseek/deepseek-chat",
-  "api_key": "sk-..."
-}
-```
-
-**Anthropic (with API key)**
-
-```json
-{
-  "model_name": "claude-sonnet-4.6",
-  "model": "anthropic/claude-sonnet-4.6",
-  "api_key": "sk-ant-your-key"
-}
-```
-
-> Run `suprclaw auth login --provider anthropic` to paste your API token.
-
-**Anthropic Messages API (native format)**
-
-For direct Anthropic API access or custom endpoints that only support Anthropic's native message format:
-
-```json
-{
-  "model_name": "claude-opus-4-6",
-  "model": "anthropic-messages/claude-opus-4-6",
-  "api_key": "sk-ant-your-key",
-  "api_base": "https://api.anthropic.com"
-}
-```
-
-> Use `anthropic-messages` protocol when:
-> - Using third-party proxies that only support Anthropic's native `/v1/messages` endpoint (not OpenAI-compatible `/v1/chat/completions`)
-> - Connecting to services like MiniMax, Synthetic that require Anthropic's native message format
-> - The existing `anthropic` protocol returns 404 errors (indicating the endpoint doesn't support OpenAI-compatible format)
->
-> **Note:** The `anthropic` protocol uses OpenAI-compatible format (`/v1/chat/completions`), while `anthropic-messages` uses Anthropic's native format (`/v1/messages`). Choose based on your endpoint's supported format.
-
-**Ollama (local)**
-
-```json
-{
-  "model_name": "llama3",
-  "model": "ollama/llama3"
-}
-```
-
-**Custom Proxy/API**
-
-```json
-{
-  "model_name": "my-custom-model",
-  "model": "openai/custom-model",
-  "api_base": "https://my-proxy.com/v1",
-  "api_key": "sk-...",
-  "request_timeout": 300
-}
-```
-
-**LiteLLM Proxy**
-
-```json
-{
-  "model_name": "lite-gpt4",
-  "model": "litellm/lite-gpt4",
-  "api_base": "http://localhost:4000/v1",
-  "api_key": "sk-..."
-}
-```
-
-SuprClaw strips only the outer `litellm/` prefix before sending the request, so proxy aliases like `litellm/lite-gpt4` send `lite-gpt4`, while `litellm/openai/gpt-4o` sends `openai/gpt-4o`.
-
-#### Load Balancing
-
-Configure multiple endpoints for the same model name—SuprClaw will automatically round-robin between them:
-
+**OpenAI:**
 ```json
 {
   "model_list": [
     {
-      "model_name": "gpt-5.4",
-      "model": "openai/gpt-5.4",
-      "api_base": "https://api1.example.com/v1",
-      "api_key": "sk-key1"
-    },
-    {
-      "model_name": "gpt-5.4",
-      "model": "openai/gpt-5.4",
-      "api_base": "https://api2.example.com/v1",
-      "api_key": "sk-key2"
+      "model_name": "gpt-4o",
+      "model": "openai/gpt-4o",
+      "api_key": "sk-your-key"
     }
   ]
 }
 ```
 
-#### Migration from Legacy `providers` Config
-
-The old `providers` configuration is **deprecated** but still supported for backward compatibility.
-
-**Old Config (deprecated):**
-
-```json
-{
-  "providers": {
-    "zhipu": {
-      "api_key": "your-key",
-      "api_base": "https://open.bigmodel.cn/api/paas/v4"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "provider": "zhipu",
-      "model": "glm-4.7"
-    }
-  }
-}
-```
-
-**New Config (recommended):**
-
+**Ollama (local):**
 ```json
 {
   "model_list": [
     {
-      "model_name": "glm-4.7",
-      "model": "zhipu/glm-4.7",
-      "api_key": "your-key"
+      "model_name": "llama3",
+      "model": "ollama/llama3"
     }
-  ],
-  "agents": {
-    "defaults": {
-      "model": "glm-4.7"
-    }
-  }
+  ]
 }
 ```
 
-For detailed migration guide, see [docs/migration/model-list-migration.md](docs/migration/model-list-migration.md).
-
-### Provider Architecture
-
-SuprClaw routes providers by protocol family:
-
-- OpenAI-compatible protocol: OpenRouter, OpenAI-compatible gateways, Groq, Zhipu, and vLLM-style endpoints.
-- Anthropic protocol: Claude-native API behavior.
-- Codex/OAuth path: OpenAI OAuth/token authentication route.
-
-This keeps the runtime lightweight while making new OpenAI-compatible backends mostly a config operation (`api_base` + `api_key`).
-
-<details>
-<summary><b>Zhipu</b></summary>
-
-**1. Get API key and base URL**
-
-* Get [API key](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)
-
-**2. Configure**
-
+**OpenRouter (access to all models):**
 ```json
 {
-  "agents": {
-    "defaults": {
-      "workspace": "~/.suprclaw/workspace",
-      "model": "glm-4.7",
-      "max_tokens": 8192,
-      "temperature": 0.7,
-      "max_tool_iterations": 20
+  "model_list": [
+    {
+      "model_name": "claude-sonnet-4.6",
+      "model": "openrouter/anthropic/claude-sonnet-4.6",
+      "api_key": "sk-or-v1-your-key"
     }
-  },
-  "providers": {
-    "zhipu": {
-      "api_key": "Your API Key",
-      "api_base": "https://open.bigmodel.cn/api/paas/v4"
-    }
-  }
+  ]
 }
 ```
 
-**3. Run**
-
-```bash
-suprclaw agent -m "Hello"
+**Load balancing (round-robin across endpoints):**
+```json
+{
+  "model_list": [
+    { "model_name": "gpt-4o", "model": "openai/gpt-4o", "api_base": "https://api1.example.com/v1", "api_key": "sk-key1" },
+    { "model_name": "gpt-4o", "model": "openai/gpt-4o", "api_base": "https://api2.example.com/v1", "api_key": "sk-key2" }
+  ]
+}
 ```
 
-</details>
+### Web Search
 
-<details>
-<summary><b>Full config example</b></summary>
+SuprClaw picks the best available search provider automatically:
+
+1. **Perplexity** — AI-powered with citations
+2. **Brave Search** — $5/1000 queries
+3. **SearXNG** — self-hosted, free
+4. **DuckDuckGo** — default fallback, no key required
 
 ```json
 {
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5"
-    }
-  },
-  "session": {
-    "dm_scope": "per-channel-peer",
-    "backlog_limit": 20
-  },
-  "providers": {
-    "openrouter": {
-      "api_key": "sk-or-v1-xxx"
-    },
-    "groq": {
-      "api_key": "gsk_xxx"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "123456:ABC...",
-      "allow_from": ["123456789"]
-    },
-    "discord": {
-      "enabled": true,
-      "token": "",
-      "allow_from": [""]
-    },
-    "whatsapp": {
-      "enabled": false,
-      "bridge_url": "ws://localhost:3001",
-      "use_native": false,
-      "session_store_path": "",
-      "allow_from": []
-    },
-    "feishu": {
-      "enabled": false,
-      "app_id": "cli_xxx",
-      "app_secret": "xxx",
-      "encrypt_key": "",
-      "verification_token": "",
-      "allow_from": []
-    },
-    "qq": {
-      "enabled": false,
-      "app_id": "",
-      "app_secret": "",
-      "allow_from": []
-    }
-  },
   "tools": {
     "web": {
-      "brave": {
-        "enabled": false,
-        "api_key": "BSA...",
-        "max_results": 5
-      },
-      "duckduckgo": {
-        "enabled": true,
-        "max_results": 5
-      },
-      "perplexity": {
-        "enabled": false,
-        "api_key": "",
-        "max_results": 5
-      },
-      "searxng": {
-        "enabled": false,
-        "base_url": "http://localhost:8888",
-        "max_results": 5
-      }
-    },
-    "cron": {
-      "exec_timeout_minutes": 5
+      "duckduckgo": { "enabled": true, "max_results": 5 },
+      "brave": { "enabled": false, "api_key": "YOUR_KEY", "max_results": 5 },
+      "tavily": { "enabled": false, "api_key": "YOUR_KEY", "max_results": 5 },
+      "perplexity": { "enabled": false, "api_key": "YOUR_KEY", "max_results": 5 },
+      "searxng": { "enabled": false, "base_url": "http://your-server:8888", "max_results": 5 }
     }
-  },
-  "heartbeat": {
-    "enabled": true,
-    "interval": 30
   }
 }
 ```
 
-</details>
+---
 
 ## CLI Reference
 
 | Command                   | Description                   |
 | ------------------------- | ----------------------------- |
 | `suprclaw onboard`        | Initialize config & workspace |
-| `suprclaw agent -m "..."` | Chat with the agent           |
+| `suprclaw agent -m "..."` | Send a one-shot message       |
 | `suprclaw agent`          | Interactive chat mode         |
 | `suprclaw gateway`        | Start the gateway             |
 | `suprclaw status`         | Show status                   |
-| `suprclaw cron list`      | List all scheduled jobs       |
+| `suprclaw cron list`      | List scheduled jobs           |
 | `suprclaw cron add ...`   | Add a scheduled job           |
 
-### Scheduled Tasks / Reminders
+### Scheduled Tasks
 
-SuprClaw supports scheduled reminders and recurring tasks through the `cron` tool:
-
-* **One-time reminders**: "Remind me in 10 minutes" → triggers once after 10min
-* **Recurring tasks**: "Remind me every 2 hours" → triggers every 2 hours
-* **Cron expressions**: "Remind me at 9am daily" → uses cron expression
-
-Jobs are stored in `~/.suprclaw/workspace/cron/` and processed automatically.
-
-## 🤝 Contribute & Roadmap
-
-PRs welcome! The codebase is intentionally small and readable. 🤗
-
-See our full [Community Roadmap](https://github.com/sipeed/suprclaw/blob/main/ROADMAP.md).
-
-Developer group building, join after your first merged PR!
-
-User Groups:
-
-discord: <https://discord.gg/V4sAZ9XWpN>
-
-## 🐛 Troubleshooting
-
-### Web search says "API key configuration issue"
-
-This is normal if you haven't configured a search API key yet. SuprClaw will provide helpful links for manual searching.
-
-#### Search Provider Priority
-
-SuprClaw automatically selects the best available search provider in this order:
-1. **Perplexity** (if enabled and API key configured) - AI-powered search with citations
-2. **Brave Search** (if enabled and API key configured) - Privacy-focused paid API ($5/1000 queries)
-3. **SearXNG** (if enabled and base_url configured) - Self-hosted metasearch aggregating 70+ engines (free)
-4. **DuckDuckGo** (if enabled, default fallback) - No API key required (free)
-
-#### Web Search Configuration Options
-
-**Option 1 (Best Results)**: Perplexity AI Search
-```json
-{
-  "tools": {
-    "web": {
-      "perplexity": {
-        "enabled": true,
-        "api_key": "YOUR_PERPLEXITY_API_KEY",
-        "max_results": 5
-      }
-    }
-  }
-}
+```bash
+# Natural language scheduling via agent
+suprclaw agent -m "Remind me every day at 9am to check email"
+suprclaw agent -m "Remind me in 30 minutes"
 ```
 
-**Option 2 (Paid API)**: Get an API key at [https://brave.com/search/api](https://brave.com/search/api) ($5/1000 queries, ~$5-6/month)
-```json
-{
-  "tools": {
-    "web": {
-      "brave": {
-        "enabled": true,
-        "api_key": "YOUR_BRAVE_API_KEY",
-        "max_results": 5
-      }
-    }
-  }
-}
-```
-
-**Option 3 (Self-Hosted)**: Deploy your own [SearXNG](https://github.com/searxng/searxng) instance
-```json
-{
-  "tools": {
-    "web": {
-      "searxng": {
-        "enabled": true,
-        "base_url": "http://your-server:8888",
-        "max_results": 5
-      }
-    }
-  }
-}
-```
-
-Benefits of SearXNG:
-- **Zero cost**: No API fees or rate limits
-- **Privacy-focused**: Self-hosted, no tracking
-- **Aggregate results**: Queries 70+ search engines simultaneously
-- **Perfect for cloud VMs**: Solves datacenter IP blocking issues (Oracle Cloud, GCP, AWS, Azure)
-- **No API key needed**: Just deploy and configure the base URL
-
-**Option 4 (No Setup Required)**: DuckDuckGo is enabled by default as fallback (no API key needed)
-
-Add the key to `~/.suprclaw/config.json` if using Brave:
-
-```json
-{
-  "tools": {
-    "web": {
-      "brave": {
-        "enabled": false,
-        "api_key": "YOUR_BRAVE_API_KEY",
-        "max_results": 5
-      },
-      "duckduckgo": {
-        "enabled": true,
-        "max_results": 5
-      },
-      "perplexity": {
-        "enabled": false,
-        "api_key": "YOUR_PERPLEXITY_API_KEY",
-        "max_results": 5
-      },
-      "searxng": {
-        "enabled": false,
-        "base_url": "http://your-searxng-instance:8888",
-        "max_results": 5
-      }
-    }
-  }
-}
-```
-
-### Getting content filtering errors
-
-Some providers (like Zhipu) have content filtering. Try rephrasing your query or use a different model.
-
-### Telegram bot says "Conflict: terminated by other getUpdates"
-
-This happens when another instance of the bot is running. Make sure only one `suprclaw gateway` is running at a time.
+Jobs are stored in `~/.suprclaw/workspace/cron/` and run automatically.
 
 ---
 
-## 📝 API Key Comparison
+## Troubleshooting
 
-| Service          | Free Tier                | Use Case                              |
-| ---------------- | ------------------------ | ------------------------------------- |
-| **OpenRouter**   | 200K tokens/month        | Multiple models (Claude, GPT-4, etc.) |
-| **Volcengine CodingPlan** | ¥9.9/first month | Best for Chinese users, multiple SOTA models (Doubao, DeepSeek, etc.) |
-| **Zhipu**        | 200K tokens/month        | Suitable for Chinese users                |
-| **Brave Search** | Paid ($5/1000 queries)   | Web search functionality              |
-| **SearXNG**      | Unlimited (self-hosted)  | Privacy-focused metasearch (70+ engines) |
-| **Groq**         | Free tier available      | Fast inference (Llama, Mixtral)       |
-| **Cerebras**     | Free tier available      | Fast inference (Llama, Qwen, etc.)    |
-| **LongCat**      | Up to 5M tokens/day      | Fast inference (free tier)            |
-| **ModelScope**   | 2000 requests/day        | Free inference (Qwen, GLM, DeepSeek, etc.) |
+**Web search says "API key configuration issue"**
+
+Expected if no search API key is configured. DuckDuckGo is the built-in fallback and requires no key.
+
+**Telegram: "Conflict: terminated by other getUpdates"**
+
+Another instance is running. Only one `suprclaw gateway` should run at a time.
+
+**Content filtering errors**
+
+Some providers filter certain content. Try rephrasing or switch to a different model/provider.
+
+**Agent accessing files outside workspace**
+
+Check `restrict_to_workspace` in your config. Set to `true` to re-enable the sandbox.
 
 ---
+
+## Contributing
+
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and [ROADMAP.md](ROADMAP.md).
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
