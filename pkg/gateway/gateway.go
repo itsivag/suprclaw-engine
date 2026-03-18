@@ -30,6 +30,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/media"
 	"github.com/itsivag/suprclaw/pkg/providers"
 	"github.com/itsivag/suprclaw/pkg/state"
+	"github.com/itsivag/suprclaw/pkg/tools"
 	"github.com/itsivag/suprclaw/pkg/voice"
 )
 
