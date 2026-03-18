@@ -25,18 +25,19 @@
   display: inline-flex;
   align-items: center;
   gap: 0.75rem;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--ifm-background-color);
+  border: 1px solid var(--ifm-color-emphasis-300);
   border-radius: 8px;
   padding: 0.75rem 1rem 0.75rem 1.5rem;
   font-size: 0.9rem;
-  color: #fff;
+  color: var(--ifm-font-color-base);
 }
 
 .copyBtn {
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: var(--ifm-color-emphasis-200);
+  border: 1px solid var(--ifm-color-emphasis-300);
   border-radius: 4px;
-  color: #fff;
+  color: var(--ifm-font-color-base);
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
@@ -46,7 +47,7 @@
 }
 
 .copyBtn:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--ifm-color-emphasis-300);
 }
 
 .features {
