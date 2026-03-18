@@ -218,6 +218,9 @@ picoclaw onboard
   },
   "tools": {
     "web": {
+      "enabled": true,
+      "fetch_limit_bytes": 10485760,
+      "format": "plaintext",
       "search": {
         "api_key": "YOUR_BRAVE_API_KEY",
         "max_results": 5

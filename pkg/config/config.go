@@ -697,6 +697,7 @@ type WebToolsConfig struct {
 	// For authenticated proxies, prefer HTTP_PROXY/HTTPS_PROXY env vars instead of embedding credentials in config.
 	Proxy                string              `json:"proxy,omitempty"                  env:"PICOCLAW_TOOLS_WEB_PROXY"`
 	FetchLimitBytes      int64               `json:"fetch_limit_bytes,omitempty"      env:"PICOCLAW_TOOLS_WEB_FETCH_LIMIT_BYTES"`
+	Format               string              `json:"format,omitempty"                 env:"PICOCLAW_TOOLS_WEB_FORMAT"`
 	PrivateHostWhitelist FlexibleStringSlice `json:"private_host_whitelist,omitempty" env:"PICOCLAW_TOOLS_WEB_PRIVATE_HOST_WHITELIST"`
 }
 
