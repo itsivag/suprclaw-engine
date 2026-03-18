@@ -8,3 +8,11 @@ config/
 *.md
 LICENSE
 assets/
+!docker/runtime/workspace/AGENTS.md
+!docker/runtime/workspace/BOOTSTRAP.md
+!docker/runtime/workspace/HEARTBEAT.md
+!docker/runtime/workspace/IDENTITY.md
+!docker/runtime/workspace/SOUL.md
+!docker/runtime/workspace/TOOLS.md
+!docker/runtime/workspace/USER.md
+!docker/runtime/workspace/memory/heartbeat-state.json
