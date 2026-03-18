@@ -126,8 +126,6 @@ type OpenClawChannels struct {
 	Feishu      *OpenClawFeishuConfig      `json:"feishu"`
 	IMessage    *OpenClawIMessageConfig    `json:"imessage"`
 	BlueBubbles *OpenClawBlueBubblesConfig `json:"bluebubbles"`
-	QQ          *OpenClawQQConfig          `json:"qq"`
-	DingTalk    *OpenClawDingTalkConfig    `json:"dingtalk"`
 }
 
 type OpenClawTelegramConfig struct {
@@ -244,22 +242,6 @@ type OpenClawIMessageConfig struct {
 type OpenClawBlueBubblesConfig struct {
 	ServerURL *string  `json:"serverUrl"`
 	Password  *string  `json:"password"`
-	DmPolicy  *string  `json:"dmPolicy"`
-	AllowFrom []string `json:"allowFrom"`
-	Enabled   *bool    `json:"enabled"`
-}
-
-type OpenClawQQConfig struct {
-	AppID     *string  `json:"appId"`
-	AppSecret *string  `json:"appSecret"`
-	DmPolicy  *string  `json:"dmPolicy"`
-	AllowFrom []string `json:"allowFrom"`
-	Enabled   *bool    `json:"enabled"`
-}
-
-type OpenClawDingTalkConfig struct {
-	AppID     *string  `json:"appId"`
-	AppSecret *string  `json:"appSecret"`
 	DmPolicy  *string  `json:"dmPolicy"`
 	AllowFrom []string `json:"allowFrom"`
 	Enabled   *bool    `json:"enabled"`
@@ -619,10 +601,7 @@ type PeerMatch struct {
 type ChannelsConfig struct {
 	WhatsApp WhatsAppConfig `json:"whatsapp"`
 	Telegram TelegramConfig `json:"telegram"`
-	Feishu   FeishuConfig   `json:"feishu"`
 	Discord  DiscordConfig  `json:"discord"`
-	QQ       QQConfig       `json:"qq"`
-	DingTalk DingTalkConfig `json:"dingtalk"`
 	Slack    SlackConfig    `json:"slack"`
 	Matrix   MatrixConfig   `json:"matrix"`
 	LINE     LINEConfig     `json:"line"`
@@ -641,34 +620,11 @@ type TelegramConfig struct {
 	AllowFrom []string `json:"allow_from"`
 }
 
-type FeishuConfig struct {
-	Enabled           bool     `json:"enabled"`
-	AppID             string   `json:"app_id"`
-	AppSecret         string   `json:"app_secret"`
-	EncryptKey        string   `json:"encrypt_key"`
-	VerificationToken string   `json:"verification_token"`
-	AllowFrom         []string `json:"allow_from"`
-}
-
 type DiscordConfig struct {
 	Enabled     bool     `json:"enabled"`
 	Token       string   `json:"token"`
 	MentionOnly bool     `json:"mention_only"`
 	AllowFrom   []string `json:"allow_from"`
-}
-
-type QQConfig struct {
-	Enabled   bool     `json:"enabled"`
-	AppID     string   `json:"app_id"`
-	AppSecret string   `json:"app_secret"`
-	AllowFrom []string `json:"allow_from"`
-}
-
-type DingTalkConfig struct {
-	Enabled      bool     `json:"enabled"`
-	ClientID     string   `json:"client_id"`
-	ClientSecret string   `json:"client_secret"`
-	AllowFrom    []string `json:"allow_from"`
 }
 
 type SlackConfig struct {
@@ -802,52 +758,6 @@ func (c *OpenClawConfig) convertChannels(warnings *[]string) ChannelsConfig {
 		}
 		if c.Channels.WhatsApp.BridgeURL != nil {
 			channels.WhatsApp.BridgeURL = *c.Channels.WhatsApp.BridgeURL
-		}
-	}
-
-	if c.Channels.Feishu != nil {
-		enabled := c.Channels.Feishu.Enabled == nil || *c.Channels.Feishu.Enabled
-		channels.Feishu = FeishuConfig{
-			Enabled:   enabled,
-			AllowFrom: c.Channels.Feishu.AllowFrom,
-		}
-		if c.Channels.Feishu.AppID != nil {
-			channels.Feishu.AppID = *c.Channels.Feishu.AppID
-		}
-		if c.Channels.Feishu.AppSecret != nil {
-			channels.Feishu.AppSecret = *c.Channels.Feishu.AppSecret
-		}
-		if c.Channels.Feishu.EncryptKey != nil {
-			channels.Feishu.EncryptKey = *c.Channels.Feishu.EncryptKey
-		}
-		if c.Channels.Feishu.VerificationToken != nil {
-			channels.Feishu.VerificationToken = *c.Channels.Feishu.VerificationToken
-		}
-	}
-
-	if c.Channels.QQ != nil && supportedChannels["qq"] {
-		channels.QQ = QQConfig{
-			Enabled:   true,
-			AllowFrom: c.Channels.QQ.AllowFrom,
-		}
-		if c.Channels.QQ.AppID != nil {
-			channels.QQ.AppID = *c.Channels.QQ.AppID
-		}
-		if c.Channels.QQ.AppSecret != nil {
-			channels.QQ.AppSecret = *c.Channels.QQ.AppSecret
-		}
-	}
-
-	if c.Channels.DingTalk != nil && supportedChannels["dingtalk"] {
-		channels.DingTalk = DingTalkConfig{
-			Enabled:   true,
-			AllowFrom: c.Channels.DingTalk.AllowFrom,
-		}
-		if c.Channels.DingTalk.AppID != nil {
-			channels.DingTalk.ClientID = *c.Channels.DingTalk.AppID
-		}
-		if c.Channels.DingTalk.AppSecret != nil {
-			channels.DingTalk.ClientSecret = *c.Channels.DingTalk.AppSecret
 		}
 	}
 
@@ -991,27 +901,10 @@ func (c ChannelsConfig) ToStandardChannels() config.ChannelsConfig {
 			Token:   c.Telegram.Token,
 			Proxy:   c.Telegram.Proxy,
 		},
-		Feishu: config.FeishuConfig{
-			Enabled:           c.Feishu.Enabled,
-			AppID:             c.Feishu.AppID,
-			AppSecret:         c.Feishu.AppSecret,
-			EncryptKey:        c.Feishu.EncryptKey,
-			VerificationToken: c.Feishu.VerificationToken,
-		},
 		Discord: config.DiscordConfig{
 			Enabled:     c.Discord.Enabled,
 			Token:       c.Discord.Token,
 			MentionOnly: c.Discord.MentionOnly,
-		},
-		QQ: config.QQConfig{
-			Enabled:   c.QQ.Enabled,
-			AppID:     c.QQ.AppID,
-			AppSecret: c.QQ.AppSecret,
-		},
-		DingTalk: config.DingTalkConfig{
-			Enabled:      c.DingTalk.Enabled,
-			ClientID:     c.DingTalk.ClientID,
-			ClientSecret: c.DingTalk.ClientSecret,
 		},
 		Slack: config.SlackConfig{
 			Enabled:  c.Slack.Enabled,

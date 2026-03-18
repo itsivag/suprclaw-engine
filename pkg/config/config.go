@@ -256,21 +256,14 @@ func (d *AgentDefaults) GetModelName() string {
 }
 
 type ChannelsConfig struct {
-	WhatsApp   WhatsAppConfig   `json:"whatsapp"`
-	Telegram   TelegramConfig   `json:"telegram"`
-	Feishu     FeishuConfig     `json:"feishu"`
-	Discord    DiscordConfig    `json:"discord"`
-	QQ         QQConfig         `json:"qq"`
-	DingTalk   DingTalkConfig   `json:"dingtalk"`
-	Slack      SlackConfig      `json:"slack"`
-	Matrix     MatrixConfig     `json:"matrix"`
-	LINE       LINEConfig       `json:"line"`
-	OneBot     OneBotConfig     `json:"onebot"`
-	WeCom      WeComConfig      `json:"wecom"`
-	WeComApp   WeComAppConfig   `json:"wecom_app"`
-	WeComAIBot WeComAIBotConfig `json:"wecom_aibot"`
-	Pico       PicoConfig       `json:"pico"`
-	IRC        IRCConfig        `json:"irc"`
+	WhatsApp WhatsAppConfig `json:"whatsapp"`
+	Telegram TelegramConfig `json:"telegram"`
+	Discord  DiscordConfig  `json:"discord"`
+	Slack    SlackConfig    `json:"slack"`
+	Matrix   MatrixConfig   `json:"matrix"`
+	LINE     LINEConfig     `json:"line"`
+	Pico     PicoConfig     `json:"pico"`
+	IRC      IRCConfig      `json:"irc"`
 }
 
 // GroupTriggerConfig controls when the bot responds in group chats.
@@ -311,19 +304,6 @@ type TelegramConfig struct {
 	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_TELEGRAM_REASONING_CHANNEL_ID"`
 }
 
-type FeishuConfig struct {
-	Enabled             bool                `json:"enabled"                 env:"SUPRCLAW_CHANNELS_FEISHU_ENABLED"`
-	AppID               string              `json:"app_id"                  env:"SUPRCLAW_CHANNELS_FEISHU_APP_ID"`
-	AppSecret           string              `json:"app_secret"              env:"SUPRCLAW_CHANNELS_FEISHU_APP_SECRET"`
-	EncryptKey          string              `json:"encrypt_key"             env:"SUPRCLAW_CHANNELS_FEISHU_ENCRYPT_KEY"`
-	VerificationToken   string              `json:"verification_token"      env:"SUPRCLAW_CHANNELS_FEISHU_VERIFICATION_TOKEN"`
-	AllowFrom           FlexibleStringSlice `json:"allow_from"              env:"SUPRCLAW_CHANNELS_FEISHU_ALLOW_FROM"`
-	GroupTrigger        GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	Placeholder         PlaceholderConfig   `json:"placeholder,omitempty"`
-	ReasoningChannelID  string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_FEISHU_REASONING_CHANNEL_ID"`
-	RandomReactionEmoji FlexibleStringSlice `json:"random_reaction_emoji"   env:"SUPRCLAW_CHANNELS_FEISHU_RANDOM_REACTION_EMOJI"`
-}
-
 type DiscordConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"SUPRCLAW_CHANNELS_DISCORD_ENABLED"`
 	Token              string              `json:"token"                   env:"SUPRCLAW_CHANNELS_DISCORD_TOKEN"`
@@ -334,26 +314,6 @@ type DiscordConfig struct {
 	Typing             TypingConfig        `json:"typing,omitempty"`
 	Placeholder        PlaceholderConfig   `json:"placeholder,omitempty"`
 	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_DISCORD_REASONING_CHANNEL_ID"`
-}
-
-type QQConfig struct {
-	Enabled            bool                `json:"enabled"                 env:"SUPRCLAW_CHANNELS_QQ_ENABLED"`
-	AppID              string              `json:"app_id"                  env:"SUPRCLAW_CHANNELS_QQ_APP_ID"`
-	AppSecret          string              `json:"app_secret"              env:"SUPRCLAW_CHANNELS_QQ_APP_SECRET"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"SUPRCLAW_CHANNELS_QQ_ALLOW_FROM"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	MaxMessageLength   int                 `json:"max_message_length"      env:"SUPRCLAW_CHANNELS_QQ_MAX_MESSAGE_LENGTH"`
-	SendMarkdown       bool                `json:"send_markdown"           env:"SUPRCLAW_CHANNELS_QQ_SEND_MARKDOWN"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_QQ_REASONING_CHANNEL_ID"`
-}
-
-type DingTalkConfig struct {
-	Enabled            bool                `json:"enabled"                 env:"SUPRCLAW_CHANNELS_DINGTALK_ENABLED"`
-	ClientID           string              `json:"client_id"               env:"SUPRCLAW_CHANNELS_DINGTALK_CLIENT_ID"`
-	ClientSecret       string              `json:"client_secret"           env:"SUPRCLAW_CHANNELS_DINGTALK_CLIENT_SECRET"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"SUPRCLAW_CHANNELS_DINGTALK_ALLOW_FROM"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_DINGTALK_REASONING_CHANNEL_ID"`
 }
 
 type SlackConfig struct {
@@ -393,61 +353,6 @@ type LINEConfig struct {
 	Typing             TypingConfig        `json:"typing,omitempty"`
 	Placeholder        PlaceholderConfig   `json:"placeholder,omitempty"`
 	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_LINE_REASONING_CHANNEL_ID"`
-}
-
-type OneBotConfig struct {
-	Enabled            bool                `json:"enabled"                 env:"SUPRCLAW_CHANNELS_ONEBOT_ENABLED"`
-	WSUrl              string              `json:"ws_url"                  env:"SUPRCLAW_CHANNELS_ONEBOT_WS_URL"`
-	AccessToken        string              `json:"access_token"            env:"SUPRCLAW_CHANNELS_ONEBOT_ACCESS_TOKEN"`
-	ReconnectInterval  int                 `json:"reconnect_interval"      env:"SUPRCLAW_CHANNELS_ONEBOT_RECONNECT_INTERVAL"`
-	GroupTriggerPrefix []string            `json:"group_trigger_prefix"    env:"SUPRCLAW_CHANNELS_ONEBOT_GROUP_TRIGGER_PREFIX"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"SUPRCLAW_CHANNELS_ONEBOT_ALLOW_FROM"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	Typing             TypingConfig        `json:"typing,omitempty"`
-	Placeholder        PlaceholderConfig   `json:"placeholder,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_ONEBOT_REASONING_CHANNEL_ID"`
-}
-
-type WeComConfig struct {
-	Enabled            bool                `json:"enabled"                 env:"SUPRCLAW_CHANNELS_WECOM_ENABLED"`
-	Token              string              `json:"token"                   env:"SUPRCLAW_CHANNELS_WECOM_TOKEN"`
-	EncodingAESKey     string              `json:"encoding_aes_key"        env:"SUPRCLAW_CHANNELS_WECOM_ENCODING_AES_KEY"`
-	WebhookURL         string              `json:"webhook_url"             env:"SUPRCLAW_CHANNELS_WECOM_WEBHOOK_URL"`
-	WebhookHost        string              `json:"webhook_host"            env:"SUPRCLAW_CHANNELS_WECOM_WEBHOOK_HOST"`
-	WebhookPort        int                 `json:"webhook_port"            env:"SUPRCLAW_CHANNELS_WECOM_WEBHOOK_PORT"`
-	WebhookPath        string              `json:"webhook_path"            env:"SUPRCLAW_CHANNELS_WECOM_WEBHOOK_PATH"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"SUPRCLAW_CHANNELS_WECOM_ALLOW_FROM"`
-	ReplyTimeout       int                 `json:"reply_timeout"           env:"SUPRCLAW_CHANNELS_WECOM_REPLY_TIMEOUT"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_WECOM_REASONING_CHANNEL_ID"`
-}
-
-type WeComAppConfig struct {
-	Enabled            bool                `json:"enabled"                 env:"SUPRCLAW_CHANNELS_WECOM_APP_ENABLED"`
-	CorpID             string              `json:"corp_id"                 env:"SUPRCLAW_CHANNELS_WECOM_APP_CORP_ID"`
-	CorpSecret         string              `json:"corp_secret"             env:"SUPRCLAW_CHANNELS_WECOM_APP_CORP_SECRET"`
-	AgentID            int64               `json:"agent_id"                env:"SUPRCLAW_CHANNELS_WECOM_APP_AGENT_ID"`
-	Token              string              `json:"token"                   env:"SUPRCLAW_CHANNELS_WECOM_APP_TOKEN"`
-	EncodingAESKey     string              `json:"encoding_aes_key"        env:"SUPRCLAW_CHANNELS_WECOM_APP_ENCODING_AES_KEY"`
-	WebhookHost        string              `json:"webhook_host"            env:"SUPRCLAW_CHANNELS_WECOM_APP_WEBHOOK_HOST"`
-	WebhookPort        int                 `json:"webhook_port"            env:"SUPRCLAW_CHANNELS_WECOM_APP_WEBHOOK_PORT"`
-	WebhookPath        string              `json:"webhook_path"            env:"SUPRCLAW_CHANNELS_WECOM_APP_WEBHOOK_PATH"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"SUPRCLAW_CHANNELS_WECOM_APP_ALLOW_FROM"`
-	ReplyTimeout       int                 `json:"reply_timeout"           env:"SUPRCLAW_CHANNELS_WECOM_APP_REPLY_TIMEOUT"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_WECOM_APP_REASONING_CHANNEL_ID"`
-}
-
-type WeComAIBotConfig struct {
-	Enabled            bool                `json:"enabled"              env:"SUPRCLAW_CHANNELS_WECOM_AIBOT_ENABLED"`
-	Token              string              `json:"token"                env:"SUPRCLAW_CHANNELS_WECOM_AIBOT_TOKEN"`
-	EncodingAESKey     string              `json:"encoding_aes_key"     env:"SUPRCLAW_CHANNELS_WECOM_AIBOT_ENCODING_AES_KEY"`
-	WebhookPath        string              `json:"webhook_path"         env:"SUPRCLAW_CHANNELS_WECOM_AIBOT_WEBHOOK_PATH"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"           env:"SUPRCLAW_CHANNELS_WECOM_AIBOT_ALLOW_FROM"`
-	ReplyTimeout       int                 `json:"reply_timeout"        env:"SUPRCLAW_CHANNELS_WECOM_AIBOT_REPLY_TIMEOUT"`
-	MaxSteps           int                 `json:"max_steps"            env:"SUPRCLAW_CHANNELS_WECOM_AIBOT_MAX_STEPS"`       // Maximum streaming steps
-	WelcomeMessage     string              `json:"welcome_message"      env:"SUPRCLAW_CHANNELS_WECOM_AIBOT_WELCOME_MESSAGE"` // Sent on enter_chat event; empty = no welcome
-	ReasoningChannelID string              `json:"reasoning_channel_id" env:"SUPRCLAW_CHANNELS_WECOM_AIBOT_REASONING_CHANNEL_ID"`
 }
 
 type PicoConfig struct {
@@ -909,12 +814,6 @@ func (c *Config) migrateChannelConfigs() {
 	// Discord: mention_only -> group_trigger.mention_only
 	if c.Channels.Discord.MentionOnly && !c.Channels.Discord.GroupTrigger.MentionOnly {
 		c.Channels.Discord.GroupTrigger.MentionOnly = true
-	}
-
-	// OneBot: group_trigger_prefix -> group_trigger.prefixes
-	if len(c.Channels.OneBot.GroupTriggerPrefix) > 0 &&
-		len(c.Channels.OneBot.GroupTrigger.Prefixes) == 0 {
-		c.Channels.OneBot.GroupTrigger.Prefixes = c.Channels.OneBot.GroupTriggerPrefix
 	}
 }
 

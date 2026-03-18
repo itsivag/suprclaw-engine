@@ -198,12 +198,6 @@ func TestConvertToSuprClaw(t *testing.T) {
 				"enabled": true,
 				"bridgeUrl": "http://localhost:3000"
 			},
-			"feishu": {
-				"enabled": true,
-				"appId": "app-id",
-				"appSecret": "app-secret",
-				"allowFrom": ["user3"]
-			},
 			"signal": {
 				"enabled": true
 			}
@@ -270,10 +264,6 @@ func TestConvertToSuprClaw(t *testing.T) {
 		t.Errorf("expected whatsapp bridge URL 'http://localhost:3000', got '%s'", picoCfg.Channels.WhatsApp.BridgeURL)
 	}
 
-	if picoCfg.Channels.Feishu.AppID != "app-id" {
-		t.Errorf("expected feishu app ID 'app-id', got '%s'", picoCfg.Channels.Feishu.AppID)
-	}
-
 	if len(picoCfg.ModelList) != 1 {
 		t.Errorf("expected 1 model config (no models.json provided), got %d", len(picoCfg.ModelList))
 	}
@@ -304,7 +294,7 @@ func TestToStandardConfig_ExecAllowRemoteDefaultsTrue(t *testing.T) {
 	}
 }
 
-func TestConvertToSuprClawWithQQAndDingTalk(t *testing.T) {
+func TestConvertToSuprClawWithSlack(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "openclaw.json")
 
@@ -317,16 +307,6 @@ func TestConvertToSuprClawWithQQAndDingTalk(t *testing.T) {
 			}
 		},
 		"channels": {
-			"qq": {
-				"enabled": true,
-				"appId": "qq-app-id",
-				"appSecret": "qq-app-secret"
-			},
-			"dingtalk": {
-				"enabled": true,
-				"appId": "ding-app-id",
-				"appSecret": "ding-app-secret"
-			},
 			"slack": {
 				"enabled": true,
 				"botToken": "xoxb-test",
@@ -348,20 +328,6 @@ func TestConvertToSuprClawWithQQAndDingTalk(t *testing.T) {
 	picoCfg, _, err := cfg.ConvertToSuprClaw("")
 	if err != nil {
 		t.Fatalf("failed to convert config: %v", err)
-	}
-
-	if !picoCfg.Channels.QQ.Enabled {
-		t.Error("qq should be enabled")
-	}
-	if picoCfg.Channels.QQ.AppID != "qq-app-id" {
-		t.Errorf("expected qq app ID 'qq-app-id', got '%s'", picoCfg.Channels.QQ.AppID)
-	}
-
-	if !picoCfg.Channels.DingTalk.Enabled {
-		t.Error("dingtalk should be enabled")
-	}
-	if picoCfg.Channels.DingTalk.ClientID != "ding-app-id" {
-		t.Errorf("expected dingtalk client ID 'ding-app-id', got '%s'", picoCfg.Channels.DingTalk.ClientID)
 	}
 
 	if !picoCfg.Channels.Slack.Enabled {

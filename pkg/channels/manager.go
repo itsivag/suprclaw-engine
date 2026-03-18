@@ -63,7 +63,6 @@ var channelRateConfig = map[string]float64{
 	"slack":    1,
 	"matrix":   2,
 	"line":     10,
-	"qq":       5,
 	"irc":      2,
 }
 
@@ -248,20 +247,8 @@ func (m *Manager) initChannels() error {
 		}
 	}
 
-	if m.config.Channels.Feishu.Enabled {
-		m.initChannel("feishu", "Feishu")
-	}
-
 	if m.config.Channels.Discord.Enabled && m.config.Channels.Discord.Token != "" {
 		m.initChannel("discord", "Discord")
-	}
-
-	if m.config.Channels.QQ.Enabled {
-		m.initChannel("qq", "QQ")
-	}
-
-	if m.config.Channels.DingTalk.Enabled && m.config.Channels.DingTalk.ClientID != "" {
-		m.initChannel("dingtalk", "DingTalk")
 	}
 
 	if m.config.Channels.Slack.Enabled && m.config.Channels.Slack.BotToken != "" {
@@ -277,22 +264,6 @@ func (m *Manager) initChannels() error {
 
 	if m.config.Channels.LINE.Enabled && m.config.Channels.LINE.ChannelAccessToken != "" {
 		m.initChannel("line", "LINE")
-	}
-
-	if m.config.Channels.OneBot.Enabled && m.config.Channels.OneBot.WSUrl != "" {
-		m.initChannel("onebot", "OneBot")
-	}
-
-	if m.config.Channels.WeCom.Enabled && m.config.Channels.WeCom.Token != "" {
-		m.initChannel("wecom", "WeCom")
-	}
-
-	if m.config.Channels.WeComAIBot.Enabled && m.config.Channels.WeComAIBot.Token != "" {
-		m.initChannel("wecom_aibot", "WeCom AI Bot")
-	}
-
-	if m.config.Channels.WeComApp.Enabled && m.config.Channels.WeComApp.CorpID != "" {
-		m.initChannel("wecom_app", "WeCom App")
 	}
 
 	if m.config.Channels.Pico.Enabled && m.config.Channels.Pico.Token != "" {

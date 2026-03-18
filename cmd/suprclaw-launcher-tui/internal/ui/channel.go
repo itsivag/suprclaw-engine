@@ -25,28 +25,10 @@ func (s *appState) buildChannelMenuItems() []MenuItem {
 			func() { s.push("channel-discord", s.discordForm()) },
 		),
 		channelItem(
-			"QQ",
-			"QQ bot settings",
-			s.config.Channels.QQ.Enabled,
-			func() { s.push("channel-qq", s.qqForm()) },
-		),
-		channelItem(
 			"WhatsApp",
 			"WhatsApp bridge",
 			s.config.Channels.WhatsApp.Enabled,
 			func() { s.push("channel-whatsapp", s.whatsappForm()) },
-		),
-		channelItem(
-			"Feishu",
-			"Feishu bot settings",
-			s.config.Channels.Feishu.Enabled,
-			func() { s.push("channel-feishu", s.feishuForm()) },
-		),
-		channelItem(
-			"DingTalk",
-			"DingTalk bot settings",
-			s.config.Channels.DingTalk.Enabled,
-			func() { s.push("channel-dingtalk", s.dingtalkForm()) },
 		),
 		channelItem(
 			"Slack",
@@ -65,24 +47,6 @@ func (s *appState) buildChannelMenuItems() []MenuItem {
 			"LINE bot settings",
 			s.config.Channels.LINE.Enabled,
 			func() { s.push("channel-line", s.lineForm()) },
-		),
-		channelItem(
-			"OneBot",
-			"OneBot settings",
-			s.config.Channels.OneBot.Enabled,
-			func() { s.push("channel-onebot", s.onebotForm()) },
-		),
-		channelItem(
-			"WeCom",
-			"WeCom bot settings",
-			s.config.Channels.WeCom.Enabled,
-			func() { s.push("channel-wecom", s.wecomForm()) },
-		),
-		channelItem(
-			"WeCom App",
-			"WeCom App settings",
-			s.config.Channels.WeComApp.Enabled,
-			func() { s.push("channel-wecomapp", s.wecomAppForm()) },
 		),
 	}
 }
@@ -129,56 +93,11 @@ func (s *appState) discordForm() tview.Primitive {
 	return wrapWithBack(form, s)
 }
 
-func (s *appState) qqForm() tview.Primitive {
-	cfg := &s.config.Channels.QQ
-	form := baseChannelForm("QQ", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
-	form.AddInputField("App ID", cfg.AppID, 64, nil, func(text string) {
-		cfg.AppID = strings.TrimSpace(text)
-	})
-	form.AddInputField("App Secret", cfg.AppSecret, 128, nil, func(text string) {
-		cfg.AppSecret = strings.TrimSpace(text)
-	})
-	addAllowFromField(form, &cfg.AllowFrom)
-	return wrapWithBack(form, s)
-}
-
 func (s *appState) whatsappForm() tview.Primitive {
 	cfg := &s.config.Channels.WhatsApp
 	form := baseChannelForm("WhatsApp", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
 	form.AddInputField("Bridge URL", cfg.BridgeURL, 128, nil, func(text string) {
 		cfg.BridgeURL = strings.TrimSpace(text)
-	})
-	addAllowFromField(form, &cfg.AllowFrom)
-	return wrapWithBack(form, s)
-}
-
-func (s *appState) feishuForm() tview.Primitive {
-	cfg := &s.config.Channels.Feishu
-	form := baseChannelForm("Feishu", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
-	form.AddInputField("App ID", cfg.AppID, 64, nil, func(text string) {
-		cfg.AppID = strings.TrimSpace(text)
-	})
-	form.AddInputField("App Secret", cfg.AppSecret, 128, nil, func(text string) {
-		cfg.AppSecret = strings.TrimSpace(text)
-	})
-	form.AddInputField("Encrypt Key", cfg.EncryptKey, 128, nil, func(text string) {
-		cfg.EncryptKey = strings.TrimSpace(text)
-	})
-	form.AddInputField("Verification Token", cfg.VerificationToken, 128, nil, func(text string) {
-		cfg.VerificationToken = strings.TrimSpace(text)
-	})
-	addAllowFromField(form, &cfg.AllowFrom)
-	return wrapWithBack(form, s)
-}
-
-func (s *appState) dingtalkForm() tview.Primitive {
-	cfg := &s.config.Channels.DingTalk
-	form := baseChannelForm("DingTalk", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
-	form.AddInputField("Client ID", cfg.ClientID, 64, nil, func(text string) {
-		cfg.ClientID = strings.TrimSpace(text)
-	})
-	form.AddInputField("Client Secret", cfg.ClientSecret, 128, nil, func(text string) {
-		cfg.ClientSecret = strings.TrimSpace(text)
 	})
 	addAllowFromField(form, &cfg.AllowFrom)
 	return wrapWithBack(form, s)
@@ -236,96 +155,6 @@ func (s *appState) matrixForm() tview.Primitive {
 		cfg.JoinOnInvite = checked
 	})
 	addAllowFromField(form, &cfg.AllowFrom)
-	return wrapWithBack(form, s)
-}
-
-func (s *appState) onebotForm() tview.Primitive {
-	cfg := &s.config.Channels.OneBot
-	form := baseChannelForm("OneBot", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
-	form.AddInputField("WS URL", cfg.WSUrl, 128, nil, func(text string) {
-		cfg.WSUrl = strings.TrimSpace(text)
-	})
-	form.AddInputField("Access Token", cfg.AccessToken, 128, nil, func(text string) {
-		cfg.AccessToken = strings.TrimSpace(text)
-	})
-	addIntField(
-		form,
-		"Reconnect Interval",
-		cfg.ReconnectInterval,
-		func(value int) { cfg.ReconnectInterval = value },
-	)
-	form.AddInputField(
-		"Group Trigger Prefix",
-		strings.Join(cfg.GroupTriggerPrefix, ","),
-		128,
-		nil,
-		func(text string) {
-			cfg.GroupTriggerPrefix = splitCSV(text)
-		},
-	)
-	addAllowFromField(form, &cfg.AllowFrom)
-	return wrapWithBack(form, s)
-}
-
-func (s *appState) wecomForm() tview.Primitive {
-	cfg := &s.config.Channels.WeCom
-	form := baseChannelForm("WeCom", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
-	form.AddInputField("Token", cfg.Token, 128, nil, func(text string) {
-		cfg.Token = strings.TrimSpace(text)
-	})
-	form.AddInputField("Encoding AES Key", cfg.EncodingAESKey, 128, nil, func(text string) {
-		cfg.EncodingAESKey = strings.TrimSpace(text)
-	})
-	form.AddInputField("Webhook URL", cfg.WebhookURL, 128, nil, func(text string) {
-		cfg.WebhookURL = strings.TrimSpace(text)
-	})
-	form.AddInputField("Webhook Host", cfg.WebhookHost, 64, nil, func(text string) {
-		cfg.WebhookHost = strings.TrimSpace(text)
-	})
-	addIntField(form, "Webhook Port", cfg.WebhookPort, func(value int) { cfg.WebhookPort = value })
-	form.AddInputField("Webhook Path", cfg.WebhookPath, 64, nil, func(text string) {
-		cfg.WebhookPath = strings.TrimSpace(text)
-	})
-	addAllowFromField(form, &cfg.AllowFrom)
-	addIntField(
-		form,
-		"Reply Timeout",
-		cfg.ReplyTimeout,
-		func(value int) { cfg.ReplyTimeout = value },
-	)
-	return wrapWithBack(form, s)
-}
-
-func (s *appState) wecomAppForm() tview.Primitive {
-	cfg := &s.config.Channels.WeComApp
-	form := baseChannelForm("WeCom App", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
-	form.AddInputField("Corp ID", cfg.CorpID, 64, nil, func(text string) {
-		cfg.CorpID = strings.TrimSpace(text)
-	})
-	form.AddInputField("Corp Secret", cfg.CorpSecret, 128, nil, func(text string) {
-		cfg.CorpSecret = strings.TrimSpace(text)
-	})
-	addInt64Field(form, "Agent ID", cfg.AgentID, func(value int64) { cfg.AgentID = value })
-	form.AddInputField("Token", cfg.Token, 128, nil, func(text string) {
-		cfg.Token = strings.TrimSpace(text)
-	})
-	form.AddInputField("Encoding AES Key", cfg.EncodingAESKey, 128, nil, func(text string) {
-		cfg.EncodingAESKey = strings.TrimSpace(text)
-	})
-	form.AddInputField("Webhook Host", cfg.WebhookHost, 64, nil, func(text string) {
-		cfg.WebhookHost = strings.TrimSpace(text)
-	})
-	addIntField(form, "Webhook Port", cfg.WebhookPort, func(value int) { cfg.WebhookPort = value })
-	form.AddInputField("Webhook Path", cfg.WebhookPath, 64, nil, func(text string) {
-		cfg.WebhookPath = strings.TrimSpace(text)
-	})
-	addAllowFromField(form, &cfg.AllowFrom)
-	addIntField(
-		form,
-		"Reply Timeout",
-		cfg.ReplyTimeout,
-		func(value int) { cfg.ReplyTimeout = value },
-	)
 	return wrapWithBack(form, s)
 }
 
