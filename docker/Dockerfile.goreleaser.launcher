@@ -4,9 +4,9 @@ ARG TARGETPLATFORM
 
 RUN apk add --no-cache ca-certificates tzdata
 
-COPY $TARGETPLATFORM/picoclaw /usr/local/bin/picoclaw
-COPY $TARGETPLATFORM/picoclaw-launcher /usr/local/bin/picoclaw-launcher
-COPY $TARGETPLATFORM/picoclaw-launcher-tui /usr/local/bin/picoclaw-launcher-tui
+COPY $TARGETPLATFORM/suprclaw /usr/local/bin/suprclaw
+COPY $TARGETPLATFORM/suprclaw-launcher /usr/local/bin/suprclaw-launcher
+COPY $TARGETPLATFORM/suprclaw-launcher-tui /usr/local/bin/suprclaw-launcher-tui
 
-ENTRYPOINT ["picoclaw-launcher"]
+ENTRYPOINT ["suprclaw-launcher"]
 CMD ["-public", "-no-browser"]
