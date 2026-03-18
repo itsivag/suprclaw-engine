@@ -540,10 +540,6 @@ func DefaultConfig() *Config {
 				Enabled: true,
 			},
 		},
-		Heartbeat: HeartbeatConfig{
-			Enabled:  true,
-			Interval: 30,
-		},
 		Devices: DevicesConfig{
 			Enabled:    false,
 			MonitorUSB: true,

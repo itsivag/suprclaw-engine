@@ -65,7 +65,6 @@ type processOptions struct {
 	DefaultResponse   string   // Response when LLM returns empty
 	EnableSummary     bool     // Whether to trigger summarization
 	SendResponse      bool     // Whether to send response via bus
-	NoHistory         bool     // If true, don't load session history (for heartbeat)
 }
 
 const (
@@ -664,28 +663,6 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 	return al.processMessage(ctx, msg)
 }
 
-// ProcessHeartbeat processes a heartbeat request without session history.
-// Each heartbeat is independent and doesn't accumulate context.
-func (al *AgentLoop) ProcessHeartbeat(
-	ctx context.Context,
-	content, channel, chatID string,
-) (string, error) {
-	agent := al.GetRegistry().GetDefaultAgent()
-	if agent == nil {
-		return "", fmt.Errorf("no default agent for heartbeat")
-	}
-	return al.runAgentLoop(ctx, agent, processOptions{
-		SessionKey:      "heartbeat",
-		Channel:         channel,
-		ChatID:          chatID,
-		UserMessage:     content,
-		DefaultResponse: defaultResponse,
-		EnableSummary:   false,
-		SendResponse:    false,
-		NoHistory:       true, // Don't load session history for heartbeat
-	})
-}
-
 func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
 	// Add message preview to log (show full content for error messages)
 	var logContent string
@@ -867,7 +844,7 @@ func (al *AgentLoop) runAgentLoop(
 	agent *AgentInstance,
 	opts processOptions,
 ) (string, error) {
-	// 0. Record last channel for heartbeat notifications (skip internal channels and cli)
+	// 0. Record last channel for notifications (skip internal channels and cli)
 	if opts.Channel != "" && opts.ChatID != "" {
 		if !constants.IsInternalChannel(opts.Channel) {
 			channelKey := fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID)
@@ -881,13 +858,11 @@ func (al *AgentLoop) runAgentLoop(
 		}
 	}
 
-	// 1. Build messages (skip history for heartbeat)
+	// 1. Build messages
 	var history []providers.Message
 	var summary string
-	if !opts.NoHistory {
-		history = agent.Sessions.GetHistory(opts.SessionKey)
-		summary = agent.Sessions.GetSummary(opts.SessionKey)
-	}
+	history = agent.Sessions.GetHistory(opts.SessionKey)
+	summary = agent.Sessions.GetSummary(opts.SessionKey)
 	messages := agent.ContextBuilder.BuildMessages(
 		history,
 		summary,

@@ -17,7 +17,7 @@ Runs on $10 hardware with <10MB RAM. Single binary, 1-second boot, works across 
 - **Multi-arch** — x86_64, ARM64, MIPS, RISC-V
 - **Self-hosted** — no telemetry, no tracking, all data stays local
 - **Multi-channel** — Telegram, Discord, WhatsApp, Matrix, LINE, and more
-- **Scheduled tasks** — built-in cron and heartbeat system
+- **Scheduled tasks** — built-in cron
 - **Sandboxed** — agent restricted to workspace by default
 
 ---
@@ -287,8 +287,6 @@ Config file: `~/.suprclaw/config.json`
 | `SUPRCLAW_CONFIG`                                 | Path to config file                      | `~/.suprclaw/config.json` |
 | `SUPRCLAW_HOME`                                   | Root directory for all suprclaw data     | `~/.suprclaw`             |
 | `SUPRCLAW_BUILTIN_SKILLS`                         | Override builtin skills path             | —                         |
-| `SUPRCLAW_HEARTBEAT_ENABLED`                      | Enable/disable heartbeat (`true`/`false`)| `true`                    |
-| `SUPRCLAW_HEARTBEAT_INTERVAL`                     | Heartbeat interval in minutes            | `30`                      |
 | `SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE`  | Restrict agent to workspace              | `true`                    |
 
 ### Workspace Layout
@@ -340,28 +338,6 @@ The agent is restricted to the workspace by default:
 The `exec` tool always blocks dangerous commands regardless of workspace setting: `rm -rf`, `format`, `mkfs`, `dd if=`, `shutdown`, fork bombs, and direct disk writes.
 
 > ⚠️ Set `"restrict_to_workspace": false` or `SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false` to allow full system access. Use with caution.
-
-### Heartbeat (Periodic Tasks)
-
-Create `HEARTBEAT.md` in your workspace:
-
-```markdown
-# Periodic Tasks
-
-- Check my email for important messages
-- Summarize today's calendar
-```
-
-The agent reads this file every 30 minutes and runs the tasks. For long-running tasks, use the `spawn` tool to run them as async subagents.
-
-```json
-{
-  "heartbeat": {
-    "enabled": true,
-    "interval": 30
-  }
-}
-```
 
 ---
 

@@ -32,12 +32,10 @@ import (
 	"github.com/sipeed/suprclaw/pkg/cron"
 	"github.com/sipeed/suprclaw/pkg/devices"
 	"github.com/sipeed/suprclaw/pkg/health"
-	"github.com/sipeed/suprclaw/pkg/heartbeat"
 	"github.com/sipeed/suprclaw/pkg/logger"
 	"github.com/sipeed/suprclaw/pkg/media"
 	"github.com/sipeed/suprclaw/pkg/providers"
 	"github.com/sipeed/suprclaw/pkg/state"
-	"github.com/sipeed/suprclaw/pkg/tools"
 	"github.com/sipeed/suprclaw/pkg/voice"
 )
 
@@ -48,9 +46,8 @@ const (
 )
 
 type services struct {
-	CronService      *cron.CronService
-	HeartbeatService *heartbeat.HeartbeatService
-	MediaStore       media.MediaStore
+	CronService    *cron.CronService
+	MediaStore     media.MediaStore
 	ChannelManager   *channels.Manager
 	DeviceService    *devices.Service
 	HealthServer     *health.Server
@@ -193,18 +190,6 @@ func setupAndStartServices(
 	}
 	fmt.Println("✓ Cron service started")
 
-	runningServices.HeartbeatService = heartbeat.NewHeartbeatService(
-		cfg.WorkspacePath(),
-		cfg.Heartbeat.Interval,
-		cfg.Heartbeat.Enabled,
-	)
-	runningServices.HeartbeatService.SetBus(msgBus)
-	runningServices.HeartbeatService.SetHandler(createHeartbeatHandler(agentLoop))
-	if err = runningServices.HeartbeatService.Start(); err != nil {
-		return nil, fmt.Errorf("error starting heartbeat service: %w", err)
-	}
-	fmt.Println("✓ Heartbeat service started")
-
 	runningServices.MediaStore = media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
 		Enabled:  cfg.Tools.MediaCleanup.Enabled,
 		MaxAge:   time.Duration(cfg.Tools.MediaCleanup.MaxAge) * time.Minute,
@@ -271,9 +256,6 @@ func stopAndCleanupServices(runningServices *services, shutdownTimeout time.Dura
 	}
 	if runningServices.DeviceService != nil {
 		runningServices.DeviceService.Stop()
-	}
-	if runningServices.HeartbeatService != nil {
-		runningServices.HeartbeatService.Stop()
 	}
 	if runningServices.CronService != nil {
 		runningServices.CronService.Stop()
@@ -389,18 +371,6 @@ func restartServices(
 		return fmt.Errorf("error restarting cron service: %w", err)
 	}
 	fmt.Println("  ✓ Cron service restarted")
-
-	runningServices.HeartbeatService = heartbeat.NewHeartbeatService(
-		cfg.WorkspacePath(),
-		cfg.Heartbeat.Interval,
-		cfg.Heartbeat.Enabled,
-	)
-	runningServices.HeartbeatService.SetBus(msgBus)
-	runningServices.HeartbeatService.SetHandler(createHeartbeatHandler(al))
-	if err = runningServices.HeartbeatService.Start(); err != nil {
-		return fmt.Errorf("error restarting heartbeat service: %w", err)
-	}
-	fmt.Println("  ✓ Heartbeat service restarted")
 
 	runningServices.MediaStore = media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
 		Enabled:  cfg.Tools.MediaCleanup.Enabled,
@@ -576,19 +546,3 @@ func setupCronTool(
 	return cronService, nil
 }
 
-func createHeartbeatHandler(agentLoop *agent.AgentLoop) func(prompt, channel, chatID string) *tools.ToolResult {
-	return func(prompt, channel, chatID string) *tools.ToolResult {
-		if channel == "" || chatID == "" {
-			channel, chatID = "cli", "direct"
-		}
-
-		response, err := agentLoop.ProcessHeartbeat(context.Background(), prompt, channel, chatID)
-		if err != nil {
-			return tools.ErrorResult(fmt.Sprintf("Heartbeat error: %v", err))
-		}
-		if response == "HEARTBEAT_OK" {
-			return tools.SilentResult("Heartbeat OK")
-		}
-		return tools.SilentResult(response)
-	}
-}

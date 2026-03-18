@@ -85,7 +85,6 @@ type Config struct {
 	ModelList []ModelConfig   `json:"model_list"` // New model-centric provider configuration
 	Gateway   GatewayConfig   `json:"gateway"`
 	Tools     ToolsConfig     `json:"tools"`
-	Heartbeat HeartbeatConfig `json:"heartbeat"`
 	Devices   DevicesConfig   `json:"devices"`
 	Voice     VoiceConfig     `json:"voice"`
 	// BuildInfo contains build-time version information
@@ -490,11 +489,6 @@ type IRCConfig struct {
 	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
 	Typing             TypingConfig        `json:"typing,omitempty"`
 	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_IRC_REASONING_CHANNEL_ID"`
-}
-
-type HeartbeatConfig struct {
-	Enabled  bool `json:"enabled"  env:"SUPRCLAW_HEARTBEAT_ENABLED"`
-	Interval int  `json:"interval" env:"SUPRCLAW_HEARTBEAT_INTERVAL"` // minutes, min 5
 }
 
 type DevicesConfig struct {
