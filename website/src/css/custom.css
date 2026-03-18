@@ -13,7 +13,11 @@
   --ifm-color-primary-light: #ec599f;
   --ifm-color-primary-lighter: #ee66a6;
   --ifm-color-primary-lightest: #f38dbc;
-  --ifm-code-font-size: 95%;
+  --ifm-font-size-base: 15px;
+  --ifm-code-font-size: 90%;
+  --ifm-h1-font-size: 2rem;
+  --ifm-h2-font-size: 1.5rem;
+  --ifm-h3-font-size: 1.2rem;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
 }
 
@@ -30,5 +34,5 @@
 }
 
 .hero__subtitle {
-  font-size: 1.2rem;
+  font-size: 1rem;
 }
