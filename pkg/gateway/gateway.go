@@ -558,8 +558,27 @@ func setupCronTool(
 
 	var cronTool *tools.CronTool
 	if cfg.Tools.IsToolEnabled("cron") {
+		// Extract primary agent identity for webhook sender fields.
+		webhookAgentID, webhookAgentName := "", ""
+		if def := agentLoop.GetRegistry().GetDefaultAgent(); def != nil {
+			webhookAgentID = def.ID
+			webhookAgentName = def.Name
+			if webhookAgentName == "" {
+				webhookAgentName = webhookAgentID
+			}
+		}
+		webhookCfg := cron.WebhookConfig{
+			Enabled:  cfg.Tools.Cron.Webhook.Enabled,
+			Endpoint: cfg.Tools.Cron.Webhook.Endpoint,
+			Secret:   cfg.Tools.Cron.Webhook.Secret,
+			UserID:   cfg.Tools.Cron.Webhook.UserID,
+		}
+
 		var err error
-		cronTool, err = tools.NewCronTool(cronService, agentLoop, msgBus, workspace, restrict, execTimeout, cfg)
+		cronTool, err = tools.NewCronTool(
+			cronService, agentLoop, msgBus, workspace, restrict, execTimeout, cfg,
+			webhookCfg, webhookAgentID, webhookAgentName,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("critical error during CronTool initialization: %w", err)
 		}

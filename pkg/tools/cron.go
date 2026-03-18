@@ -26,6 +26,9 @@ type CronTool struct {
 	execTool     *ExecTool
 	allowCommand bool
 	execEnabled  bool
+	webhookCfg   cron.WebhookConfig
+	agentID      string
+	agentName    string
 }
 
 // NewCronTool creates a new CronTool
@@ -33,6 +36,7 @@ type CronTool struct {
 func NewCronTool(
 	cronService *cron.CronService, executor JobExecutor, msgBus *bus.MessageBus, workspace string, restrict bool,
 	execTimeout time.Duration, config *config.Config,
+	webhookCfg cron.WebhookConfig, agentID string, agentName string,
 ) (*CronTool, error) {
 	allowCommand := true
 	execEnabled := true
@@ -60,6 +64,9 @@ func NewCronTool(
 		execTool:     execTool,
 		allowCommand: allowCommand,
 		execEnabled:  execEnabled,
+		webhookCfg:   webhookCfg,
+		agentID:      agentID,
+		agentName:    agentName,
 	}, nil
 }
 
@@ -297,6 +304,8 @@ func (t *CronTool) enableJob(args map[string]any, enable bool) *ToolResult {
 
 // ExecuteJob executes a cron job through the agent
 func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
+	executionMS := time.Now().UnixMilli()
+
 	// Get channel/chatID from job payload
 	channel := job.Payload.Channel
 	chatID := job.Payload.To
@@ -335,6 +344,7 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 			output = fmt.Sprintf("Error executing scheduled command: %s", result.ForLLM)
 		} else {
 			output = fmt.Sprintf("Scheduled command '%s' executed:\n%s", job.Payload.Command, result.ForLLM)
+			t.fireWebhook(job, executionMS, output)
 		}
 
 		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -356,6 +366,7 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 			ChatID:  chatID,
 			Content: job.Payload.Message,
 		})
+		t.fireWebhook(job, executionMS, job.Payload.Message)
 		return "ok"
 	}
 
@@ -374,7 +385,25 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	// Response is automatically sent via MessageBus by AgentLoop
-	_ = response // Will be sent by AgentLoop
+	t.fireWebhook(job, executionMS, response)
 	return "ok"
+}
+
+// fireWebhook dispatches a webhook event asynchronously after a successful cron job execution.
+func (t *CronTool) fireWebhook(job *cron.CronJob, executionMS int64, content string) {
+	if !t.webhookCfg.Enabled || t.webhookCfg.Endpoint == "" {
+		return
+	}
+	event := cron.WebhookEvent{
+		EventID:   cron.CronEventID(job.ID, executionMS),
+		CreatedAt: time.UnixMilli(executionMS).UTC().Format(time.RFC3339),
+		Source:    "cron",
+		AgentID:   t.agentID,
+		AgentName: t.agentName,
+		JobID:     job.ID,
+		JobName:   job.Name,
+		Content:   content,
+		UserID:    t.webhookCfg.UserID,
+	}
+	go cron.SendWebhook(context.Background(), t.webhookCfg, event)
 }

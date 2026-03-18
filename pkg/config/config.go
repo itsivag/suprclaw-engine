@@ -618,10 +618,18 @@ type WebToolsConfig struct {
 	PrivateHostWhitelist FlexibleStringSlice `json:"private_host_whitelist,omitempty" env:"SUPRCLAW_TOOLS_WEB_PRIVATE_HOST_WHITELIST"`
 }
 
+type CronWebhookConfig struct {
+	Enabled  bool   `json:"enabled"           env:"SUPRCLAW_TOOLS_CRON_WEBHOOK_ENABLED"`
+	Endpoint string `json:"endpoint"          env:"SUPRCLAW_TOOLS_CRON_WEBHOOK_ENDPOINT"`
+	Secret   string `json:"secret"            env:"SUPRCLAW_TOOLS_CRON_WEBHOOK_SECRET"`
+	UserID   string `json:"user_id,omitempty" env:"SUPRCLAW_TOOLS_CRON_WEBHOOK_USER_ID"`
+}
+
 type CronToolsConfig struct {
 	ToolConfig         `     envPrefix:"SUPRCLAW_TOOLS_CRON_"`
-	ExecTimeoutMinutes int  `                                 env:"SUPRCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES" json:"exec_timeout_minutes"` // 0 means no timeout
-	AllowCommand       bool `                                 env:"SUPRCLAW_TOOLS_CRON_ALLOW_COMMAND"        json:"allow_command"`
+	ExecTimeoutMinutes int              `env:"SUPRCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES" json:"exec_timeout_minutes"` // 0 means no timeout
+	AllowCommand       bool             `env:"SUPRCLAW_TOOLS_CRON_ALLOW_COMMAND"        json:"allow_command"`
+	Webhook            CronWebhookConfig `json:"webhook"`
 }
 
 type ExecConfig struct {
