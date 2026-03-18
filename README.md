@@ -24,6 +24,14 @@ Runs on $10 hardware with <10MB RAM. Single binary, 1-second boot, works across 
 
 ## Install
 
+### One-liner
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/itsivag/suprclaw-engine/main/install.sh | sh
+```
+
+Auto-detects OS and architecture (x86_64, ARM64, ARMv7, RISC-V, MIPS, LoongArch). Installs to `/usr/local/bin` or `~/.local/bin`.
+
 ### Precompiled binary
 
 Download from the [releases](https://github.com/itsivag/suprclaw-engine/releases) page.
