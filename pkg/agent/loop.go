@@ -1550,6 +1550,13 @@ func (al *AgentLoop) publishStatus(ctx context.Context, opts processOptions, upd
 	}
 	update.Channel = opts.Channel
 	update.ChatID = opts.ChatID
+	logger.InfoCF("agent", "Publishing status update", map[string]any{
+		"channel":   update.Channel,
+		"chat_id":   update.ChatID,
+		"kind":      update.Kind,
+		"text":      update.Text,
+		"toolNames": update.ToolNames,
+	})
 	_ = al.bus.PublishOutboundStatus(ctx, update)
 }
 

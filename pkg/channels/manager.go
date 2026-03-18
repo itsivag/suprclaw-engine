@@ -649,14 +649,26 @@ func (m *Manager) handleStatusUpdate(ctx context.Context, channelName string, ms
 	ch, ok := m.channels[channelName]
 	m.mu.RUnlock()
 	if !ok {
+		logger.WarnCF("channels", "Status update dropped: channel not found", map[string]any{
+			"channel": channelName,
+			"chat_id": msg.ChatID,
+			"text":    msg.Text,
+		})
 		return
 	}
 
 	// Primary: WebSocket push (e.g. Supr)
 	if sb, ok := ch.(StatusBroadcaster); ok {
+		logger.InfoCF("channels", "Broadcasting status update", map[string]any{
+			"channel": channelName,
+			"chat_id": msg.ChatID,
+			"text":    msg.Text,
+		})
 		if err := sb.BroadcastStatus(ctx, msg.ChatID, msg.Text); err != nil {
-			logger.DebugCF("channels", "BroadcastStatus failed", map[string]any{
+			logger.WarnCF("channels", "BroadcastStatus failed", map[string]any{
 				"channel": channelName,
+				"chat_id": msg.ChatID,
+				"text":    msg.Text,
 				"error":   err.Error(),
 			})
 		}
