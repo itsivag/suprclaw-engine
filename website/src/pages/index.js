@@ -1,10 +1,31 @@
 import clsx from 'clsx';
+import { useState } from 'react';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 
 import styles from './index.module.css';
+
+const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/itsivag/suprclaw-engine/main/install.sh | sh';
+
+function InstallBlock() {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(INSTALL_CMD).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <div className={styles.installBlock}>
+      <code>{INSTALL_CMD}</code>
+      <button className={styles.copyBtn} onClick={handleCopy} title="Copy to clipboard">
+        {copied ? '✓' : '⎘'}
+      </button>
+    </div>
+  );
+}
 
 const features = [
   {
@@ -65,9 +86,7 @@ function HomepageHeader() {
             Download
           </Link>
         </div>
-        <div className={styles.installBlock}>
-          <code>curl -fsSL https://raw.githubusercontent.com/itsivag/suprclaw-engine/main/install.sh | sh</code>
-        </div>
+        <InstallBlock />
       </div>
     </header>
   );
