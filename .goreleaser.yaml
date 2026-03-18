@@ -18,10 +18,10 @@ builds:
       - stdjson
     ldflags:
       - -s -w
-      - -X github.com/sipeed/suprclaw/pkg/config.Version={{ .Version }}
-      - -X github.com/sipeed/suprclaw/pkg/config.GitCommit={{ .ShortCommit }}
-      - -X github.com/sipeed/suprclaw/pkg/config.BuildTime={{ .Date }}
-      - -X github.com/sipeed/suprclaw/pkg/config.GoVersion={{ .Env.GOVERSION }}
+      - -X github.com/itsivag/suprclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/itsivag/suprclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/itsivag/suprclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/itsivag/suprclaw/pkg/config.GoVersion={{ .Env.GOVERSION }}
     goos:
       - linux
       - windows

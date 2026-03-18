@@ -2,19 +2,54 @@ name: build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+
+permissions:
+  contents: write
 
 jobs:
   build:
+    name: Build & Release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Build
+      - name: Build all platforms
         run: make build-all
+
+      - name: Compress binaries
+        run: |
+          cd build
+          for f in suprclaw-*; do
+            case "$f" in
+              *.exe) zip "${f%.exe}.zip" "$f" ;;
+              *)     tar czf "${f}.tar.gz" "$f" ;;
+            esac
+          done
+
+      - name: Delete existing latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete latest --cleanup-tag -y 2>/dev/null || true
+
+      - name: Create latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          SHORT_SHA="${SHA:0:8}"
+          gh release create latest \
+            --title "Latest Build (${SHORT_SHA})" \
+            --notes "Automated build from commit ${SHA}." \
+            --target "$SHA" \
+            --prerelease \
+            --latest=false \
+            build/*.tar.gz build/*.zip

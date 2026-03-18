@@ -11,7 +11,7 @@ VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GIT_COMMIT=$(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "dev")
 BUILD_TIME=$(shell date +%FT%T%z)
 GO_VERSION=$(shell $(GO) version | awk '{print $$3}')
-CONFIG_PKG=github.com/sipeed/suprclaw/pkg/config
+CONFIG_PKG=github.com/itsivag/suprclaw/pkg/config
 LDFLAGS=-X $(CONFIG_PKG).Version=$(VERSION) -X $(CONFIG_PKG).GitCommit=$(GIT_COMMIT) -X $(CONFIG_PKG).BuildTime=$(BUILD_TIME) -X $(CONFIG_PKG).GoVersion=$(GO_VERSION) -s -w
 
 # Go variables
@@ -222,12 +222,12 @@ clean:
 ## vet: Run go vet for static analysis
 vet: generate
 	@packages="$$(go list ./...)" && \
-		$(GO) vet $$(printf '%s\n' "$$packages" | grep -v '^github.com/sipeed/suprclaw/web/')
+		$(GO) vet $$(printf '%s\n' "$$packages" | grep -v '^github.com/itsivag/suprclaw/web/')
 	@cd web/backend && $(WEB_GO) vet ./...
 
 ## test: Test Go code
 test: generate
-	@$(GO) test $$(go list ./... | grep -v github.com/sipeed/suprclaw/web/)
+	@$(GO) test $$(go list ./... | grep -v github.com/itsivag/suprclaw/web/)
 	@cd web && make test
 
 ## fmt: Format Go code
