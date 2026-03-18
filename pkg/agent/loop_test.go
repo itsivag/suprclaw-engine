@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/media"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/routing"
-	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/sipeed/suprclaw/pkg/bus"
+	"github.com/sipeed/suprclaw/pkg/channels"
+	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/sipeed/suprclaw/pkg/media"
+	"github.com/sipeed/suprclaw/pkg/providers"
+	"github.com/sipeed/suprclaw/pkg/routing"
+	"github.com/sipeed/suprclaw/pkg/tools"
 )
 
 type fakeChannel struct{ id string }

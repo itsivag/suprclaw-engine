@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"runtime"
 
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/suprclaw/pkg/config"
 )
 
 type toolCatalogEntry struct {

@@ -3,8 +3,8 @@ package irc
 import (
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/suprclaw/pkg/bus"
+	"github.com/sipeed/suprclaw/pkg/config"
 )
 
 func TestNewIRCChannel(t *testing.T) {

@@ -210,7 +210,7 @@ export function AppHeader() {
 
         {/* Docs Link */}
         <Button variant="ghost" size="icon" className="size-8" asChild>
-          <a href="https://docs.picoclaw.io" target="_blank" rel="noreferrer">
+          <a href="https://docs.suprclaw.io" target="_blank" rel="noreferrer">
             <IconBook className="size-4.5" />
           </a>
         </Button>
@@ -225,9 +225,6 @@ export function AppHeader() {
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => i18n.changeLanguage("en")}>
               English
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("zh")}>
-              简体中文
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

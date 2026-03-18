@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/fileutil"
-	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/suprclaw/pkg/fileutil"
+	"github.com/sipeed/suprclaw/pkg/logger"
 )
 
 const MaxReadFileSize = 64 * 1024 // 64KB limit to avoid context overflow

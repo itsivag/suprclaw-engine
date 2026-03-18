@@ -1,6 +1,6 @@
 # Credential Encryption
 
-PicoClaw supports encrypting `api_key` values in `model_list` configuration entries.
+SuprClaw supports encrypting `api_key` values in `model_list` configuration entries.
 Encrypted keys are stored as `enc://<base64>` strings and decrypted automatically at startup.
 
 ---
@@ -10,12 +10,12 @@ Encrypted keys are stored as `enc://<base64>` strings and decrypted automaticall
 **1. Set your passphrase**
 
 ```bash
-export PICOCLAW_KEY_PASSPHRASE="your-passphrase"
+export SUPRCLAW_KEY_PASSPHRASE="your-passphrase"
 ```
 
 **2. Encrypt an API key**
 
-Run `picoclaw onboard` — it prompts for your passphrase and generates the SSH key,
+Run `suprclaw onboard` — it prompts for your passphrase and generates the SSH key,
 then automatically re-encrypts any plaintext `api_key` entries in your config on
 the next `SaveConfig` call. The resulting `enc://` value will look like:
 
@@ -45,7 +45,7 @@ enc://AAAA...base64...
 |--------|---------|-----------|
 | Plaintext | `sk-abc123` | Used as-is |
 | File reference | `file://openai.key` | Content read from the same directory as the config file |
-| Encrypted | `enc://<base64>` | Decrypted at startup using `PICOCLAW_KEY_PASSPHRASE` |
+| Encrypted | `enc://<base64>` | Decrypted at startup using `SUPRCLAW_KEY_PASSPHRASE` |
 | Empty | `""` | Passed through unchanged (used with `auth_method: oauth`) |
 
 ---
@@ -60,14 +60,14 @@ Encryption uses **HKDF-SHA256** with an optional SSH private key as a second fac
 Without SSH key (passphrase only):
 
   ikm     = SHA256(passphrase)
-  aes_key = HKDF-SHA256(ikm, salt, info="picoclaw-credential-v1", 32 bytes)
+  aes_key = HKDF-SHA256(ikm, salt, info="suprclaw-credential-v1", 32 bytes)
 
 
 With SSH key (recommended):
 
   sshHash = SHA256(ssh_private_key_file_bytes)
   ikm     = HMAC-SHA256(key=sshHash, message=passphrase)
-  aes_key = HKDF-SHA256(ikm, salt, info="picoclaw-credential-v1", 32 bytes)
+  aes_key = HKDF-SHA256(ikm, salt, info="suprclaw-credential-v1", 32 bytes)
 ```
 
 ### Encryption
@@ -104,7 +104,7 @@ The GCM authentication tag is appended to the ciphertext automatically. Any tamp
 
 When a SSH private key is provided, breaking the encryption requires **both**:
 
-1. The **passphrase** (`PICOCLAW_KEY_PASSPHRASE`)
+1. The **passphrase** (`SUPRCLAW_KEY_PASSPHRASE`)
 2. The **SSH private key file**
 
 This means a leaked config file alone is not sufficient to recover the API key, even if the passphrase is weak. The SSH key contributes 256 bits of entropy (Ed25519) regardless of passphrase strength.
@@ -124,37 +124,37 @@ This means a leaked config file alone is not sufficient to recover the API key, 
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `PICOCLAW_KEY_PASSPHRASE` | Yes (for `enc://`) | Passphrase used for key derivation |
-| `PICOCLAW_SSH_KEY_PATH` | No | Path to SSH private key. Set to `""` to disable auto-detection and use passphrase-only mode |
+| `SUPRCLAW_KEY_PASSPHRASE` | Yes (for `enc://`) | Passphrase used for key derivation |
+| `SUPRCLAW_SSH_KEY_PATH` | No | Path to SSH private key. Set to `""` to disable auto-detection and use passphrase-only mode |
 
 ### SSH Key Auto-Detection
 
-If `PICOCLAW_SSH_KEY_PATH` is not set, PicoClaw looks for the picoclaw-specific key:
+If `SUPRCLAW_SSH_KEY_PATH` is not set, SuprClaw looks for the suprclaw-specific key:
 
 ```
-~/.ssh/picoclaw_ed25519.key
+~/.ssh/suprclaw_ed25519.key
 ```
 
 This dedicated file avoids conflicts with the user's existing SSH keys.
-Run `picoclaw onboard` to generate it automatically.
+Run `suprclaw onboard` to generate it automatically.
 
 `os.UserHomeDir()` is used for cross-platform home directory resolution (reads `USERPROFILE` on Windows, `HOME` on Unix/macOS).
 
 To explicitly disable SSH key usage and use passphrase-only mode:
 
 ```bash
-export PICOCLAW_SSH_KEY_PATH=""
+export SUPRCLAW_SSH_KEY_PATH=""
 ```
 
 ---
 
 ## Migration
 
-Because the only secret material is `PICOCLAW_KEY_PASSPHRASE` and the SSH private key file, migration is straightforward:
+Because the only secret material is `SUPRCLAW_KEY_PASSPHRASE` and the SSH private key file, migration is straightforward:
 
 1. Copy the config file to the new machine.
-2. Set `PICOCLAW_KEY_PASSPHRASE` to the same value.
-3. Copy the SSH private key file to the same path (or set `PICOCLAW_SSH_KEY_PATH` to its new location).
+2. Set `SUPRCLAW_KEY_PASSPHRASE` to the same value.
+3. Copy the SSH private key file to the same path (or set `SUPRCLAW_SSH_KEY_PATH` to its new location).
 
 No re-encryption is needed.
 
@@ -162,7 +162,7 @@ No re-encryption is needed.
 
 ## Security Considerations
 
-- **Passphrase strength matters in passphrase-only mode.** Without an SSH key, a weak passphrase can be brute-forced offline. Use `PICOCLAW_SSH_KEY_PATH=""` only in environments where no SSH key is available and the passphrase is sufficiently strong (≥ 32 random characters).
-- **The SSH key is read-only at runtime.** PicoClaw never writes to or modifies the SSH key file.
+- **Passphrase strength matters in passphrase-only mode.** Without an SSH key, a weak passphrase can be brute-forced offline. Use `SUPRCLAW_SSH_KEY_PATH=""` only in environments where no SSH key is available and the passphrase is sufficiently strong (≥ 32 random characters).
+- **The SSH key is read-only at runtime.** SuprClaw never writes to or modifies the SSH key file.
 - **Plaintext keys remain supported.** Existing configs without `enc://` are unaffected.
-- **The `enc://` format is versioned** via the HKDF `info` field (`picoclaw-credential-v1`), allowing future algorithm upgrades without breaking existing encrypted values.
+- **The `enc://` format is versioned** via the HKDF `info` field (`suprclaw-credential-v1`), allowing future algorithm upgrades without breaking existing encrypted values.

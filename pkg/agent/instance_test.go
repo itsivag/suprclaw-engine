@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/media"
+	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/sipeed/suprclaw/pkg/media"
 )
 
 func TestNewAgentInstance_UsesDefaultsTemperatureAndMaxTokens(t *testing.T) {

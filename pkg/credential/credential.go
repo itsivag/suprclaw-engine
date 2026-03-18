@@ -8,7 +8,7 @@
 //
 //   - Plaintext:   "sk-abc123"          → returned as-is
 //   - File ref:    "file://filename.key" → content read from configDir/filename.key
-//   - Encrypted:   "enc://<base64>"     → AES-256-GCM decrypt via PICOCLAW_KEY_PASSPHRASE
+//   - Encrypted:   "enc://<base64>"     → AES-256-GCM decrypt via SUPRCLAW_KEY_PASSPHRASE
 //   - Empty:       ""                   → returned as-is (auth_method=oauth etc.)
 //
 // Encryption uses AES-256-GCM with HKDF-SHA256 key derivation (< 1ms, safe for embedded Linux).
@@ -20,8 +20,8 @@
 // SSH key path resolution priority:
 //
 //  1. sshKeyPath argument to Encrypt (explicit)
-//  2. PICOCLAW_SSH_KEY_PATH env var
-//  3. ~/.ssh/picoclaw_ed25519.key (os.UserHomeDir is cross-platform)
+//  2. SUPRCLAW_SSH_KEY_PATH env var
+//  3. ~/.ssh/suprclaw_ed25519.key (os.UserHomeDir is cross-platform)
 package credential
 
 import (
@@ -42,10 +42,10 @@ import (
 
 // PassphraseEnvVar is the environment variable that holds the encryption passphrase.
 // Other packages (e.g. config) reference this constant to avoid duplicating the string.
-const PassphraseEnvVar = "PICOCLAW_KEY_PASSPHRASE"
+const PassphraseEnvVar = "SUPRCLAW_KEY_PASSPHRASE"
 
 // PassphraseProvider is the function used to retrieve the passphrase for enc://
-// credential decryption. It defaults to reading PICOCLAW_KEY_PASSPHRASE from the
+// credential decryption. It defaults to reading SUPRCLAW_KEY_PASSPHRASE from the
 // process environment. Replace it at startup to use a different source, such as
 // an in-memory SecureStore, so that all LoadConfig() calls everywhere share the
 // same passphrase source without needing os.Environ.
@@ -69,11 +69,11 @@ var ErrDecryptionFailed = errors.New("credential: enc:// decryption failed (wron
 const (
 	fileScheme = "file://"
 	encScheme  = "enc://"
-	hkdfInfo   = "picoclaw-credential-v1"
+	hkdfInfo   = "suprclaw-credential-v1"
 	saltLen    = 16
 	nonceLen   = 12
 	keyLen     = 32
-	sshKeyEnv  = "PICOCLAW_SSH_KEY_PATH"
+	sshKeyEnv  = "SUPRCLAW_SSH_KEY_PATH"
 )
 
 // Resolver resolves raw credential strings for model_list api_key fields.
@@ -189,9 +189,9 @@ func resolveEncrypted(raw string) (string, error) {
 
 // Encrypt encrypts plaintext and returns an enc:// credential string.
 //
-// passphrase is required (PICOCLAW_KEY_PASSPHRASE value).
+// passphrase is required (SUPRCLAW_KEY_PASSPHRASE value).
 // sshKeyPath is the SSH private key file to use; pass "" to auto-detect via
-// PICOCLAW_SSH_KEY_PATH env var or ~/.ssh/picoclaw_ed25519.key.
+// SUPRCLAW_SSH_KEY_PATH env var or ~/.ssh/suprclaw_ed25519.key.
 // An SSH private key must be resolvable or Encrypt returns an error.
 func Encrypt(passphrase, sshKeyPath, plaintext string) (string, error) {
 	if passphrase == "" {
@@ -238,8 +238,8 @@ func isWithinDir(path, dir string) bool {
 }
 
 // allowedSSHKeyPath reports whether path is in a permitted location for SSH key files:
-//   - exact match with PICOCLAW_SSH_KEY_PATH env var
-//   - within the PICOCLAW_HOME env var directory
+//   - exact match with SUPRCLAW_SSH_KEY_PATH env var
+//   - within the SUPRCLAW_HOME env var directory
 //   - within ~/.ssh/
 func allowedSSHKeyPath(path string) bool {
 	if path == "" {
@@ -247,15 +247,15 @@ func allowedSSHKeyPath(path string) bool {
 	}
 	clean := filepath.Clean(path)
 
-	// Exact match with PICOCLAW_SSH_KEY_PATH.
+	// Exact match with SUPRCLAW_SSH_KEY_PATH.
 	if envPath, ok := os.LookupEnv(sshKeyEnv); ok && envPath != "" {
 		if clean == filepath.Clean(envPath) {
 			return true
 		}
 	}
 
-	// Within PICOCLAW_HOME.
-	if picoHome := os.Getenv("PICOCLAW_HOME"); picoHome != "" {
+	// Within SUPRCLAW_HOME.
+	if picoHome := os.Getenv("SUPRCLAW_HOME"); picoHome != "" {
 		if isWithinDir(clean, picoHome) {
 			return true
 		}
@@ -274,17 +274,17 @@ func allowedSSHKeyPath(path string) bool {
 // deriveKey derives a 32-byte AES-256 key from passphrase and SSH private key.
 //
 // ikm = HMAC-SHA256(key=SHA256(sshKeyBytes), msg=passphrase)
-// Final key: HKDF-SHA256(ikm, salt, info="picoclaw-credential-v1", 32 bytes)
+// Final key: HKDF-SHA256(ikm, salt, info="suprclaw-credential-v1", 32 bytes)
 // sshKeyPath must be non-empty; returns an error otherwise.
 func deriveKey(passphrase, sshKeyPath string, salt []byte) ([]byte, error) {
 	if sshKeyPath == "" {
 		return nil, fmt.Errorf(
 			"credential: SSH private key is required but not found" +
-				" (set PICOCLAW_SSH_KEY_PATH or place key at ~/.ssh/picoclaw_ed25519.key)")
+				" (set SUPRCLAW_SSH_KEY_PATH or place key at ~/.ssh/suprclaw_ed25519.key)")
 	}
 	if !allowedSSHKeyPath(sshKeyPath) {
 		return nil, fmt.Errorf(
-			"credential: SSH key path %q is not in an allowed location (PICOCLAW_SSH_KEY_PATH, PICOCLAW_HOME, or ~/.ssh/)",
+			"credential: SSH key path %q is not in an allowed location (SUPRCLAW_SSH_KEY_PATH, SUPRCLAW_HOME, or ~/.ssh/)",
 			sshKeyPath,
 		)
 	}
@@ -308,8 +308,8 @@ func deriveKey(passphrase, sshKeyPath string, salt []byte) ([]byte, error) {
 //
 // Priority:
 //  1. override (non-empty explicit argument)
-//  2. PICOCLAW_SSH_KEY_PATH env var
-//  3. ~/.ssh/picoclaw_ed25519.key (auto-detection)
+//  2. SUPRCLAW_SSH_KEY_PATH env var
+//  3. ~/.ssh/suprclaw_ed25519.key (auto-detection)
 //
 // Returns "" when no key is found; deriveKey will return an error in that case.
 func pickSSHKeyPath(override string) string {
@@ -322,7 +322,7 @@ func pickSSHKeyPath(override string) string {
 	return findDefaultSSHKey()
 }
 
-// findDefaultSSHKey returns the picoclaw-specific SSH key path if it exists.
+// findDefaultSSHKey returns the suprclaw-specific SSH key path if it exists.
 func findDefaultSSHKey() string {
 	p, err := DefaultSSHKeyPath()
 	if err != nil {

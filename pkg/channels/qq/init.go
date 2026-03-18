@@ -1,9 +1,9 @@
 package qq
 
 import (
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/suprclaw/pkg/bus"
+	"github.com/sipeed/suprclaw/pkg/channels"
+	"github.com/sipeed/suprclaw/pkg/config"
 )
 
 func init() {

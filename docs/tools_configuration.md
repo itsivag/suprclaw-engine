@@ -1,6 +1,6 @@
 # Tools Configuration
 
-PicoClaw's tools configuration is located in the `tools` field of `config.json`.
+SuprClaw's tools configuration is located in the `tools` field of `config.json`.
 
 ## Directory Structure
 
@@ -78,7 +78,7 @@ The exec tool is used to execute shell commands.
 
 ### Default Blocked Command Patterns
 
-By default, PicoClaw blocks the following dangerous commands:
+By default, SuprClaw blocks the following dangerous commands:
 
 - Delete commands: `rm -rf`, `del /f/q`, `rmdir /s`
 - Disk operations: `format`, `mkfs`, `diskpart`, `dd if=`, writing to `/dev/sd*`
@@ -95,7 +95,7 @@ By default, PicoClaw blocks the following dangerous commands:
 
 ### Known Architectural Limitation
 
-The exec guard only validates the top-level command sent to PicoClaw. It does **not** recursively inspect child
+The exec guard only validates the top-level command sent to SuprClaw. It does **not** recursively inspect child
 processes spawned by build tools or scripts after that command starts running.
 
 Examples of workflows that can bypass the direct command guard once the initial command is allowed:
@@ -329,14 +329,14 @@ The skills tool configures skill discovery and installation via registries like 
 
 ## Environment Variables
 
-All configuration options can be overridden via environment variables with the format `PICOCLAW_TOOLS_<SECTION>_<KEY>`:
+All configuration options can be overridden via environment variables with the format `SUPRCLAW_TOOLS_<SECTION>_<KEY>`:
 
 For example:
 
-- `PICOCLAW_TOOLS_WEB_BRAVE_ENABLED=true`
-- `PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS=false`
-- `PICOCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES=10`
-- `PICOCLAW_TOOLS_MCP_ENABLED=true`
+- `SUPRCLAW_TOOLS_WEB_BRAVE_ENABLED=true`
+- `SUPRCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS=false`
+- `SUPRCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES=10`
+- `SUPRCLAW_TOOLS_MCP_ENABLED=true`
 
 Note: Nested map-style config (for example `tools.mcp.servers.<name>.*`) is configured in `config.json` rather than
 environment variables.

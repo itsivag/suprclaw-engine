@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=SuprClaw Launcher
+Comment=Web-based configuration and management UI for SuprClaw
+Exec=suprclaw-launcher
+Icon=suprclaw-launcher
+Terminal=true
+Type=Application
+Categories=Utility;Network;
+Keywords=suprclaw;ai;agent;bot;

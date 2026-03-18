@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/memory"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/session"
+	"github.com/sipeed/suprclaw/pkg/memory"
+	"github.com/sipeed/suprclaw/pkg/providers"
+	"github.com/sipeed/suprclaw/pkg/session"
 )
 
 // Compile-time interface satisfaction checks.

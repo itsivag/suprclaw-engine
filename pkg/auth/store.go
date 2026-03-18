@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/fileutil"
+	"github.com/sipeed/suprclaw/pkg/fileutil"
 )
 
 type AuthCredential struct {
@@ -39,11 +39,11 @@ func (c *AuthCredential) NeedsRefresh() bool {
 }
 
 func authFilePath() string {
-	if home := os.Getenv("PICOCLAW_HOME"); home != "" {
+	if home := os.Getenv("SUPRCLAW_HOME"); home != "" {
 		return filepath.Join(home, "auth.json")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".picoclaw", "auth.json")
+	return filepath.Join(home, ".suprclaw", "auth.json")
 }
 
 func LoadStore() (*AuthStore, error) {

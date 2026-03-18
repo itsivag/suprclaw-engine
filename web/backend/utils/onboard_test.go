@@ -46,9 +46,9 @@ func TestEnsureOnboardedRunsOnboardWhenConfigMissing(t *testing.T) {
 		return exec.Command(
 			"sh",
 			"-c",
-			`test "$PICOCLAW_CONFIG" = "$EXPECTED_CONFIG_PATH" &&
-mkdir -p "$(dirname "$PICOCLAW_CONFIG")" &&
-printf '{}' > "$PICOCLAW_CONFIG"`,
+			`test "$SUPRCLAW_CONFIG" = "$EXPECTED_CONFIG_PATH" &&
+mkdir -p "$(dirname "$SUPRCLAW_CONFIG")" &&
+printf '{}' > "$SUPRCLAW_CONFIG"`,
 		)
 	}
 

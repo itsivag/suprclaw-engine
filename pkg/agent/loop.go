@@ -1,8 +1,8 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// SuprClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 SuprClaw contributors
 
 package agent
 
@@ -19,20 +19,20 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/commands"
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/constants"
-	"github.com/sipeed/picoclaw/pkg/logger"
-	"github.com/sipeed/picoclaw/pkg/media"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/routing"
-	"github.com/sipeed/picoclaw/pkg/skills"
-	"github.com/sipeed/picoclaw/pkg/state"
-	"github.com/sipeed/picoclaw/pkg/tools"
-	"github.com/sipeed/picoclaw/pkg/utils"
-	"github.com/sipeed/picoclaw/pkg/voice"
+	"github.com/sipeed/suprclaw/pkg/bus"
+	"github.com/sipeed/suprclaw/pkg/channels"
+	"github.com/sipeed/suprclaw/pkg/commands"
+	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/sipeed/suprclaw/pkg/constants"
+	"github.com/sipeed/suprclaw/pkg/logger"
+	"github.com/sipeed/suprclaw/pkg/media"
+	"github.com/sipeed/suprclaw/pkg/providers"
+	"github.com/sipeed/suprclaw/pkg/routing"
+	"github.com/sipeed/suprclaw/pkg/skills"
+	"github.com/sipeed/suprclaw/pkg/state"
+	"github.com/sipeed/suprclaw/pkg/tools"
+	"github.com/sipeed/suprclaw/pkg/utils"
+	"github.com/sipeed/suprclaw/pkg/voice"
 )
 
 type AgentLoop struct {

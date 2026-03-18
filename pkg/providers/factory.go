@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/auth"
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/suprclaw/pkg/auth"
+	"github.com/sipeed/suprclaw/pkg/config"
 )
 
 const defaultAnthropicAPIBase = "https://api.anthropic.com/v1"

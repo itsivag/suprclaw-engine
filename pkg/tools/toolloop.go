@@ -1,8 +1,8 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// SuprClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 SuprClaw contributors
 
 package tools
 
@@ -12,9 +12,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/sipeed/picoclaw/pkg/logger"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/utils"
+	"github.com/sipeed/suprclaw/pkg/logger"
+	"github.com/sipeed/suprclaw/pkg/providers"
+	"github.com/sipeed/suprclaw/pkg/utils"
 )
 
 // ToolLoopConfig configures the tool execution loop.

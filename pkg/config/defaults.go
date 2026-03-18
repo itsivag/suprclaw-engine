@@ -1,7 +1,7 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// SuprClaw - Ultra-lightweight personal AI agent
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 SuprClaw contributors
 
 package config
 
@@ -10,16 +10,16 @@ import (
 	"path/filepath"
 )
 
-// DefaultConfig returns the default configuration for PicoClaw.
+// DefaultConfig returns the default configuration for SuprClaw.
 func DefaultConfig() *Config {
 	// Determine the base path for the workspace.
-	// Priority: $PICOCLAW_HOME > ~/.picoclaw
+	// Priority: $SUPRCLAW_HOME > ~/.suprclaw
 	var homePath string
-	if picoclawHome := os.Getenv("PICOCLAW_HOME"); picoclawHome != "" {
-		homePath = picoclawHome
+	if suprclawHome := os.Getenv("SUPRCLAW_HOME"); suprclawHome != "" {
+		homePath = suprclawHome
 	} else {
 		userHome, _ := os.UserHomeDir()
-		homePath = filepath.Join(userHome, ".picoclaw")
+		homePath = filepath.Join(userHome, ".suprclaw")
 	}
 	workspacePath := filepath.Join(homePath, "workspace")
 

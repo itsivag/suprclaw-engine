@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 )
 
 // Language represents the supported languages
@@ -11,7 +10,6 @@ type Language string
 
 const (
 	LanguageEnglish Language = "en"
-	LanguageChinese Language = "zh"
 )
 
 // current language (default: English)
@@ -39,16 +37,13 @@ const (
 )
 
 // Translation tables
-// Chinese translations intentionally contain Han script
-//
-//nolint:gosmopolitan
 var translations = map[Language]map[TranslationKey]string{
 	LanguageEnglish: {
 		AppTooltip:         "%s - Web Console",
 		MenuOpen:           "Open Console",
-		MenuOpenTooltip:    "Open PicoClaw console in browser",
+		MenuOpenTooltip:    "Open SuprClaw console in browser",
 		MenuAbout:          "About",
-		MenuAboutTooltip:   "About PicoClaw",
+		MenuAboutTooltip:   "About SuprClaw",
 		MenuVersion:        "Version: %s",
 		MenuVersionTooltip: "Current version number",
 		MenuGitHub:         "GitHub",
@@ -56,44 +51,16 @@ var translations = map[Language]map[TranslationKey]string{
 		MenuRestart:        "Restart Service",
 		MenuRestartTooltip: "Restart Gateway service",
 		MenuQuit:           "Quit",
-		MenuQuitTooltip:    "Exit PicoClaw",
-		Exiting:            "Exiting PicoClaw...",
-		DocUrl:             "https://docs.picoclaw.io/docs/",
-	},
-	LanguageChinese: {
-		AppTooltip:         "%s - Web Console",
-		MenuOpen:           "打开控制台",
-		MenuOpenTooltip:    "在浏览器中打开 PicoClaw 控制台",
-		MenuAbout:          "关于",
-		MenuAboutTooltip:   "关于 PicoClaw",
-		MenuVersion:        "版本: %s",
-		MenuVersionTooltip: "当前版本号",
-		MenuGitHub:         "GitHub",
-		MenuDocs:           "文档",
-		MenuRestart:        "重启服务",
-		MenuRestartTooltip: "重启核心服务",
-		MenuQuit:           "退出",
-		MenuQuitTooltip:    "退出 PicoClaw",
-		Exiting:            "正在退出 PicoClaw...",
-		DocUrl:             "https://docs.picoclaw.io/zh-Hans/docs/",
+		MenuQuitTooltip:    "Exit SuprClaw",
+		Exiting:            "Exiting SuprClaw...",
+		DocUrl:             "https://docs.suprclaw.io/docs/",
 	},
 }
 
 // SetLanguage sets the current language
 func SetLanguage(lang string) {
-	lang = strings.ToLower(strings.TrimSpace(lang))
-
-	// Extract language code before first underscore or dot
-	// e.g., "en_US.UTF-8" -> "en", "zh_CN" -> "zh"
-	if idx := strings.IndexAny(lang, "_."); idx > 0 {
-		lang = lang[:idx]
-	}
-
-	if lang == "zh" || lang == "zh-cn" || lang == "chinese" {
-		currentLang = LanguageChinese
-	} else {
-		currentLang = LanguageEnglish
-	}
+	_ = lang
+	currentLang = LanguageEnglish
 }
 
 // GetLanguage returns the current language

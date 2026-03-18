@@ -1,7 +1,7 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// SuprClaw - Ultra-lightweight personal AI agent
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 SuprClaw contributors
 
 package config
 
@@ -216,7 +216,7 @@ func TestFullConfig_JSON_BackwardCompat(t *testing.T) {
 	oldFormat := `{
 		"agents": {
 			"defaults": {
-				"workspace": "~/.picoclaw/workspace",
+				"workspace": "~/.suprclaw/workspace",
 				"model": "gpt4",
 				"max_tokens": 4096
 			}
@@ -233,7 +233,7 @@ func TestFullConfig_JSON_BackwardCompat(t *testing.T) {
 	newFormat := `{
 		"agents": {
 			"defaults": {
-				"workspace": "~/.picoclaw/workspace",
+				"workspace": "~/.suprclaw/workspace",
 				"model_name": "gpt4",
 				"max_tokens": 4096
 			}

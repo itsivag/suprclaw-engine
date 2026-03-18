@@ -1,13 +1,13 @@
-// PicoClaw Web Console - Web-based chat and management interface
+// SuprClaw Web Console - Web-based chat and management interface
 //
-// Provides a web UI for chatting with PicoClaw via the Pico Channel WebSocket,
+// Provides a web UI for chatting with SuprClaw via the Pico Channel WebSocket,
 // with configuration management and gateway process control.
 //
 // Usage:
 //
-//	go build -o picoclaw-web ./web/backend/
-//	./picoclaw-web [config.json]
-//	./picoclaw-web -public config.json
+//	go build -o suprclaw-web ./web/backend/
+//	./suprclaw-web [config.json]
+//	./suprclaw-web -public config.json
 
 package main
 
@@ -22,15 +22,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/web/backend/api"
-	"github.com/sipeed/picoclaw/web/backend/launcherconfig"
-	"github.com/sipeed/picoclaw/web/backend/middleware"
-	"github.com/sipeed/picoclaw/web/backend/utils"
+	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/sipeed/suprclaw/web/backend/api"
+	"github.com/sipeed/suprclaw/web/backend/launcherconfig"
+	"github.com/sipeed/suprclaw/web/backend/middleware"
+	"github.com/sipeed/suprclaw/web/backend/utils"
 )
 
 const (
-	appName = "PicoClaw"
+	appName = "SuprClaw"
 )
 
 var (
@@ -47,13 +47,13 @@ func main() {
 	port := flag.String("port", "18800", "Port to listen on")
 	public := flag.Bool("public", false, "Listen on all interfaces (0.0.0.0) instead of localhost only")
 	noBrowser = flag.Bool("no-browser", false, "Do not auto-open browser on startup")
-	lang := flag.String("lang", "", "Language: en (English) or zh (Chinese). Default: auto-detect from system locale")
+	lang := flag.String("lang", "", "Language: en (English). Default: en")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "PicoClaw Launcher - A web-based configuration editor\n\n")
+		fmt.Fprintf(os.Stderr, "SuprClaw Launcher - A web-based configuration editor\n\n")
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] [config.json]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Arguments:\n")
-		fmt.Fprintf(os.Stderr, "  config.json    Path to the configuration file (default: ~/.picoclaw/config.json)\n\n")
+		fmt.Fprintf(os.Stderr, "  config.json    Path to the configuration file (default: ~/.suprclaw/config.json)\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
@@ -84,7 +84,7 @@ func main() {
 	}
 	err = utils.EnsureOnboarded(absPath)
 	if err != nil {
-		log.Printf("Warning: Failed to initialize PicoClaw config automatically: %v", err)
+		log.Printf("Warning: Failed to initialize SuprClaw config automatically: %v", err)
 	}
 
 	var explicitPort bool

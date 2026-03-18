@@ -1,5 +1,5 @@
 # ============================================================
-# Stage 1: Build the picoclaw binary
+# Stage 1: Build the suprclaw binary
 # ============================================================
 FROM golang:1.25-alpine AS builder
 
@@ -27,17 +27,17 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q --spider http://localhost:18790/health || exit 1
 
 # Copy binary
-COPY --from=builder /src/build/picoclaw /usr/local/bin/picoclaw
+COPY --from=builder /src/build/suprclaw /usr/local/bin/suprclaw
 
 # Create non-root user and group
-RUN addgroup -g 1000 picoclaw && \
-    adduser -D -u 1000 -G picoclaw picoclaw
+RUN addgroup -g 1000 suprclaw && \
+    adduser -D -u 1000 -G suprclaw suprclaw
 
 # Switch to non-root user
-USER picoclaw
+USER suprclaw
 
 # Run onboard to create initial directories and config
-RUN /usr/local/bin/picoclaw onboard
+RUN /usr/local/bin/suprclaw onboard
 
-ENTRYPOINT ["picoclaw"]
+ENTRYPOINT ["suprclaw"]
 CMD ["gateway"]
