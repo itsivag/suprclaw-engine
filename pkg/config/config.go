@@ -542,9 +542,11 @@ func (c *ModelConfig) Validate() error {
 }
 
 type GatewayConfig struct {
-	Host      string `json:"host"       env:"SUPRCLAW_GATEWAY_HOST"`
-	Port      int    `json:"port"       env:"SUPRCLAW_GATEWAY_PORT"`
-	HotReload bool   `json:"hot_reload" env:"SUPRCLAW_GATEWAY_HOT_RELOAD"`
+	Host                string `json:"host"                  env:"SUPRCLAW_GATEWAY_HOST"`
+	Port                int    `json:"port"                  env:"SUPRCLAW_GATEWAY_PORT"`
+	HotReload           bool   `json:"hot_reload"            env:"SUPRCLAW_GATEWAY_HOT_RELOAD"`
+	RemoteAdminControl  bool   `json:"remote_admin_control"  env:"SUPRCLAW_GATEWAY_REMOTE_ADMIN_CONTROL"`
+	AdminSecret         string `json:"admin_secret"          env:"SUPRCLAW_GATEWAY_ADMIN_SECRET"`
 }
 
 type ToolDiscoveryConfig struct {

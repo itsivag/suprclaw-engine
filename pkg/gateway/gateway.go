@@ -48,6 +48,7 @@ type services struct {
 	ChannelManager   *channels.Manager
 	DeviceService    *devices.Service
 	HealthServer     *health.Server
+	configPath       string
 }
 
 type startupBlockedProvider struct {
@@ -106,7 +107,7 @@ func Run(debug bool, configPath string, allowEmptyStartup bool) error {
 			"skills_available": skillsInfo["available"],
 		})
 
-	runningServices, err := setupAndStartServices(cfg, agentLoop, msgBus)
+	runningServices, err := setupAndStartServices(cfg, agentLoop, msgBus, configPath)
 	if err != nil {
 		return err
 	}
@@ -166,8 +167,9 @@ func setupAndStartServices(
 	cfg *config.Config,
 	agentLoop *agent.AgentLoop,
 	msgBus *bus.MessageBus,
+	configPath string,
 ) (*services, error) {
-	runningServices := &services{}
+	runningServices := &services{configPath: configPath}
 
 	execTimeout := time.Duration(cfg.Tools.Cron.ExecTimeoutMinutes) * time.Minute
 	var err error
@@ -222,6 +224,12 @@ func setupAndStartServices(
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
+
+	if cfg.Gateway.RemoteAdminControl {
+		adminH := newAdminHandler(configPath, runningServices.CronService, cfg.Gateway.AdminSecret)
+		adminH.registerRoutes(runningServices.ChannelManager.Mux())
+		fmt.Printf("✓ Admin API enabled at http://%s:%d/api/admin/*\n", cfg.Gateway.Host, cfg.Gateway.Port)
+	}
 
 	if err = runningServices.ChannelManager.StartAll(context.Background()); err != nil {
 		return nil, fmt.Errorf("error starting channels: %w", err)
@@ -412,6 +420,11 @@ func restartServices(
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
+
+	if cfg.Gateway.RemoteAdminControl {
+		adminH := newAdminHandler(runningServices.configPath, runningServices.CronService, cfg.Gateway.AdminSecret)
+		adminH.registerRoutes(runningServices.ChannelManager.Mux())
+	}
 
 	if err = runningServices.ChannelManager.StartAll(context.Background()); err != nil {
 		return fmt.Errorf("error restarting channels: %w", err)
