@@ -18,7 +18,7 @@ var channelCatalog = []channelCatalogItem{
 	{Name: "line", ConfigKey: "line"},
 	{Name: "whatsapp", ConfigKey: "whatsapp", Variant: "bridge"},
 	{Name: "whatsapp_native", ConfigKey: "whatsapp", Variant: "native"},
-	{Name: "pico", ConfigKey: "pico"},
+	{Name: "supr", ConfigKey: "supr"},
 	{Name: "matrix", ConfigKey: "matrix"},
 	{Name: "irc", ConfigKey: "irc"},
 }

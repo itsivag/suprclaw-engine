@@ -1,4 +1,4 @@
-package pico
+package supr
 
 import (
 	"github.com/itsivag/suprclaw/pkg/bus"
@@ -7,10 +7,10 @@ import (
 )
 
 func init() {
-	channels.RegisterFactory("pico", func(cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
+	channels.RegisterFactory("supr", func(cfg *config.Config, b *bus.MessageBus) (channels.Channel, error) {
 		agents := buildAgentSummaries(cfg)
 		defaultAgent := findDefaultAgent(cfg)
-		return NewPicoChannel(cfg.Channels.Pico, b, agents, defaultAgent)
+		return NewSuprChannel(cfg.Channels.Supr, b, agents, defaultAgent)
 	})
 }
 

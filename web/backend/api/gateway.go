@@ -351,10 +351,10 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 	// Clear old logs for this new run
 	gateway.logs.Reset()
 
-	// Ensure Pico Channel is configured before starting gateway
-	if _, err := h.ensurePicoChannel(""); err != nil {
-		log.Printf("Warning: failed to ensure pico channel: %v", err)
-		// Non-fatal: gateway can still start without pico channel
+	// Ensure Supr Channel is configured before starting gateway
+	if _, err := h.ensureSuprChannel(""); err != nil {
+		log.Printf("Warning: failed to ensure supr channel: %v", err)
+		// Non-fatal: gateway can still start without supr channel
 	}
 
 	if err := cmd.Start(); err != nil {

@@ -104,5 +104,5 @@ func (h *Handler) buildWsURL(r *http.Request, cfg *config.Config) string {
 	if wsPort == 0 {
 		wsPort = 18800 // default web server port
 	}
-	return requestWSScheme(r) + "://" + net.JoinHostPort(host, strconv.Itoa(wsPort)) + "/pico/ws"
+	return requestWSScheme(r) + "://" + net.JoinHostPort(host, strconv.Itoa(wsPort)) + "/supr/ws"
 }

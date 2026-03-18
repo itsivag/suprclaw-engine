@@ -13,16 +13,16 @@ import (
 	"github.com/itsivag/suprclaw/pkg/config"
 )
 
-func TestEnsurePicoChannel_FreshConfig(t *testing.T) {
+func TestEnsureSuprChannel_FreshConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	changed, err := h.ensurePicoChannel("")
+	changed, err := h.ensureSuprChannel("")
 	if err != nil {
-		t.Fatalf("ensurePicoChannel() error = %v", err)
+		t.Fatalf("ensureSuprChannel() error = %v", err)
 	}
 	if !changed {
-		t.Fatal("ensurePicoChannel() should report changed on a fresh config")
+		t.Fatal("ensureSuprChannel() should report changed on a fresh config")
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -30,20 +30,20 @@ func TestEnsurePicoChannel_FreshConfig(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if !cfg.Channels.Pico.Enabled {
-		t.Error("expected Pico to be enabled after setup")
+	if !cfg.Channels.Supr.Enabled {
+		t.Error("expected Supr to be enabled after setup")
 	}
-	if cfg.Channels.Pico.Token == "" {
+	if cfg.Channels.Supr.Token == "" {
 		t.Error("expected a non-empty token after setup")
 	}
 }
 
-func TestEnsurePicoChannel_DoesNotEnableTokenQuery(t *testing.T) {
+func TestEnsureSuprChannel_DoesNotEnableTokenQuery(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	if _, err := h.ensurePicoChannel(""); err != nil {
-		t.Fatalf("ensurePicoChannel() error = %v", err)
+	if _, err := h.ensureSuprChannel(""); err != nil {
+		t.Fatalf("ensureSuprChannel() error = %v", err)
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -51,17 +51,17 @@ func TestEnsurePicoChannel_DoesNotEnableTokenQuery(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if cfg.Channels.Pico.AllowTokenQuery {
+	if cfg.Channels.Supr.AllowTokenQuery {
 		t.Error("setup must not enable allow_token_query by default")
 	}
 }
 
-func TestEnsurePicoChannel_DoesNotSetWildcardOrigins(t *testing.T) {
+func TestEnsureSuprChannel_DoesNotSetWildcardOrigins(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	if _, err := h.ensurePicoChannel("http://localhost:18800"); err != nil {
-		t.Fatalf("ensurePicoChannel() error = %v", err)
+	if _, err := h.ensureSuprChannel("http://localhost:18800"); err != nil {
+		t.Fatalf("ensureSuprChannel() error = %v", err)
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -69,19 +69,19 @@ func TestEnsurePicoChannel_DoesNotSetWildcardOrigins(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	for _, origin := range cfg.Channels.Pico.AllowOrigins {
+	for _, origin := range cfg.Channels.Supr.AllowOrigins {
 		if origin == "*" {
 			t.Error("setup must not set wildcard origin '*'")
 		}
 	}
 }
 
-func TestEnsurePicoChannel_NoOriginWithoutCaller(t *testing.T) {
+func TestEnsureSuprChannel_NoOriginWithoutCaller(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	if _, err := h.ensurePicoChannel(""); err != nil {
-		t.Fatalf("ensurePicoChannel() error = %v", err)
+	if _, err := h.ensureSuprChannel(""); err != nil {
+		t.Fatalf("ensureSuprChannel() error = %v", err)
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -91,18 +91,18 @@ func TestEnsurePicoChannel_NoOriginWithoutCaller(t *testing.T) {
 
 	// Without a caller origin, allow_origins stays empty (CheckOrigin
 	// allows all when the list is empty, so the channel still works).
-	if len(cfg.Channels.Pico.AllowOrigins) != 0 {
-		t.Errorf("allow_origins = %v, want empty when no caller origin", cfg.Channels.Pico.AllowOrigins)
+	if len(cfg.Channels.Supr.AllowOrigins) != 0 {
+		t.Errorf("allow_origins = %v, want empty when no caller origin", cfg.Channels.Supr.AllowOrigins)
 	}
 }
 
-func TestEnsurePicoChannel_SetsCallerOrigin(t *testing.T) {
+func TestEnsureSuprChannel_SetsCallerOrigin(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
 	lanOrigin := "http://192.168.1.9:18800"
-	if _, err := h.ensurePicoChannel(lanOrigin); err != nil {
-		t.Fatalf("ensurePicoChannel() error = %v", err)
+	if _, err := h.ensureSuprChannel(lanOrigin); err != nil {
+		t.Fatalf("ensureSuprChannel() error = %v", err)
 	}
 
 	cfg, err := config.LoadConfig(configPath)
@@ -110,32 +110,32 @@ func TestEnsurePicoChannel_SetsCallerOrigin(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if len(cfg.Channels.Pico.AllowOrigins) != 1 || cfg.Channels.Pico.AllowOrigins[0] != lanOrigin {
-		t.Errorf("allow_origins = %v, want [%s]", cfg.Channels.Pico.AllowOrigins, lanOrigin)
+	if len(cfg.Channels.Supr.AllowOrigins) != 1 || cfg.Channels.Supr.AllowOrigins[0] != lanOrigin {
+		t.Errorf("allow_origins = %v, want [%s]", cfg.Channels.Supr.AllowOrigins, lanOrigin)
 	}
 }
 
-func TestEnsurePicoChannel_PreservesUserSettings(t *testing.T) {
+func TestEnsureSuprChannel_PreservesUserSettings(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 
 	// Pre-configure with custom user settings
 	cfg := config.DefaultConfig()
-	cfg.Channels.Pico.Enabled = true
-	cfg.Channels.Pico.Token = "user-custom-token"
-	cfg.Channels.Pico.AllowTokenQuery = true
-	cfg.Channels.Pico.AllowOrigins = []string{"https://myapp.example.com"}
+	cfg.Channels.Supr.Enabled = true
+	cfg.Channels.Supr.Token = "user-custom-token"
+	cfg.Channels.Supr.AllowTokenQuery = true
+	cfg.Channels.Supr.AllowOrigins = []string{"https://myapp.example.com"}
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
 	h := NewHandler(configPath)
 
-	changed, err := h.ensurePicoChannel("")
+	changed, err := h.ensureSuprChannel("")
 	if err != nil {
-		t.Fatalf("ensurePicoChannel() error = %v", err)
+		t.Fatalf("ensureSuprChannel() error = %v", err)
 	}
 	if changed {
-		t.Error("ensurePicoChannel() should not change a fully configured config")
+		t.Error("ensureSuprChannel() should not change a fully configured config")
 	}
 
 	cfg, err = config.LoadConfig(configPath)
@@ -143,55 +143,55 @@ func TestEnsurePicoChannel_PreservesUserSettings(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if cfg.Channels.Pico.Token != "user-custom-token" {
-		t.Errorf("token = %q, want %q", cfg.Channels.Pico.Token, "user-custom-token")
+	if cfg.Channels.Supr.Token != "user-custom-token" {
+		t.Errorf("token = %q, want %q", cfg.Channels.Supr.Token, "user-custom-token")
 	}
-	if !cfg.Channels.Pico.AllowTokenQuery {
+	if !cfg.Channels.Supr.AllowTokenQuery {
 		t.Error("user's allow_token_query=true must be preserved")
 	}
-	if len(cfg.Channels.Pico.AllowOrigins) != 1 || cfg.Channels.Pico.AllowOrigins[0] != "https://myapp.example.com" {
-		t.Errorf("allow_origins = %v, want [https://myapp.example.com]", cfg.Channels.Pico.AllowOrigins)
+	if len(cfg.Channels.Supr.AllowOrigins) != 1 || cfg.Channels.Supr.AllowOrigins[0] != "https://myapp.example.com" {
+		t.Errorf("allow_origins = %v, want [https://myapp.example.com]", cfg.Channels.Supr.AllowOrigins)
 	}
 }
 
-func TestEnsurePicoChannel_Idempotent(t *testing.T) {
+func TestEnsureSuprChannel_Idempotent(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
 	origin := "http://localhost:18800"
 
 	// First call sets things up
-	if _, err := h.ensurePicoChannel(origin); err != nil {
-		t.Fatalf("first ensurePicoChannel() error = %v", err)
+	if _, err := h.ensureSuprChannel(origin); err != nil {
+		t.Fatalf("first ensureSuprChannel() error = %v", err)
 	}
 
 	cfg1, _ := config.LoadConfig(configPath)
-	token1 := cfg1.Channels.Pico.Token
+	token1 := cfg1.Channels.Supr.Token
 
 	// Second call should be a no-op
-	changed, err := h.ensurePicoChannel(origin)
+	changed, err := h.ensureSuprChannel(origin)
 	if err != nil {
-		t.Fatalf("second ensurePicoChannel() error = %v", err)
+		t.Fatalf("second ensureSuprChannel() error = %v", err)
 	}
 	if changed {
-		t.Error("second ensurePicoChannel() should not report changed")
+		t.Error("second ensureSuprChannel() should not report changed")
 	}
 
 	cfg2, _ := config.LoadConfig(configPath)
-	if cfg2.Channels.Pico.Token != token1 {
+	if cfg2.Channels.Supr.Token != token1 {
 		t.Error("token should not change on subsequent calls")
 	}
 }
 
-func TestHandlePicoSetup_IncludesRequestOrigin(t *testing.T) {
+func TestHandleSuprSetup_IncludesRequestOrigin(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	req := httptest.NewRequest("POST", "/api/pico/setup", nil)
+	req := httptest.NewRequest("POST", "/api/supr/setup", nil)
 	req.Header.Set("Origin", "http://10.0.0.5:3000")
 	rec := httptest.NewRecorder()
 
-	h.handlePicoSetup(rec, req)
+	h.handleSuprSetup(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -202,19 +202,19 @@ func TestHandlePicoSetup_IncludesRequestOrigin(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if len(cfg.Channels.Pico.AllowOrigins) != 1 || cfg.Channels.Pico.AllowOrigins[0] != "http://10.0.0.5:3000" {
-		t.Errorf("allow_origins = %v, want [http://10.0.0.5:3000]", cfg.Channels.Pico.AllowOrigins)
+	if len(cfg.Channels.Supr.AllowOrigins) != 1 || cfg.Channels.Supr.AllowOrigins[0] != "http://10.0.0.5:3000" {
+		t.Errorf("allow_origins = %v, want [http://10.0.0.5:3000]", cfg.Channels.Supr.AllowOrigins)
 	}
 }
 
-func TestHandlePicoSetup_Response(t *testing.T) {
+func TestHandleSuprSetup_Response(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 
-	req := httptest.NewRequest("POST", "/api/pico/setup", nil)
+	req := httptest.NewRequest("POST", "/api/supr/setup", nil)
 	rec := httptest.NewRecorder()
 
-	h.handlePicoSetup(rec, req)
+	h.handleSuprSetup(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -245,8 +245,8 @@ func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 	handler := h.handleWebSocketProxy()
 
 	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/pico/ws" {
-			t.Fatalf("server1 path = %q, want %q", r.URL.Path, "/pico/ws")
+		if r.URL.Path != "/supr/ws" {
+			t.Fatalf("server1 path = %q, want %q", r.URL.Path, "/supr/ws")
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "server1")
@@ -254,8 +254,8 @@ func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 	defer server1.Close()
 
 	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/pico/ws" {
-			t.Fatalf("server2 path = %q, want %q", r.URL.Path, "/pico/ws")
+		if r.URL.Path != "/supr/ws" {
+			t.Fatalf("server2 path = %q, want %q", r.URL.Path, "/supr/ws")
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "server2")
@@ -269,7 +269,7 @@ func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
-	req1 := httptest.NewRequest(http.MethodGet, "/pico/ws", nil)
+	req1 := httptest.NewRequest(http.MethodGet, "/supr/ws", nil)
 	rec1 := httptest.NewRecorder()
 	handler(rec1, req1)
 
@@ -285,7 +285,7 @@ func TestHandleWebSocketProxyReloadsGatewayTargetFromConfig(t *testing.T) {
 		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/pico/ws", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/supr/ws", nil)
 	rec2 := httptest.NewRecorder()
 	handler(rec2, req2)
 

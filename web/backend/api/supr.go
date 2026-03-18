@@ -12,16 +12,16 @@ import (
 	"github.com/itsivag/suprclaw/pkg/config"
 )
 
-// registerPicoRoutes binds Pico Channel management endpoints to the ServeMux.
-func (h *Handler) registerPicoRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/pico/token", h.handleGetPicoToken)
-	mux.HandleFunc("POST /api/pico/token", h.handleRegenPicoToken)
-	mux.HandleFunc("POST /api/pico/setup", h.handlePicoSetup)
+// registerSuprRoutes binds Supr Channel management endpoints to the ServeMux.
+func (h *Handler) registerSuprRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/supr/token", h.handleGetSuprToken)
+	mux.HandleFunc("POST /api/supr/token", h.handleRegenSuprToken)
+	mux.HandleFunc("POST /api/supr/setup", h.handleSuprSetup)
 
-	// WebSocket proxy: forward /pico/ws to gateway
+	// WebSocket proxy: forward /supr/ws to gateway
 	// This allows the frontend to connect via the same port as the web UI,
 	// avoiding the need to expose extra ports for WebSocket communication.
-	mux.HandleFunc("GET /pico/ws", h.handleWebSocketProxy())
+	mux.HandleFunc("GET /supr/ws", h.handleWebSocketProxy())
 }
 
 // createWsProxy creates a reverse proxy to the current gateway WebSocket endpoint.
@@ -43,10 +43,10 @@ func (h *Handler) handleWebSocketProxy() http.HandlerFunc {
 	}
 }
 
-// handleGetPicoToken returns the current WS token and URL for the frontend.
+// handleGetSuprToken returns the current WS token and URL for the frontend.
 //
-//	GET /api/pico/token
-func (h *Handler) handleGetPicoToken(w http.ResponseWriter, r *http.Request) {
+//	GET /api/supr/token
+func (h *Handler) handleGetSuprToken(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
@@ -57,16 +57,16 @@ func (h *Handler) handleGetPicoToken(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"token":   cfg.Channels.Pico.Token,
+		"token":   cfg.Channels.Supr.Token,
 		"ws_url":  wsURL,
-		"enabled": cfg.Channels.Pico.Enabled,
+		"enabled": cfg.Channels.Supr.Enabled,
 	})
 }
 
-// handleRegenPicoToken generates a new Pico WebSocket token and saves it.
+// handleRegenSuprToken generates a new Supr WebSocket token and saves it.
 //
-//	POST /api/pico/token
-func (h *Handler) handleRegenPicoToken(w http.ResponseWriter, r *http.Request) {
+//	POST /api/supr/token
+func (h *Handler) handleRegenSuprToken(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
@@ -74,7 +74,7 @@ func (h *Handler) handleRegenPicoToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := generateSecureToken()
-	cfg.Channels.Pico.Token = token
+	cfg.Channels.Supr.Token = token
 
 	if err := config.SaveConfig(h.configPath, cfg); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
@@ -90,14 +90,14 @@ func (h *Handler) handleRegenPicoToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ensurePicoChannel enables the Pico channel with sane defaults if it isn't
+// ensureSuprChannel enables the Supr channel with sane defaults if it isn't
 // already configured. Returns true when the config was modified.
 //
 // callerOrigin is the Origin header from the setup request. If non-empty and
 // no origins are configured yet, it's written as the allowed origin so the
 // WebSocket handshake works for whatever host the caller is on (LAN, custom
 // port, etc.). Pass "" when there's no request context.
-func (h *Handler) ensurePicoChannel(callerOrigin string) (bool, error) {
+func (h *Handler) ensureSuprChannel(callerOrigin string) (bool, error) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to load config: %w", err)
@@ -105,19 +105,19 @@ func (h *Handler) ensurePicoChannel(callerOrigin string) (bool, error) {
 
 	changed := false
 
-	if !cfg.Channels.Pico.Enabled {
-		cfg.Channels.Pico.Enabled = true
+	if !cfg.Channels.Supr.Enabled {
+		cfg.Channels.Supr.Enabled = true
 		changed = true
 	}
 
-	if cfg.Channels.Pico.Token == "" {
-		cfg.Channels.Pico.Token = generateSecureToken()
+	if cfg.Channels.Supr.Token == "" {
+		cfg.Channels.Supr.Token = generateSecureToken()
 		changed = true
 	}
 
 	// Seed origins from the request instead of hardcoding ports.
-	if len(cfg.Channels.Pico.AllowOrigins) == 0 && callerOrigin != "" {
-		cfg.Channels.Pico.AllowOrigins = []string{callerOrigin}
+	if len(cfg.Channels.Supr.AllowOrigins) == 0 && callerOrigin != "" {
+		cfg.Channels.Supr.AllowOrigins = []string{callerOrigin}
 		changed = true
 	}
 
@@ -130,11 +130,11 @@ func (h *Handler) ensurePicoChannel(callerOrigin string) (bool, error) {
 	return changed, nil
 }
 
-// handlePicoSetup automatically configures everything needed for the Pico Channel to work.
+// handleSuprSetup automatically configures everything needed for the Supr Channel to work.
 //
-//	POST /api/pico/setup
-func (h *Handler) handlePicoSetup(w http.ResponseWriter, r *http.Request) {
-	changed, err := h.ensurePicoChannel(r.Header.Get("Origin"))
+//	POST /api/supr/setup
+func (h *Handler) handleSuprSetup(w http.ResponseWriter, r *http.Request) {
+	changed, err := h.ensureSuprChannel(r.Header.Get("Origin"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -150,7 +150,7 @@ func (h *Handler) handlePicoSetup(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"token":   cfg.Channels.Pico.Token,
+		"token":   cfg.Channels.Supr.Token,
 		"ws_url":  wsURL,
 		"enabled": true,
 		"changed": changed,
@@ -162,7 +162,7 @@ func generateSecureToken() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		// Fallback to something pseudo-random if crypto/rand fails
-		return fmt.Sprintf("pico_%x", time.Now().UnixNano())
+		return fmt.Sprintf("supr_%x", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
 }

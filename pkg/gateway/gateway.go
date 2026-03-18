@@ -17,7 +17,7 @@ import (
 	_ "github.com/itsivag/suprclaw/pkg/channels/irc"
 	_ "github.com/itsivag/suprclaw/pkg/channels/line"
 	_ "github.com/itsivag/suprclaw/pkg/channels/matrix"
-	_ "github.com/itsivag/suprclaw/pkg/channels/pico"
+	_ "github.com/itsivag/suprclaw/pkg/channels/supr"
 	_ "github.com/itsivag/suprclaw/pkg/channels/slack"
 	_ "github.com/itsivag/suprclaw/pkg/channels/telegram"
 	_ "github.com/itsivag/suprclaw/pkg/channels/whatsapp"

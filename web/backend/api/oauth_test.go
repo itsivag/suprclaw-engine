@@ -223,7 +223,7 @@ func setupOAuthTestEnv(t *testing.T) (string, func()) {
 
 	tmp := t.TempDir()
 	oldHome := os.Getenv("HOME")
-	oldPicoHome := os.Getenv("SUPRCLAW_HOME")
+	oldSuprHome := os.Getenv("SUPRCLAW_HOME")
 
 	if err := os.Setenv("HOME", tmp); err != nil {
 		t.Fatalf("set HOME: %v", err)
@@ -247,10 +247,10 @@ func setupOAuthTestEnv(t *testing.T) (string, func()) {
 
 	cleanup := func() {
 		_ = os.Setenv("HOME", oldHome)
-		if oldPicoHome == "" {
+		if oldSuprHome == "" {
 			_ = os.Unsetenv("SUPRCLAW_HOME")
 		} else {
-			_ = os.Setenv("SUPRCLAW_HOME", oldPicoHome)
+			_ = os.Setenv("SUPRCLAW_HOME", oldSuprHome)
 		}
 	}
 	return configPath, cleanup

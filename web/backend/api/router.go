@@ -42,8 +42,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Config CRUD
 	h.registerConfigRoutes(mux)
 
-	// Pico Channel (WebSocket chat)
-	h.registerPicoRoutes(mux)
+	// Supr Channel (WebSocket chat)
+	h.registerSuprRoutes(mux)
 
 	// Gateway process lifecycle
 	h.registerGatewayRoutes(mux)

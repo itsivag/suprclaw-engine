@@ -1,6 +1,6 @@
 // SuprClaw Web Console - Web-based chat and management interface
 //
-// Provides a web UI for chatting with SuprClaw via the Pico Channel WebSocket,
+// Provides a web UI for chatting with SuprClaw via the Supr Channel WebSocket,
 // with configuration management and gateway process control.
 //
 // Usage:

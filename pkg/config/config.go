@@ -289,7 +289,7 @@ type ChannelsConfig struct {
 	Slack    SlackConfig    `json:"slack"`
 	Matrix   MatrixConfig   `json:"matrix"`
 	LINE     LINEConfig     `json:"line"`
-	Pico     PicoConfig     `json:"pico"`
+	Supr     SuprConfig     `json:"supr"`
 	IRC      IRCConfig      `json:"irc"`
 }
 
@@ -382,16 +382,16 @@ type LINEConfig struct {
 	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"SUPRCLAW_CHANNELS_LINE_REASONING_CHANNEL_ID"`
 }
 
-type PicoConfig struct {
-	Enabled         bool                `json:"enabled"                     env:"SUPRCLAW_CHANNELS_PICO_ENABLED"`
-	Token           string              `json:"token"                       env:"SUPRCLAW_CHANNELS_PICO_TOKEN"`
+type SuprConfig struct {
+	Enabled         bool                `json:"enabled"                     env:"SUPRCLAW_CHANNELS_SUPR_ENABLED"`
+	Token           string              `json:"token"                       env:"SUPRCLAW_CHANNELS_SUPR_TOKEN"`
 	AllowTokenQuery bool                `json:"allow_token_query,omitempty"`
 	AllowOrigins    []string            `json:"allow_origins,omitempty"`
 	PingInterval    int                 `json:"ping_interval,omitempty"`
 	ReadTimeout     int                 `json:"read_timeout,omitempty"`
 	WriteTimeout    int                 `json:"write_timeout,omitempty"`
 	MaxConnections  int                 `json:"max_connections,omitempty"`
-	AllowFrom       FlexibleStringSlice `json:"allow_from"                  env:"SUPRCLAW_CHANNELS_PICO_ALLOW_FROM"`
+	AllowFrom       FlexibleStringSlice `json:"allow_from"                  env:"SUPRCLAW_CHANNELS_SUPR_ALLOW_FROM"`
 	Placeholder     PlaceholderConfig   `json:"placeholder,omitempty"`
 }
 

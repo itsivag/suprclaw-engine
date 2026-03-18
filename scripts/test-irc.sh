@@ -38,7 +38,7 @@ echo '  "irc": {'
 echo '    "enabled": true,'
 echo '    "server": "localhost:6667",'
 echo '    "tls": false,'
-echo '    "nick": "picobot",'
+echo '    "nick": "suprbot",'
 echo '    "channels": ["#test"],'
 echo '    "allow_from": [],'
 echo '    "group_trigger": { "mention_only": true }'
@@ -50,7 +50,7 @@ echo ""
 echo "Connect with an IRC client:"
 echo "  irssi:   /connect localhost $IRC_PORT"
 echo "  weechat: /server add test localhost/$IRC_PORT && /connect test"
-echo "  Join #test, then: picobot: hello"
+echo "  Join #test, then: suprbot: hello"
 echo ""
 echo "To stop the IRC server:"
 echo "  docker rm -f $CONTAINER_NAME"

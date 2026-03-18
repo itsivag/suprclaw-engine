@@ -231,41 +231,41 @@ func TestConvertToSuprClaw(t *testing.T) {
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	picoCfg, warnings, err := cfg.ConvertToSuprClaw("")
+	suprCfg, warnings, err := cfg.ConvertToSuprClaw("")
 	if err != nil {
 		t.Fatalf("failed to convert config: %v", err)
 	}
 
-	if picoCfg.Agents.Defaults.ModelName != "claude-sonnet-4-20250514" {
-		t.Errorf("expected model 'claude-sonnet-4-20250514', got '%s'", picoCfg.Agents.Defaults.ModelName)
+	if suprCfg.Agents.Defaults.ModelName != "claude-sonnet-4-20250514" {
+		t.Errorf("expected model 'claude-sonnet-4-20250514', got '%s'", suprCfg.Agents.Defaults.ModelName)
 	}
-	if picoCfg.Agents.Defaults.Workspace != "~/.suprclaw/workspace" {
-		t.Errorf("expected workspace '~/.suprclaw/workspace', got '%s'", picoCfg.Agents.Defaults.Workspace)
+	if suprCfg.Agents.Defaults.Workspace != "~/.suprclaw/workspace" {
+		t.Errorf("expected workspace '~/.suprclaw/workspace', got '%s'", suprCfg.Agents.Defaults.Workspace)
 	}
 
-	if len(picoCfg.Agents.List) != 2 {
-		t.Errorf("expected 2 agents, got %d", len(picoCfg.Agents.List))
+	if len(suprCfg.Agents.List) != 2 {
+		t.Errorf("expected 2 agents, got %d", len(suprCfg.Agents.List))
 	}
-	if picoCfg.Agents.List[0].ID != "main" {
-		t.Errorf("expected first agent id 'main', got '%s'", picoCfg.Agents.List[0].ID)
+	if suprCfg.Agents.List[0].ID != "main" {
+		t.Errorf("expected first agent id 'main', got '%s'", suprCfg.Agents.List[0].ID)
 	}
-	if picoCfg.Agents.List[1].Skills == nil || len(picoCfg.Agents.List[1].Skills) != 2 {
+	if suprCfg.Agents.List[1].Skills == nil || len(suprCfg.Agents.List[1].Skills) != 2 {
 		t.Errorf("expected 2 skills for assistant agent")
 	}
 
-	if !picoCfg.Channels.Telegram.Enabled {
+	if !suprCfg.Channels.Telegram.Enabled {
 		t.Error("telegram should be enabled")
 	}
-	if picoCfg.Channels.Telegram.Token != "test-token" {
-		t.Errorf("expected telegram token 'test-token', got '%s'", picoCfg.Channels.Telegram.Token)
+	if suprCfg.Channels.Telegram.Token != "test-token" {
+		t.Errorf("expected telegram token 'test-token', got '%s'", suprCfg.Channels.Telegram.Token)
 	}
 
-	if picoCfg.Channels.WhatsApp.BridgeURL != "http://localhost:3000" {
-		t.Errorf("expected whatsapp bridge URL 'http://localhost:3000', got '%s'", picoCfg.Channels.WhatsApp.BridgeURL)
+	if suprCfg.Channels.WhatsApp.BridgeURL != "http://localhost:3000" {
+		t.Errorf("expected whatsapp bridge URL 'http://localhost:3000', got '%s'", suprCfg.Channels.WhatsApp.BridgeURL)
 	}
 
-	if len(picoCfg.ModelList) != 1 {
-		t.Errorf("expected 1 model config (no models.json provided), got %d", len(picoCfg.ModelList))
+	if len(suprCfg.ModelList) != 1 {
+		t.Errorf("expected 1 model config (no models.json provided), got %d", len(suprCfg.ModelList))
 	}
 
 	foundWarning := false
@@ -325,19 +325,19 @@ func TestConvertToSuprClawWithSlack(t *testing.T) {
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	picoCfg, _, err := cfg.ConvertToSuprClaw("")
+	suprCfg, _, err := cfg.ConvertToSuprClaw("")
 	if err != nil {
 		t.Fatalf("failed to convert config: %v", err)
 	}
 
-	if !picoCfg.Channels.Slack.Enabled {
+	if !suprCfg.Channels.Slack.Enabled {
 		t.Error("slack should be enabled")
 	}
-	if picoCfg.Channels.Slack.BotToken != "xoxb-test" {
-		t.Errorf("expected slack bot token 'xoxb-test', got '%s'", picoCfg.Channels.Slack.BotToken)
+	if suprCfg.Channels.Slack.BotToken != "xoxb-test" {
+		t.Errorf("expected slack bot token 'xoxb-test', got '%s'", suprCfg.Channels.Slack.BotToken)
 	}
-	if picoCfg.Channels.Slack.AppToken != "xapp-test" {
-		t.Errorf("expected slack app token 'xapp-test', got '%s'", picoCfg.Channels.Slack.AppToken)
+	if suprCfg.Channels.Slack.AppToken != "xapp-test" {
+		t.Errorf("expected slack app token 'xapp-test', got '%s'", suprCfg.Channels.Slack.AppToken)
 	}
 }
 
@@ -367,26 +367,26 @@ func TestConvertToSuprClawWithMatrix(t *testing.T) {
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	picoCfg, warnings, err := cfg.ConvertToSuprClaw("")
+	suprCfg, warnings, err := cfg.ConvertToSuprClaw("")
 	if err != nil {
 		t.Fatalf("failed to convert config: %v", err)
 	}
 
-	if !picoCfg.Channels.Matrix.Enabled {
+	if !suprCfg.Channels.Matrix.Enabled {
 		t.Error("matrix should be enabled")
 	}
-	if picoCfg.Channels.Matrix.Homeserver != "https://matrix.example.com" {
-		t.Errorf("expected matrix homeserver, got %q", picoCfg.Channels.Matrix.Homeserver)
+	if suprCfg.Channels.Matrix.Homeserver != "https://matrix.example.com" {
+		t.Errorf("expected matrix homeserver, got %q", suprCfg.Channels.Matrix.Homeserver)
 	}
-	if picoCfg.Channels.Matrix.UserID != "@bot:matrix.example.com" {
-		t.Errorf("expected matrix user_id, got %q", picoCfg.Channels.Matrix.UserID)
+	if suprCfg.Channels.Matrix.UserID != "@bot:matrix.example.com" {
+		t.Errorf("expected matrix user_id, got %q", suprCfg.Channels.Matrix.UserID)
 	}
-	if picoCfg.Channels.Matrix.AccessToken != "syt_test_token" {
-		t.Errorf("expected matrix access_token, got %q", picoCfg.Channels.Matrix.AccessToken)
+	if suprCfg.Channels.Matrix.AccessToken != "syt_test_token" {
+		t.Errorf("expected matrix access_token, got %q", suprCfg.Channels.Matrix.AccessToken)
 	}
-	if len(picoCfg.Channels.Matrix.AllowFrom) != 1 ||
-		picoCfg.Channels.Matrix.AllowFrom[0] != "@alice:matrix.example.com" {
-		t.Errorf("unexpected matrix allow_from: %#v", picoCfg.Channels.Matrix.AllowFrom)
+	if len(suprCfg.Channels.Matrix.AllowFrom) != 1 ||
+		suprCfg.Channels.Matrix.AllowFrom[0] != "@alice:matrix.example.com" {
+		t.Errorf("unexpected matrix allow_from: %#v", suprCfg.Channels.Matrix.AllowFrom)
 	}
 
 	for _, w := range warnings {
@@ -421,12 +421,12 @@ func TestConvertToSuprClawWithMatrixDisabled(t *testing.T) {
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	picoCfg, _, err := cfg.ConvertToSuprClaw("")
+	suprCfg, _, err := cfg.ConvertToSuprClaw("")
 	if err != nil {
 		t.Fatalf("failed to convert config: %v", err)
 	}
 
-	if picoCfg.Channels.Matrix.Enabled {
+	if suprCfg.Channels.Matrix.Enabled {
 		t.Error("matrix should respect enabled=false from source config")
 	}
 }
@@ -585,7 +585,7 @@ func TestLoadOpenClawConfigFromDir(t *testing.T) {
 }
 
 func TestToStandardConfig(t *testing.T) {
-	picoCfg := &SuprClawConfig{
+	suprCfg := &SuprClawConfig{
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
 				Provider:  "anthropic",
@@ -624,7 +624,7 @@ func TestToStandardConfig(t *testing.T) {
 		},
 	}
 
-	stdCfg := picoCfg.ToStandardConfig()
+	stdCfg := suprCfg.ToStandardConfig()
 
 	if stdCfg.Agents.Defaults.Provider != "anthropic" {
 		t.Errorf("expected provider 'anthropic', got '%s'", stdCfg.Agents.Defaults.Provider)

@@ -1,4 +1,4 @@
-package pico
+package supr
 
 import (
 	"context"
@@ -26,8 +26,8 @@ type agentSummary struct {
 	Name string `json:"name"`
 }
 
-// picoConn represents a single WebSocket connection.
-type picoConn struct {
+// suprConn represents a single WebSocket connection.
+type suprConn struct {
 	id        string
 	conn      *websocket.Conn
 	sessionID string
@@ -36,7 +36,7 @@ type picoConn struct {
 }
 
 // writeJSON sends a JSON message to the connection with write locking.
-func (pc *picoConn) writeJSON(v any) error {
+func (pc *suprConn) writeJSON(v any) error {
 	if pc.closed.Load() {
 		return fmt.Errorf("connection closed")
 	}
@@ -46,19 +46,19 @@ func (pc *picoConn) writeJSON(v any) error {
 }
 
 // close closes the connection.
-func (pc *picoConn) close() {
+func (pc *suprConn) close() {
 	if pc.closed.CompareAndSwap(false, true) {
 		pc.conn.Close()
 	}
 }
 
-// PicoChannel implements the native Pico Protocol WebSocket channel.
+// SuprChannel implements the native Supr WebSocket WebSocket channel.
 // It serves as the reference implementation for all optional capability interfaces.
-type PicoChannel struct {
+type SuprChannel struct {
 	*channels.BaseChannel
-	config       config.PicoConfig
+	config       config.SuprConfig
 	upgrader     websocket.Upgrader
-	connections  sync.Map // connID → *picoConn
+	connections  sync.Map // connID → *suprConn
 	connCount    atomic.Int32
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -66,13 +66,13 @@ type PicoChannel struct {
 	defaultAgent string
 }
 
-// NewPicoChannel creates a new Pico Protocol channel.
-func NewPicoChannel(cfg config.PicoConfig, messageBus *bus.MessageBus, agents []agentSummary, defaultAgent string) (*PicoChannel, error) {
+// NewSuprChannel creates a new Supr WebSocket channel.
+func NewSuprChannel(cfg config.SuprConfig, messageBus *bus.MessageBus, agents []agentSummary, defaultAgent string) (*SuprChannel, error) {
 	if cfg.Token == "" {
-		return nil, fmt.Errorf("pico token is required")
+		return nil, fmt.Errorf("supr token is required")
 	}
 
-	base := channels.NewBaseChannel("pico", cfg, messageBus, cfg.AllowFrom)
+	base := channels.NewBaseChannel("supr", cfg, messageBus, cfg.AllowFrom)
 
 	allowOrigins := cfg.AllowOrigins
 	checkOrigin := func(r *http.Request) bool {
@@ -88,7 +88,7 @@ func NewPicoChannel(cfg config.PicoConfig, messageBus *bus.MessageBus, agents []
 		return false
 	}
 
-	return &PicoChannel{
+	return &SuprChannel{
 		BaseChannel:  base,
 		config:       cfg,
 		agents:       agents,
@@ -102,22 +102,22 @@ func NewPicoChannel(cfg config.PicoConfig, messageBus *bus.MessageBus, agents []
 }
 
 // Start implements Channel.
-func (c *PicoChannel) Start(ctx context.Context) error {
-	logger.InfoC("pico", "Starting Pico Protocol channel")
+func (c *SuprChannel) Start(ctx context.Context) error {
+	logger.InfoC("supr", "Starting Supr WebSocket channel")
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.SetRunning(true)
-	logger.InfoC("pico", "Pico Protocol channel started")
+	logger.InfoC("supr", "Supr WebSocket channel started")
 	return nil
 }
 
 // Stop implements Channel.
-func (c *PicoChannel) Stop(ctx context.Context) error {
-	logger.InfoC("pico", "Stopping Pico Protocol channel")
+func (c *SuprChannel) Stop(ctx context.Context) error {
+	logger.InfoC("supr", "Stopping Supr WebSocket channel")
 	c.SetRunning(false)
 
 	// Close all connections
 	c.connections.Range(func(key, value any) bool {
-		if pc, ok := value.(*picoConn); ok {
+		if pc, ok := value.(*suprConn); ok {
 			pc.close()
 		}
 		c.connections.Delete(key)
@@ -128,16 +128,16 @@ func (c *PicoChannel) Stop(ctx context.Context) error {
 		c.cancel()
 	}
 
-	logger.InfoC("pico", "Pico Protocol channel stopped")
+	logger.InfoC("supr", "Supr WebSocket channel stopped")
 	return nil
 }
 
 // WebhookPath implements channels.WebhookHandler.
-func (c *PicoChannel) WebhookPath() string { return "/pico/" }
+func (c *SuprChannel) WebhookPath() string { return "/supr/" }
 
 // ServeHTTP implements http.Handler for the shared HTTP server.
-func (c *PicoChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pico")
+func (c *SuprChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/supr")
 
 	switch {
 	case path == "/ws" || path == "/ws/":
@@ -148,7 +148,7 @@ func (c *PicoChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Send implements Channel — sends a message to the appropriate WebSocket connection.
-func (c *PicoChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if !c.IsRunning() {
 		return channels.ErrNotRunning
 	}
@@ -161,7 +161,7 @@ func (c *PicoChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 }
 
 // EditMessage implements channels.MessageEditor.
-func (c *PicoChannel) EditMessage(ctx context.Context, chatID string, messageID string, content string) error {
+func (c *SuprChannel) EditMessage(ctx context.Context, chatID string, messageID string, content string) error {
 	outMsg := newMessage(TypeMessageUpdate, map[string]any{
 		"message_id": messageID,
 		"content":    content,
@@ -170,7 +170,7 @@ func (c *PicoChannel) EditMessage(ctx context.Context, chatID string, messageID 
 }
 
 // StartTyping implements channels.TypingCapable.
-func (c *PicoChannel) StartTyping(ctx context.Context, chatID string) (func(), error) {
+func (c *SuprChannel) StartTyping(ctx context.Context, chatID string) (func(), error) {
 	startMsg := newMessage(TypeTypingStart, nil)
 	if err := c.broadcastToSession(chatID, startMsg); err != nil {
 		return func() {}, err
@@ -182,9 +182,9 @@ func (c *PicoChannel) StartTyping(ctx context.Context, chatID string) (func(), e
 }
 
 // SendPlaceholder implements channels.PlaceholderCapable.
-// It sends a placeholder message via the Pico Protocol that will later be
+// It sends a placeholder message via the Supr WebSocket that will later be
 // edited to the actual response via EditMessage (channels.MessageEditor).
-func (c *PicoChannel) SendPlaceholder(ctx context.Context, chatID string) (string, error) {
+func (c *SuprChannel) SendPlaceholder(ctx context.Context, chatID string) (string, error) {
 	if !c.config.Placeholder.Enabled {
 		return "", nil
 	}
@@ -210,26 +210,26 @@ func (c *PicoChannel) SendPlaceholder(ctx context.Context, chatID string) (strin
 // BroadcastStatus implements channels.StatusBroadcaster.
 // It sends a typing.status WebSocket event to all connected clients for the session,
 // giving the browser instant feedback about the current agent operation.
-func (c *PicoChannel) BroadcastStatus(ctx context.Context, chatID, text string) error {
+func (c *SuprChannel) BroadcastStatus(ctx context.Context, chatID, text string) error {
 	msg := newMessage(TypeTypingStatus, map[string]any{"text": text})
 	return c.broadcastToSession(chatID, msg)
 }
 
 // broadcastToSession sends a message to all connections with a matching session.
-func (c *PicoChannel) broadcastToSession(chatID string, msg PicoMessage) error {
-	// chatID format: "pico:<sessionID>"
-	sessionID := strings.TrimPrefix(chatID, "pico:")
+func (c *SuprChannel) broadcastToSession(chatID string, msg SuprMessage) error {
+	// chatID format: "supr:<sessionID>"
+	sessionID := strings.TrimPrefix(chatID, "supr:")
 	msg.SessionID = sessionID
 
 	var sent bool
 	c.connections.Range(func(key, value any) bool {
-		pc, ok := value.(*picoConn)
+		pc, ok := value.(*suprConn)
 		if !ok {
 			return true
 		}
 		if pc.sessionID == sessionID {
 			if err := pc.writeJSON(msg); err != nil {
-				logger.DebugCF("pico", "Write to connection failed", map[string]any{
+				logger.DebugCF("supr", "Write to connection failed", map[string]any{
 					"conn_id": pc.id,
 					"error":   err.Error(),
 				})
@@ -247,7 +247,7 @@ func (c *PicoChannel) broadcastToSession(chatID string, msg PicoMessage) error {
 }
 
 // handleWebSocket upgrades the HTTP connection and manages the WebSocket lifecycle.
-func (c *PicoChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+func (c *SuprChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if !c.IsRunning() {
 		http.Error(w, "channel not running", http.StatusServiceUnavailable)
 		return
@@ -277,7 +277,7 @@ func (c *PicoChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := c.upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
-		logger.ErrorCF("pico", "WebSocket upgrade failed", map[string]any{
+		logger.ErrorCF("supr", "WebSocket upgrade failed", map[string]any{
 			"error": err.Error(),
 		})
 		return
@@ -289,7 +289,7 @@ func (c *PicoChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		sessionID = uuid.New().String()
 	}
 
-	pc := &picoConn{
+	pc := &suprConn{
 		id:        uuid.New().String(),
 		conn:      conn,
 		sessionID: sessionID,
@@ -298,7 +298,7 @@ func (c *PicoChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	c.connections.Store(pc.id, pc)
 	c.connCount.Add(1)
 
-	logger.InfoCF("pico", "WebSocket client connected", map[string]any{
+	logger.InfoCF("supr", "WebSocket client connected", map[string]any{
 		"conn_id":    pc.id,
 		"session_id": sessionID,
 	})
@@ -317,7 +317,7 @@ func (c *PicoChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 //  1. Authorization: Bearer <token> header
 //  2. Sec-WebSocket-Protocol "token.<value>" (for browsers that can't set headers)
 //  3. Query parameter "token" (only when AllowTokenQuery is on)
-func (c *PicoChannel) authenticate(r *http.Request) bool {
+func (c *SuprChannel) authenticate(r *http.Request) bool {
 	token := c.config.Token
 	if token == "" {
 		return false
@@ -348,7 +348,7 @@ func (c *PicoChannel) authenticate(r *http.Request) bool {
 
 // matchedSubprotocol returns the "token.<value>" subprotocol that matches
 // the configured token, or "" if none do.
-func (c *PicoChannel) matchedSubprotocol(r *http.Request) string {
+func (c *SuprChannel) matchedSubprotocol(r *http.Request) string {
 	token := c.config.Token
 	for _, proto := range websocket.Subprotocols(r) {
 		if after, ok := strings.CutPrefix(proto, "token."); ok && after == token {
@@ -359,12 +359,12 @@ func (c *PicoChannel) matchedSubprotocol(r *http.Request) string {
 }
 
 // readLoop reads messages from a WebSocket connection.
-func (c *PicoChannel) readLoop(pc *picoConn) {
+func (c *SuprChannel) readLoop(pc *suprConn) {
 	defer func() {
 		pc.close()
 		c.connections.Delete(pc.id)
 		c.connCount.Add(-1)
-		logger.InfoCF("pico", "WebSocket client disconnected", map[string]any{
+		logger.InfoCF("supr", "WebSocket client disconnected", map[string]any{
 			"conn_id":    pc.id,
 			"session_id": pc.sessionID,
 		})
@@ -398,7 +398,7 @@ func (c *PicoChannel) readLoop(pc *picoConn) {
 		_, rawMsg, err := pc.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				logger.DebugCF("pico", "WebSocket read error", map[string]any{
+				logger.DebugCF("supr", "WebSocket read error", map[string]any{
 					"conn_id": pc.id,
 					"error":   err.Error(),
 				})
@@ -408,7 +408,7 @@ func (c *PicoChannel) readLoop(pc *picoConn) {
 
 		_ = pc.conn.SetReadDeadline(time.Now().Add(readTimeout))
 
-		var msg PicoMessage
+		var msg SuprMessage
 		if err := json.Unmarshal(rawMsg, &msg); err != nil {
 			errMsg := newError("invalid_message", "failed to parse message")
 			pc.writeJSON(errMsg)
@@ -420,7 +420,7 @@ func (c *PicoChannel) readLoop(pc *picoConn) {
 }
 
 // pingLoop sends periodic ping frames to keep the connection alive.
-func (c *PicoChannel) pingLoop(pc *picoConn, interval time.Duration) {
+func (c *SuprChannel) pingLoop(pc *suprConn, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -442,8 +442,8 @@ func (c *PicoChannel) pingLoop(pc *picoConn, interval time.Duration) {
 	}
 }
 
-// handleMessage processes an inbound Pico Protocol message.
-func (c *PicoChannel) handleMessage(pc *picoConn, msg PicoMessage) {
+// handleMessage processes an inbound Supr WebSocket message.
+func (c *SuprChannel) handleMessage(pc *suprConn, msg SuprMessage) {
 	switch msg.Type {
 	case TypePing:
 		pong := newMessage(TypePong, nil)
@@ -460,7 +460,7 @@ func (c *PicoChannel) handleMessage(pc *picoConn, msg PicoMessage) {
 }
 
 // handleMessageSend processes an inbound message.send from a client.
-func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
+func (c *SuprChannel) handleMessageSend(pc *suprConn, msg SuprMessage) {
 	content, _ := msg.Payload["content"].(string)
 	if strings.TrimSpace(content) == "" {
 		errMsg := newError("empty_content", "message content is empty")
@@ -473,13 +473,13 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 		sessionID = pc.sessionID
 	}
 
-	chatID := "pico:" + sessionID
-	senderID := "pico-user"
+	chatID := "supr:" + sessionID
+	senderID := "supr-user"
 
-	peer := bus.Peer{Kind: "direct", ID: "pico:" + sessionID}
+	peer := bus.Peer{Kind: "direct", ID: "supr:" + sessionID}
 
 	metadata := map[string]string{
-		"platform":   "pico",
+		"platform":   "supr",
 		"session_id": sessionID,
 		"conn_id":    pc.id,
 	}
@@ -488,15 +488,15 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 		metadata["requested_agent_id"] = agentID
 	}
 
-	logger.DebugCF("pico", "Received message", map[string]any{
+	logger.DebugCF("supr", "Received message", map[string]any{
 		"session_id": sessionID,
 		"preview":    truncate(content, 50),
 	})
 
 	sender := bus.SenderInfo{
-		Platform:    "pico",
+		Platform:    "supr",
 		PlatformID:  senderID,
-		CanonicalID: identity.BuildCanonicalID("pico", senderID),
+		CanonicalID: identity.BuildCanonicalID("supr", senderID),
 	}
 
 	if !c.IsAllowedSender(sender) {

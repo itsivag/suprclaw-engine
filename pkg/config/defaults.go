@@ -98,7 +98,7 @@ func DefaultConfig() *Config {
 				AllowFrom:          FlexibleStringSlice{},
 				GroupTrigger:       GroupTriggerConfig{MentionOnly: true},
 			},
-			Pico: PicoConfig{
+			Supr: SuprConfig{
 				Enabled:        false,
 				Token:          "",
 				PingInterval:   30,

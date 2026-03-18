@@ -255,8 +255,8 @@ func allowedSSHKeyPath(path string) bool {
 	}
 
 	// Within SUPRCLAW_HOME.
-	if picoHome := os.Getenv("SUPRCLAW_HOME"); picoHome != "" {
-		if isWithinDir(clean, picoHome) {
+	if suprHome := os.Getenv("SUPRCLAW_HOME"); suprHome != "" {
+		if isWithinDir(clean, suprHome) {
 			return true
 		}
 	}

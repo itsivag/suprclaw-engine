@@ -266,8 +266,8 @@ func (m *Manager) initChannels() error {
 		m.initChannel("line", "LINE")
 	}
 
-	if m.config.Channels.Pico.Enabled && m.config.Channels.Pico.Token != "" {
-		m.initChannel("pico", "Pico")
+	if m.config.Channels.Supr.Enabled && m.config.Channels.Supr.Token != "" {
+		m.initChannel("supr", "Supr")
 	}
 
 	if m.config.Channels.IRC.Enabled && m.config.Channels.IRC.Server != "" {
@@ -652,7 +652,7 @@ func (m *Manager) handleStatusUpdate(ctx context.Context, channelName string, ms
 		return
 	}
 
-	// Primary: WebSocket push (e.g. Pico)
+	// Primary: WebSocket push (e.g. Supr)
 	if sb, ok := ch.(StatusBroadcaster); ok {
 		if err := sb.BroadcastStatus(ctx, msg.ChatID, msg.Text); err != nil {
 			logger.DebugCF("channels", "BroadcastStatus failed", map[string]any{
