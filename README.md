@@ -1,6 +1,4 @@
 <div align="center">
-  <img src="assets/logo.webp" alt="SuprClaw" width="512">
-
   <h1>SuprClaw: Ultra-Efficient AI Assistant in Go</h1>
 
   <h3>$10 Hardware · 10MB RAM · 1s Boot</h3>
@@ -17,7 +15,6 @@
 <a href="https://discord.gg/V4sAZ9XWpN"><img src="https://img.shields.io/badge/Discord-Community-4c60eb?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
 
-[日本語](README.ja.md) | [Português](README.pt-br.md) | [Tiếng Việt](README.vi.md) | [Français](README.fr.md) | **English**
 
 </div>
 
@@ -29,20 +26,6 @@
 
 ⚡️ Runs on $10 hardware with <10MB RAM: That's 99% less memory than OpenClaw and 98% cheaper than a Mac mini!
 
-<table align="center">
-  <tr align="center">
-    <td align="center" valign="top">
-      <p align="center">
-        <img src="assets/suprclaw_mem.gif" width="360" height="240">
-      </p>
-    </td>
-    <td align="center" valign="top">
-      <p align="center">
-        <img src="assets/licheervnano.png" width="400" height="240">
-      </p>
-    </td>
-  </tr>
-</table>
 
 > [!CAUTION]
 > **🚨 SECURITY & OFFICIAL CHANNELS / 安全声明**
@@ -82,29 +65,13 @@
 | **Startup**</br>(0.8GHz core) | >500s         | >30s                     | **<1s**                                   |
 | **Cost**                      | Mac Mini 599$ | Most Linux SBC </br>~50$ | **Any Linux Board**</br>**As low as 10$** |
 
-<img src="assets/compare.jpg" alt="SuprClaw" width="512">
-
 ## 🦾 Demonstration
 
 ### 🛠️ Standard Assistant Workflows
 
-<table align="center">
-  <tr align="center">
-    <th><p align="center">🧩 Full-Stack Engineer</p></th>
-    <th><p align="center">🗂️ Logging & Planning Management</p></th>
-    <th><p align="center">🔎 Web Search & Learning</p></th>
-  </tr>
-  <tr>
-    <td align="center"><p align="center"><img src="assets/suprclaw_code.gif" width="240" height="180"></p></td>
-    <td align="center"><p align="center"><img src="assets/suprclaw_memory.gif" width="240" height="180"></p></td>
-    <td align="center"><p align="center"><img src="assets/suprclaw_search.gif" width="240" height="180"></p></td>
-  </tr>
-  <tr>
-    <td align="center">Develop • Deploy • Scale</td>
-    <td align="center">Schedule • Automate • Memory</td>
-    <td align="center">Discovery • Insights • Trends</td>
-  </tr>
-</table>
+- 🧩 **Full-Stack Engineer** — Develop • Deploy • Scale
+- 🗂️ **Logging & Planning Management** — Schedule • Automate • Memory
+- 🔎 **Web Search & Learning** — Discovery • Insights • Trends
 
 ### 📱 Run on old Android Phones
 
@@ -122,7 +89,6 @@ termux-chroot ./suprclaw-linux-arm64 onboard
 ```
 
 And then follow the instructions in the "Quick Start" section to complete the configuration!
-<img src="assets/termux.jpg" alt="SuprClaw" width="512">
 
 ### 🐜 Innovative Low-Footprint Deploy
 
@@ -746,7 +712,7 @@ suprclaw gateway
 
 </details>
 
-## <img src="assets/clawdchat-icon.png" width="24" height="24" alt="ClawdChat"> Join the Agent Social Network
+## 🌐 Join the Agent Social Network
 
 Connect Suprclaw to the Agent Social Network simply by sending a single message via the CLI or any integrated Chat App.
 
@@ -1446,8 +1412,6 @@ User Groups:
 
 discord: <https://discord.gg/V4sAZ9XWpN>
 
-<img src="assets/wechat.png" alt="SuprClaw" width="512">
-
 ## 🐛 Troubleshooting
 
 ### Web search says "API key configuration issue"
@@ -1573,7 +1537,3 @@ This happens when another instance of the bot is running. Make sure only one `su
 | **ModelScope**   | 2000 requests/day        | Free inference (Qwen, GLM, DeepSeek, etc.) |
 
 ---
-
-<div align="center">
-  <img src="assets/logo.jpg" alt="SuprClaw Meme" width="512">
-</div>
