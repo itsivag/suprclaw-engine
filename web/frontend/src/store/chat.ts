@@ -18,6 +18,11 @@ export type ConnectionState =
   | "connected"
   | "error"
 
+export interface AgentInfo {
+  id: string
+  name: string
+}
+
 export interface ChatStoreState {
   messages: ChatMessage[]
   connectionState: ConnectionState
@@ -25,6 +30,8 @@ export interface ChatStoreState {
   typingStatus: string
   activeSessionId: string
   hasHydratedActiveSession: boolean
+  agents: AgentInfo[]
+  activeAgentId: string
 }
 
 type ChatStorePatch = Partial<ChatStoreState>
@@ -36,6 +43,8 @@ const DEFAULT_CHAT_STATE: ChatStoreState = {
   typingStatus: "",
   activeSessionId: getInitialActiveSessionId(),
   hasHydratedActiveSession: false,
+  agents: [],
+  activeAgentId: "",
 }
 
 export const chatAtom = atom<ChatStoreState>(DEFAULT_CHAT_STATE)

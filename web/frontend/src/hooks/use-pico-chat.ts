@@ -4,6 +4,7 @@ import { useAtomValue } from "jotai"
 import {
   newChatSession,
   sendChatMessage,
+  setActiveAgent,
   switchChatSession,
 } from "@/features/chat/controller"
 import { chatAtom } from "@/store/chat"
@@ -55,7 +56,7 @@ export function formatMessageTime(dateRaw: number | string | Date): string {
 }
 
 export function usePicoChat() {
-  const { messages, connectionState, isTyping, typingStatus, activeSessionId } =
+  const { messages, connectionState, isTyping, typingStatus, activeSessionId, agents, activeAgentId } =
     useAtomValue(chatAtom)
 
   return {
@@ -64,8 +65,11 @@ export function usePicoChat() {
     isTyping,
     typingStatus,
     activeSessionId,
+    agents,
+    activeAgentId,
     sendMessage: sendChatMessage,
     switchSession: switchChatSession,
     newChat: newChatSession,
+    setActiveAgent,
   }
 }

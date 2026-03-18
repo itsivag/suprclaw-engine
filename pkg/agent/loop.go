@@ -68,13 +68,14 @@ type processOptions struct {
 }
 
 const (
-	defaultResponse           = "I've completed processing but have no response to give. Increase `max_tool_iterations` in config.json."
-	sessionKeyAgentPrefix     = "agent:"
-	metadataKeyAccountID      = "account_id"
-	metadataKeyGuildID        = "guild_id"
-	metadataKeyTeamID         = "team_id"
-	metadataKeyParentPeerKind = "parent_peer_kind"
-	metadataKeyParentPeerID   = "parent_peer_id"
+	defaultResponse              = "I've completed processing but have no response to give. Increase `max_tool_iterations` in config.json."
+	sessionKeyAgentPrefix        = "agent:"
+	metadataKeyAccountID         = "account_id"
+	metadataKeyGuildID           = "guild_id"
+	metadataKeyTeamID            = "team_id"
+	metadataKeyParentPeerKind    = "parent_peer_kind"
+	metadataKeyParentPeerID      = "parent_peer_id"
+	metadataKeyRequestedAgentID  = "requested_agent_id"
 )
 
 func NewAgentLoop(
@@ -746,6 +747,26 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 
 func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.ResolvedRoute, *AgentInstance, error) {
 	registry := al.GetRegistry()
+
+	// Short-circuit: if the client explicitly requested a specific agent, use it directly.
+	if requestedID := inboundMetadata(msg, metadataKeyRequestedAgentID); requestedID != "" {
+		if agent, ok := registry.GetAgent(requestedID); ok {
+			sessionKey := strings.ToLower(routing.BuildAgentPeerSessionKey(routing.SessionKeyParams{
+				AgentID: agent.ID,
+				Channel: msg.Channel,
+				Peer:    extractPeer(msg),
+				DMScope: routing.DMScope(al.cfg.Session.DMScope),
+			}))
+			return routing.ResolvedRoute{
+				AgentID:    agent.ID,
+				Channel:    msg.Channel,
+				SessionKey: sessionKey,
+				MatchedBy:  "explicit",
+			}, agent, nil
+		}
+		// Unknown agent_id — fall through to normal config-based routing.
+	}
+
 	route := registry.ResolveRoute(routing.RouteInput{
 		Channel:    msg.Channel,
 		AccountID:  inboundMetadata(msg, metadataKeyAccountID),

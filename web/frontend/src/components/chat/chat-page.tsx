@@ -2,6 +2,7 @@ import { IconPlus } from "@tabler/icons-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { AgentSelector } from "@/components/chat/agent-selector"
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import { ChatComposer } from "@/components/chat/chat-composer"
 import { ChatEmptyState } from "@/components/chat/chat-empty-state"
@@ -29,9 +30,12 @@ export function ChatPage() {
     isTyping,
     typingStatus,
     activeSessionId,
+    agents,
+    activeAgentId,
     sendMessage,
     switchSession,
     newChat,
+    setActiveAgent,
   } = usePicoChat()
 
   const { state: gwState } = useGateway()
@@ -95,15 +99,24 @@ export function ChatPage() {
           hasScrolled ? "shadow-sm" : "shadow-none"
         }`}
         titleExtra={
-          hasConfiguredModels && (
-            <ModelSelector
-              defaultModelName={defaultModelName}
-              apiKeyModels={apiKeyModels}
-              oauthModels={oauthModels}
-              localModels={localModels}
-              onValueChange={handleSetDefault}
-            />
-          )
+          <>
+            {agents.length > 1 && (
+              <AgentSelector
+                agents={agents}
+                activeAgentId={activeAgentId}
+                onSelect={setActiveAgent}
+              />
+            )}
+            {hasConfiguredModels && (
+              <ModelSelector
+                defaultModelName={defaultModelName}
+                apiKeyModels={apiKeyModels}
+                oauthModels={oauthModels}
+                localModels={localModels}
+                onValueChange={handleSetDefault}
+              />
+            )}
+          </>
         }
       >
         <Button

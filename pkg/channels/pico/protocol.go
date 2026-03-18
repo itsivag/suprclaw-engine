@@ -18,6 +18,7 @@ const (
 	TypeTypingStatus  = "typing.status"
 	TypeError         = "error"
 	TypePong          = "pong"
+	TypeAgentList     = "agent.list"
 )
 
 // PicoMessage is the wire format for all Pico Protocol messages.

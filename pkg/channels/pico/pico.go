@@ -20,6 +20,12 @@ import (
 	"github.com/itsivag/suprclaw/pkg/logger"
 )
 
+// agentSummary is a compact agent descriptor sent to clients on connect.
+type agentSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // picoConn represents a single WebSocket connection.
 type picoConn struct {
 	id        string
@@ -50,16 +56,18 @@ func (pc *picoConn) close() {
 // It serves as the reference implementation for all optional capability interfaces.
 type PicoChannel struct {
 	*channels.BaseChannel
-	config      config.PicoConfig
-	upgrader    websocket.Upgrader
-	connections sync.Map // connID → *picoConn
-	connCount   atomic.Int32
-	ctx         context.Context
-	cancel      context.CancelFunc
+	config       config.PicoConfig
+	upgrader     websocket.Upgrader
+	connections  sync.Map // connID → *picoConn
+	connCount    atomic.Int32
+	ctx          context.Context
+	cancel       context.CancelFunc
+	agents       []agentSummary
+	defaultAgent string
 }
 
 // NewPicoChannel creates a new Pico Protocol channel.
-func NewPicoChannel(cfg config.PicoConfig, messageBus *bus.MessageBus) (*PicoChannel, error) {
+func NewPicoChannel(cfg config.PicoConfig, messageBus *bus.MessageBus, agents []agentSummary, defaultAgent string) (*PicoChannel, error) {
 	if cfg.Token == "" {
 		return nil, fmt.Errorf("pico token is required")
 	}
@@ -81,8 +89,10 @@ func NewPicoChannel(cfg config.PicoConfig, messageBus *bus.MessageBus) (*PicoCha
 	}
 
 	return &PicoChannel{
-		BaseChannel: base,
-		config:      cfg,
+		BaseChannel:  base,
+		config:       cfg,
+		agents:       agents,
+		defaultAgent: defaultAgent,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:     checkOrigin,
 			ReadBufferSize:  1024,
@@ -293,6 +303,13 @@ func (c *PicoChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		"session_id": sessionID,
 	})
 
+	// Send agent list to every client immediately after connect.
+	listMsg := newMessage(TypeAgentList, map[string]any{
+		"agents":  c.agents,
+		"default": c.defaultAgent,
+	})
+	pc.writeJSON(listMsg)
+
 	go c.readLoop(pc)
 }
 
@@ -465,6 +482,10 @@ func (c *PicoChannel) handleMessageSend(pc *picoConn, msg PicoMessage) {
 		"platform":   "pico",
 		"session_id": sessionID,
 		"conn_id":    pc.id,
+	}
+
+	if agentID, _ := msg.Payload["agent_id"].(string); agentID != "" {
+		metadata["requested_agent_id"] = agentID
 	}
 
 	logger.DebugCF("pico", "Received message", map[string]any{

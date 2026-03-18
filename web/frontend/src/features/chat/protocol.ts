@@ -1,5 +1,5 @@
 import { normalizeUnixTimestamp } from "@/features/chat/state"
-import { updateChatStore } from "@/store/chat"
+import { type AgentInfo, updateChatStore } from "@/store/chat"
 
 export interface PicoMessage {
   type: string
@@ -81,6 +81,16 @@ export function handlePicoMessage(
 
     case "pong":
       break
+
+    case "agent.list": {
+      const agents = (payload.agents as AgentInfo[]) || []
+      const defaultAgent = (payload.default as string) || ""
+      updateChatStore((prev) => ({
+        agents,
+        activeAgentId: prev.activeAgentId || defaultAgent,
+      }))
+      break
+    }
 
     default:
       console.log("Unknown pico message type:", message.type)

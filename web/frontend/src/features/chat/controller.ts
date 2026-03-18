@@ -27,6 +27,7 @@ let wsRef: WebSocket | null = null
 let isConnecting = false
 let msgIdCounter = 0
 let activeSessionIdRef = getChatState().activeSessionId
+let activeAgentIdRef = ""
 let initialized = false
 let unsubscribeGateway: (() => void) | null = null
 let hydratePromise: Promise<void> | null = null
@@ -81,6 +82,11 @@ function needsActiveSessionHydration(): boolean {
 function setActiveSessionId(sessionId: string) {
   activeSessionIdRef = sessionId
   updateChatStore({ activeSessionId: sessionId })
+}
+
+export function setActiveAgent(agentId: string) {
+  activeAgentIdRef = agentId
+  updateChatStore({ activeAgentId: agentId })
 }
 
 function disconnectChatInternal({
@@ -342,11 +348,13 @@ export function sendChatMessage(content: string) {
   }))
 
   try {
+    const payload: Record<string, unknown> = { content }
+    if (activeAgentIdRef) payload.agent_id = activeAgentIdRef
     socket.send(
       JSON.stringify({
         type: "message.send",
         id,
-        payload: { content },
+        payload,
       }),
     )
     return true
@@ -393,10 +401,12 @@ export async function newChatSession() {
 
   disconnectChatInternal({ clearDesiredConnection: false })
   setActiveSessionId(generateSessionId())
+  activeAgentIdRef = ""
   updateChatStore({
     messages: [],
     isTyping: false,
     hasHydratedActiveSession: true,
+    activeAgentId: "",
   })
 
   if (store.get(gatewayAtom).status === "running") {
