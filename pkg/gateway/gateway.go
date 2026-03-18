@@ -18,7 +18,6 @@ import (
 	_ "github.com/sipeed/suprclaw/pkg/channels/feishu"
 	_ "github.com/sipeed/suprclaw/pkg/channels/irc"
 	_ "github.com/sipeed/suprclaw/pkg/channels/line"
-	_ "github.com/sipeed/suprclaw/pkg/channels/maixcam"
 	_ "github.com/sipeed/suprclaw/pkg/channels/matrix"
 	_ "github.com/sipeed/suprclaw/pkg/channels/onebot"
 	_ "github.com/sipeed/suprclaw/pkg/channels/pico"

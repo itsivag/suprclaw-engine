@@ -31,12 +31,6 @@ func (s *appState) buildChannelMenuItems() []MenuItem {
 			func() { s.push("channel-qq", s.qqForm()) },
 		),
 		channelItem(
-			"MaixCam",
-			"MaixCam gateway",
-			s.config.Channels.MaixCam.Enabled,
-			func() { s.push("channel-maixcam", s.maixcamForm()) },
-		),
-		channelItem(
 			"WhatsApp",
 			"WhatsApp bridge",
 			s.config.Channels.WhatsApp.Enabled,
@@ -144,17 +138,6 @@ func (s *appState) qqForm() tview.Primitive {
 	form.AddInputField("App Secret", cfg.AppSecret, 128, nil, func(text string) {
 		cfg.AppSecret = strings.TrimSpace(text)
 	})
-	addAllowFromField(form, &cfg.AllowFrom)
-	return wrapWithBack(form, s)
-}
-
-func (s *appState) maixcamForm() tview.Primitive {
-	cfg := &s.config.Channels.MaixCam
-	form := baseChannelForm("MaixCam", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
-	form.AddInputField("Host", cfg.Host, 64, nil, func(text string) {
-		cfg.Host = strings.TrimSpace(text)
-	})
-	addIntField(form, "Port", cfg.Port, func(value int) { cfg.Port = value })
 	addAllowFromField(form, &cfg.AllowFrom)
 	return wrapWithBack(form, s)
 }
