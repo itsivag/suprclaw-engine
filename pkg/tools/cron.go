@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/bus"
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/pkg/constants"
-	"github.com/sipeed/suprclaw/pkg/cron"
-	"github.com/sipeed/suprclaw/pkg/utils"
+	"github.com/itsivag/suprclaw/pkg/bus"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/constants"
+	"github.com/itsivag/suprclaw/pkg/cron"
+	"github.com/itsivag/suprclaw/pkg/utils"
 )
 
 // JobExecutor is the interface for executing cron jobs through the agent

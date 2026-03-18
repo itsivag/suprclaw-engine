@@ -41,7 +41,7 @@ func TestParseGitHubRef(t *testing.T) {
 		},
 		{
 			name:         "full URL with tree",
-			repo:         "https://github.com/sipeed/suprclaw/tree/dev/skills/test",
+			repo:         "https://github.com/itsivag/suprclaw/tree/dev/skills/test",
 			wantOwner:    "sipeed",
 			wantRepoName: "suprclaw",
 			wantRef:      "dev",
@@ -49,7 +49,7 @@ func TestParseGitHubRef(t *testing.T) {
 		},
 		{
 			name:         "full URL with blob",
-			repo:         "https://github.com/sipeed/suprclaw/blob/main/README.md",
+			repo:         "https://github.com/itsivag/suprclaw/blob/main/README.md",
 			wantOwner:    "sipeed",
 			wantRepoName: "suprclaw",
 			wantRef:      "main",
@@ -57,7 +57,7 @@ func TestParseGitHubRef(t *testing.T) {
 		},
 		{
 			name:         "full URL without ref",
-			repo:         "https://github.com/sipeed/suprclaw",
+			repo:         "https://github.com/itsivag/suprclaw",
 			wantOwner:    "sipeed",
 			wantRepoName: "suprclaw",
 			wantRef:      "main",

@@ -22,11 +22,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/web/backend/api"
-	"github.com/sipeed/suprclaw/web/backend/launcherconfig"
-	"github.com/sipeed/suprclaw/web/backend/middleware"
-	"github.com/sipeed/suprclaw/web/backend/utils"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/web/backend/api"
+	"github.com/itsivag/suprclaw/web/backend/launcherconfig"
+	"github.com/itsivag/suprclaw/web/backend/middleware"
+	"github.com/itsivag/suprclaw/web/backend/utils"
 )
 
 const (

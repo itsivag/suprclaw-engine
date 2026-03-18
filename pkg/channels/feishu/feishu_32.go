@@ -6,9 +6,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/sipeed/suprclaw/pkg/bus"
-	"github.com/sipeed/suprclaw/pkg/channels"
-	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/bus"
+	"github.com/itsivag/suprclaw/pkg/channels"
+	"github.com/itsivag/suprclaw/pkg/config"
 )
 
 // FeishuChannel is a stub implementation for 32-bit architectures

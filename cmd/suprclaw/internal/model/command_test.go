@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/config"
 )
 
 var configPath = ""

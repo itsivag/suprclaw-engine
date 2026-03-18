@@ -7,7 +7,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	suprclawconfig "github.com/sipeed/suprclaw/pkg/config"
+	suprclawconfig "github.com/itsivag/suprclaw/pkg/config"
 )
 
 func (s *appState) buildChannelMenuItems() []MenuItem {

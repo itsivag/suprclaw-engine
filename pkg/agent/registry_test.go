@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/providers"
 )
 
 type mockRegistryProvider struct{}

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/sipeed/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/providers"
 )
 
 // lookbackWindow is the number of recent history entries scanned for tool calls.

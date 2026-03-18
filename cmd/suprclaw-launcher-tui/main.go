@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sipeed/suprclaw/cmd/suprclaw-launcher-tui/internal/ui"
+	"github.com/itsivag/suprclaw/cmd/suprclaw-launcher-tui/internal/ui"
 )
 
 func main() {

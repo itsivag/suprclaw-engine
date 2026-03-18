@@ -5,7 +5,7 @@ package sources
 import (
 	"context"
 
-	"github.com/sipeed/suprclaw/pkg/devices/events"
+	"github.com/itsivag/suprclaw/pkg/devices/events"
 )
 
 type USBMonitor struct{}

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"regexp"
 
-	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/config"
 )
 
 // registerConfigRoutes binds configuration management endpoints to the ServeMux.

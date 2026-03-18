@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/logger"
-	"github.com/sipeed/suprclaw/web/backend/utils"
+	"github.com/itsivag/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/web/backend/utils"
 )
 
 const (

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/fileutil"
-	"github.com/sipeed/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/fileutil"
+	"github.com/itsivag/suprclaw/pkg/logger"
 )
 
 const MaxReadFileSize = 64 * 1024 // 64KB limit to avoid context overflow

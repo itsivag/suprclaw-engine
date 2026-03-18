@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/providers"
 )
 
 // jsonSession mirrors pkg/session.Session for migration purposes.

@@ -5,9 +5,9 @@ package whatsapp
 import (
 	"fmt"
 
-	"github.com/sipeed/suprclaw/pkg/bus"
-	"github.com/sipeed/suprclaw/pkg/channels"
-	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/bus"
+	"github.com/itsivag/suprclaw/pkg/channels"
+	"github.com/itsivag/suprclaw/pkg/config"
 )
 
 // NewWhatsAppNativeChannel returns an error when the binary was not built with -tags whatsapp_native.

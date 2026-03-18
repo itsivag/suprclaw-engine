@@ -1,7 +1,7 @@
 package routing
 
 import (
-	"github.com/sipeed/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/providers"
 )
 
 // defaultThreshold is used when the config threshold is zero or negative.

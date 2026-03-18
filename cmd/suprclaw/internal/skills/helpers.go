@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/suprclaw/cmd/suprclaw/internal"
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/pkg/skills"
-	"github.com/sipeed/suprclaw/pkg/utils"
+	"github.com/itsivag/suprclaw/cmd/suprclaw/internal"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/skills"
+	"github.com/itsivag/suprclaw/pkg/utils"
 )
 
 const skillsSearchMaxResults = 20

@@ -3,11 +3,11 @@ package agent
 import (
 	"sync"
 
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/pkg/logger"
-	"github.com/sipeed/suprclaw/pkg/providers"
-	"github.com/sipeed/suprclaw/pkg/routing"
-	"github.com/sipeed/suprclaw/pkg/tools"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/routing"
+	"github.com/itsivag/suprclaw/pkg/tools"
 )
 
 // AgentRegistry manages multiple agent instances and routes messages to them.

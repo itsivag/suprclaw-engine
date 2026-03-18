@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sipeed/suprclaw/cmd/suprclaw/internal"
-	"github.com/sipeed/suprclaw/pkg/auth"
-	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/cmd/suprclaw/internal"
+	"github.com/itsivag/suprclaw/pkg/auth"
+	"github.com/itsivag/suprclaw/pkg/config"
 )
 
 func statusCmd() {

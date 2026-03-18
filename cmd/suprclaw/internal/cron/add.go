@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sipeed/suprclaw/pkg/cron"
+	"github.com/itsivag/suprclaw/pkg/cron"
 )
 
 func newAddCommand(storePath func() string) *cobra.Command {

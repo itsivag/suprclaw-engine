@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	anthropicprovider "github.com/sipeed/suprclaw/pkg/providers/anthropic"
+	anthropicprovider "github.com/itsivag/suprclaw/pkg/providers/anthropic"
 )
 
 type ClaudeProvider struct {

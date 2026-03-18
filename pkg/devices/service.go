@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/bus"
-	"github.com/sipeed/suprclaw/pkg/constants"
-	"github.com/sipeed/suprclaw/pkg/devices/events"
-	"github.com/sipeed/suprclaw/pkg/devices/sources"
-	"github.com/sipeed/suprclaw/pkg/logger"
-	"github.com/sipeed/suprclaw/pkg/state"
+	"github.com/itsivag/suprclaw/pkg/bus"
+	"github.com/itsivag/suprclaw/pkg/constants"
+	"github.com/itsivag/suprclaw/pkg/devices/events"
+	"github.com/itsivag/suprclaw/pkg/devices/sources"
+	"github.com/itsivag/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/state"
 )
 
 type Service struct {

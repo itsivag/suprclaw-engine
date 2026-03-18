@@ -10,8 +10,8 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	configstore "github.com/sipeed/suprclaw/cmd/suprclaw-launcher-tui/internal/config"
-	suprclawconfig "github.com/sipeed/suprclaw/pkg/config"
+	configstore "github.com/itsivag/suprclaw/cmd/suprclaw-launcher-tui/internal/config"
+	suprclawconfig "github.com/itsivag/suprclaw/pkg/config"
 )
 
 type appState struct {

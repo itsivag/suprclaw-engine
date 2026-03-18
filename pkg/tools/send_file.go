@@ -11,8 +11,8 @@ import (
 
 	"github.com/h2non/filetype"
 
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/pkg/media"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/media"
 )
 
 // SendFileTool allows the LLM to send a local file (image, document, etc.)

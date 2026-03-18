@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/utils"
+	"github.com/itsivag/suprclaw/pkg/utils"
 )
 
 const (

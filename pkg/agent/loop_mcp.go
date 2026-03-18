@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/sipeed/suprclaw/pkg/logger"
-	"github.com/sipeed/suprclaw/pkg/mcp"
-	"github.com/sipeed/suprclaw/pkg/tools"
+	"github.com/itsivag/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/mcp"
+	"github.com/itsivag/suprclaw/pkg/tools"
 )
 
 type mcpRuntime struct {

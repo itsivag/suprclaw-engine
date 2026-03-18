@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sipeed/suprclaw/cmd/suprclaw/internal"
-	"github.com/sipeed/suprclaw/pkg/skills"
+	"github.com/itsivag/suprclaw/cmd/suprclaw/internal"
+	"github.com/itsivag/suprclaw/pkg/skills"
 )
 
 func newInstallCommand(installerFn func() (*skills.SkillInstaller, error)) *cobra.Command {

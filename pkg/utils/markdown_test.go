@@ -3,7 +3,7 @@ package utils
 import (
 	"testing"
 
-	"github.com/sipeed/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/logger"
 )
 
 func TestHtmlToMarkdown(t *testing.T) {

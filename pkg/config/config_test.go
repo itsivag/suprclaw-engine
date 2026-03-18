@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/suprclaw/pkg/credential"
+	"github.com/itsivag/suprclaw/pkg/credential"
 )
 
 // mustSetupSSHKey generates a temporary Ed25519 SSH key in t.TempDir() and sets

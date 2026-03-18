@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/bus"
-	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/bus"
+	"github.com/itsivag/suprclaw/pkg/config"
 )
 
 // generateTestAESKeyApp generates a valid test AES key for WeCom App

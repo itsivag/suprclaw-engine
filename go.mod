@@ -1,4 +1,4 @@
-module github.com/sipeed/suprclaw
+module github.com/itsivag/suprclaw
 
 go 1.25.7
 

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	suprclawconfig "github.com/sipeed/suprclaw/pkg/config"
+	suprclawconfig "github.com/itsivag/suprclaw/pkg/config"
 )
 
 const (

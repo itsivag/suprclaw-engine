@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/auth"
-	"github.com/sipeed/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/auth"
+	"github.com/itsivag/suprclaw/pkg/logger"
 )
 
 const (

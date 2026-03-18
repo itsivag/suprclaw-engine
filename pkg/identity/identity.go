@@ -6,7 +6,7 @@ package identity
 import (
 	"strings"
 
-	"github.com/sipeed/suprclaw/pkg/bus"
+	"github.com/itsivag/suprclaw/pkg/bus"
 )
 
 // BuildCanonicalID constructs a canonical "platform:id" identifier.

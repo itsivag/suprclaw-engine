@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/fileutil"
+	"github.com/itsivag/suprclaw/pkg/fileutil"
 )
 
 // MemoryStore manages persistent memory for the agent.

@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sipeed/suprclaw/pkg/config"
-	anthropicmessages "github.com/sipeed/suprclaw/pkg/providers/anthropic_messages"
-	"github.com/sipeed/suprclaw/pkg/providers/azure"
+	"github.com/itsivag/suprclaw/pkg/config"
+	anthropicmessages "github.com/itsivag/suprclaw/pkg/providers/anthropic_messages"
+	"github.com/itsivag/suprclaw/pkg/providers/azure"
 )
 
 // createClaudeAuthProvider creates a Claude provider using OAuth credentials from auth store.

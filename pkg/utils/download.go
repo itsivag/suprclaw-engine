@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/sipeed/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/logger"
 )
 
 // DownloadToFile streams an HTTP response body to a temporary file in small

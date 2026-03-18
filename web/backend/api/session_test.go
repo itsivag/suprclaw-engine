@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/pkg/memory"
-	"github.com/sipeed/suprclaw/pkg/providers"
-	"github.com/sipeed/suprclaw/pkg/session"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/memory"
+	"github.com/itsivag/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/session"
 )
 
 func sessionsTestDir(t *testing.T, configPath string) string {

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sipeed/suprclaw/pkg/memory"
-	"github.com/sipeed/suprclaw/pkg/providers"
-	"github.com/sipeed/suprclaw/pkg/session"
+	"github.com/itsivag/suprclaw/pkg/memory"
+	"github.com/itsivag/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/session"
 )
 
 // Compile-time interface satisfaction checks.

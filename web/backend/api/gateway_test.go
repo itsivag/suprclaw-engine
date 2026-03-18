@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/auth"
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/web/backend/utils"
+	"github.com/itsivag/suprclaw/pkg/auth"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/web/backend/utils"
 )
 
 func startLongRunningProcess(t *testing.T) *exec.Cmd {

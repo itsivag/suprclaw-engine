@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/pkg/logger"
-	"github.com/sipeed/suprclaw/pkg/providers"
-	"github.com/sipeed/suprclaw/pkg/skills"
-	"github.com/sipeed/suprclaw/pkg/utils"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/skills"
+	"github.com/itsivag/suprclaw/pkg/utils"
 )
 
 type ContextBuilder struct {

@@ -3,8 +3,8 @@ package channels
 import (
 	"sync"
 
-	"github.com/sipeed/suprclaw/pkg/bus"
-	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/bus"
+	"github.com/itsivag/suprclaw/pkg/config"
 )
 
 // ChannelFactory is a constructor function that creates a Channel from config and message bus.

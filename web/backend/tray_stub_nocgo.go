@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/logger"
 )
 
 func runTray() {

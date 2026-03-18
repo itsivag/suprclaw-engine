@@ -3,7 +3,7 @@ package channels
 import (
 	"context"
 
-	"github.com/sipeed/suprclaw/pkg/bus"
+	"github.com/itsivag/suprclaw/pkg/bus"
 )
 
 // MediaSender is an optional interface for channels that can send

@@ -8,8 +8,8 @@ import (
 
 	"fyne.io/systray"
 
-	"github.com/sipeed/suprclaw/pkg/logger"
-	"github.com/sipeed/suprclaw/web/backend/utils"
+	"github.com/itsivag/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/web/backend/utils"
 )
 
 func runTray() {
@@ -55,7 +55,7 @@ func onReady() {
 				// Version info - do nothing, just shows current version
 
 			case <-mRepo.ClickedCh:
-				if err := utils.OpenBrowser("https://github.com/sipeed/suprclaw"); err != nil {
+				if err := utils.OpenBrowser("https://github.com/itsivag/suprclaw"); err != nil {
 					logger.Errorf("Failed to open GitHub: %v", err)
 				}
 

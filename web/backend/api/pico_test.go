@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/sipeed/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/config"
 )
 
 func TestEnsurePicoChannel_FreshConfig(t *testing.T) {

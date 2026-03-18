@@ -9,13 +9,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/pkg/media"
-	"github.com/sipeed/suprclaw/pkg/memory"
-	"github.com/sipeed/suprclaw/pkg/providers"
-	"github.com/sipeed/suprclaw/pkg/routing"
-	"github.com/sipeed/suprclaw/pkg/session"
-	"github.com/sipeed/suprclaw/pkg/tools"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/media"
+	"github.com/itsivag/suprclaw/pkg/memory"
+	"github.com/itsivag/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/routing"
+	"github.com/itsivag/suprclaw/pkg/session"
+	"github.com/itsivag/suprclaw/pkg/tools"
 )
 
 // AgentInstance represents a fully configured agent with its own workspace,

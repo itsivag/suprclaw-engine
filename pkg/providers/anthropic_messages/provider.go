@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/providers/protocoltypes"
+	"github.com/itsivag/suprclaw/pkg/providers/protocoltypes"
 )
 
 type (

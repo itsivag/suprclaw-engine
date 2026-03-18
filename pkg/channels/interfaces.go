@@ -3,7 +3,7 @@ package channels
 import (
 	"context"
 
-	"github.com/sipeed/suprclaw/pkg/commands"
+	"github.com/itsivag/suprclaw/pkg/commands"
 )
 
 // TypingCapable — channels that can show a typing/thinking indicator.

@@ -18,9 +18,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/config"
-	"github.com/sipeed/suprclaw/pkg/health"
-	"github.com/sipeed/suprclaw/web/backend/utils"
+	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/health"
+	"github.com/itsivag/suprclaw/web/backend/utils"
 )
 
 // gateway holds the state for the managed gateway process.

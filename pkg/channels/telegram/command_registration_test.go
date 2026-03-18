@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/commands"
+	"github.com/itsivag/suprclaw/pkg/commands"
 )
 
 func TestStartCommandRegistration_DoesNotBlock(t *testing.T) {

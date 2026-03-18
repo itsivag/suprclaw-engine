@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/suprclaw/pkg/fileutil"
-	"github.com/sipeed/suprclaw/pkg/providers"
+	"github.com/itsivag/suprclaw/pkg/fileutil"
+	"github.com/itsivag/suprclaw/pkg/providers"
 )
 
 const (
