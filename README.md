@@ -7,6 +7,8 @@ Runs on $10 hardware with <10MB RAM. Single binary, 1-second boot, works across 
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+**[Documentation](https://itsivag.github.io/suprclaw-engine/)**
+
 ---
 
 ## Features
