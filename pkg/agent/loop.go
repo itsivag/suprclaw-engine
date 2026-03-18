@@ -51,6 +51,8 @@ type AgentLoop struct {
 	mu             sync.RWMutex
 	// Track active requests for safe provider cleanup
 	activeRequests sync.WaitGroup
+	// sessionLocks serializes concurrent runAgentLoop calls for the same session key
+	sessionLocks sync.Map
 }
 
 // processOptions configures how a message is processed
@@ -65,6 +67,7 @@ type processOptions struct {
 	DefaultResponse   string   // Response when LLM returns empty
 	EnableSummary     bool     // Whether to trigger summarization
 	SendResponse      bool     // Whether to send response via bus
+	MaxTokensOverride int      // If > 0, overrides agent.MaxTokens for this run (heartbeat token budget)
 }
 
 const (
@@ -664,6 +667,76 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 	return al.processMessage(ctx, msg)
 }
 
+// ProcessHeartbeat runs the agent in its main session for a heartbeat turn.
+// It bypasses channel routing; delivery is handled by the heartbeat runner after
+// policy evaluation (HEARTBEAT_OK suppression, adaptive backoff, etc.).
+func (al *AgentLoop) ProcessHeartbeat(
+	ctx context.Context,
+	agentID string,
+	prompt string,
+	deliverChannel, deliverChatID string,
+	maxTokens int,
+) (string, error) {
+	if err := al.ensureMCPInitialized(ctx); err != nil {
+		return "", err
+	}
+	registry := al.GetRegistry()
+	var agentInst *AgentInstance
+	if agentID != "" {
+		if a, ok := registry.GetAgent(agentID); ok {
+			agentInst = a
+		}
+	}
+	if agentInst == nil {
+		agentInst = registry.GetDefaultAgent()
+	}
+	if agentInst == nil {
+		return "", fmt.Errorf("no agent available for heartbeat")
+	}
+
+	sessionKey := routing.BuildAgentMainSessionKey(agentInst.ID)
+
+	return al.runAgentLoop(ctx, agentInst, processOptions{
+		SessionKey:        sessionKey,
+		Channel:           deliverChannel,
+		ChatID:            deliverChatID,
+		UserMessage:       prompt,
+		DefaultResponse:   "HEARTBEAT_OK",
+		EnableSummary:     false,
+		SendResponse:      false, // heartbeat runner decides delivery after policy check
+		MaxTokensOverride: maxTokens,
+	})
+}
+
+// PruneLastTurn removes the most recent user+assistant exchange from the session
+// history when a heartbeat produces HEARTBEAT_OK. This prevents idle turns from
+// accumulating and consuming context window tokens in future runs.
+func (al *AgentLoop) PruneLastTurn(agentID, sessionKey string) error {
+	registry := al.GetRegistry()
+	var agentInst *AgentInstance
+	if agentID != "" {
+		if a, ok := registry.GetAgent(agentID); ok {
+			agentInst = a
+		}
+	}
+	if agentInst == nil {
+		agentInst = registry.GetDefaultAgent()
+	}
+	if agentInst == nil {
+		return fmt.Errorf("no agent found for PruneLastTurn (agentID=%q)", agentID)
+	}
+
+	history := agentInst.Sessions.GetHistory(sessionKey)
+	if len(history) < 2 {
+		return nil
+	}
+
+	// Remove the last two messages (user prompt + assistant response).
+	pruned := history[:len(history)-2]
+	agentInst.Sessions.SetHistory(sessionKey, pruned)
+	return agentInst.Sessions.Save(sessionKey)
+}
+
 func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
 	// Add message preview to log (show full content for error messages)
 	var logContent string
@@ -859,12 +932,25 @@ func (al *AgentLoop) processSystemMessage(
 	})
 }
 
+// acquireSessionLock serializes access to a session key across concurrent callers
+// (e.g. heartbeat vs. live user messages targeting the same session).
+// Returns a release function that must be called via defer.
+func (al *AgentLoop) acquireSessionLock(sessionKey string) func() {
+	v, _ := al.sessionLocks.LoadOrStore(sessionKey, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
 // runAgentLoop is the core message processing logic.
 func (al *AgentLoop) runAgentLoop(
 	ctx context.Context,
 	agent *AgentInstance,
 	opts processOptions,
 ) (string, error) {
+	// Serialize concurrent callers for the same session to prevent history interleaving.
+	defer al.acquireSessionLock(opts.SessionKey)()
+
 	// 0. Record last channel for notifications (skip internal channels and cli)
 	if opts.Channel != "" && opts.ChatID != "" {
 		if !constants.IsInternalChannel(opts.Channel) {
@@ -1072,8 +1158,12 @@ func (al *AgentLoop) runLLMIteration(
 		var response *providers.LLMResponse
 		var err error
 
+		effectiveMaxTokens := agent.MaxTokens
+		if opts.MaxTokensOverride > 0 {
+			effectiveMaxTokens = opts.MaxTokensOverride
+		}
 		llmOpts := map[string]any{
-			"max_tokens":       agent.MaxTokens,
+			"max_tokens":       effectiveMaxTokens,
 			"temperature":      agent.Temperature,
 			"prompt_cache_key": agent.ID,
 		}

@@ -479,6 +479,15 @@ func DefaultConfig() *Config {
 		Voice: VoiceConfig{
 			EchoTranscription: false,
 		},
+		Heartbeat: HeartbeatConfig{
+			Enabled:            false,
+			IntervalMinutes:    30,
+			SkipIfUnchanged:    true,
+			ShowOk:             false,
+			AckMaxChars:        60,
+			AdaptiveBackoff:    true,
+			MaxIntervalMinutes: 120,
+		},
 		BuildInfo: BuildInfo{
 			Version:   Version,
 			GitCommit: GitCommit,

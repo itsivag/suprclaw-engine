@@ -87,8 +87,34 @@ type Config struct {
 	Tools     ToolsConfig     `json:"tools"`
 	Devices   DevicesConfig   `json:"devices"`
 	Voice     VoiceConfig     `json:"voice"`
+	Heartbeat HeartbeatConfig `json:"heartbeat,omitempty"`
 	// BuildInfo contains build-time version information
 	BuildInfo BuildInfo `json:"build_info,omitempty"`
+}
+
+// HeartbeatConfig configures the periodic heartbeat awareness system.
+type HeartbeatConfig struct {
+	Enabled         bool   `json:"enabled"`
+	IntervalMinutes int    `json:"interval_minutes"`    // default: 30, min: 5
+	AgentID         string `json:"agent_id,omitempty"` // default: default agent
+
+	// Token-saving features
+	IdleWindowMinutes int  `json:"idle_window_minutes"` // skip if user active within N min; 0=disabled
+	MaxTokensPerRun   int  `json:"max_tokens_per_run"`  // hard token budget; 0=unlimited
+	SkipIfUnchanged   bool `json:"skip_if_unchanged"`   // skip if HEARTBEAT.md unchanged
+
+	// Active hours
+	ActiveHoursStart string `json:"active_hours_start,omitempty"` // "08:00"
+	ActiveHoursEnd   string `json:"active_hours_end,omitempty"`   // "22:00"
+	Timezone         string `json:"timezone,omitempty"`           // IANA: "America/New_York"
+
+	// Delivery
+	ShowOk      bool `json:"show_ok"`       // deliver HEARTBEAT_OK; default false
+	AckMaxChars int  `json:"ack_max_chars"` // strip trailing ack up to N chars; default 60
+
+	// Adaptive backoff
+	AdaptiveBackoff    bool `json:"adaptive_backoff"`     // double interval on consecutive ok
+	MaxIntervalMinutes int  `json:"max_interval_minutes"` // backoff cap; default 120
 }
 
 // BuildInfo contains build-time version information

@@ -26,6 +26,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/cron"
 	"github.com/itsivag/suprclaw/pkg/devices"
 	"github.com/itsivag/suprclaw/pkg/health"
+	"github.com/itsivag/suprclaw/pkg/heartbeat"
 	"github.com/itsivag/suprclaw/pkg/logger"
 	"github.com/itsivag/suprclaw/pkg/media"
 	"github.com/itsivag/suprclaw/pkg/providers"
@@ -41,8 +42,9 @@ const (
 )
 
 type services struct {
-	CronService    *cron.CronService
-	MediaStore     media.MediaStore
+	CronService      *cron.CronService
+	HeartbeatService *heartbeat.HeartbeatService
+	MediaStore       media.MediaStore
 	ChannelManager   *channels.Manager
 	DeviceService    *devices.Service
 	HealthServer     *health.Server
@@ -239,6 +241,20 @@ func setupAndStartServices(
 		fmt.Println("✓ Device event service started")
 	}
 
+	if cfg.Heartbeat.Enabled {
+		runningServices.HeartbeatService = heartbeat.NewHeartbeatService(
+			cfg.Heartbeat,
+			cfg.WorkspacePath(),
+			agentLoop,
+			msgBus,
+			stateManager,
+		)
+		if err = runningServices.HeartbeatService.Start(); err != nil {
+			return nil, fmt.Errorf("error starting heartbeat service: %w", err)
+		}
+		fmt.Println("✓ Heartbeat service started")
+	}
+
 	return runningServices, nil
 }
 
@@ -254,6 +270,9 @@ func stopAndCleanupServices(runningServices *services, shutdownTimeout time.Dura
 	}
 	if runningServices.CronService != nil {
 		runningServices.CronService.Stop()
+	}
+	if runningServices.HeartbeatService != nil {
+		runningServices.HeartbeatService.Stop()
 	}
 	if runningServices.MediaStore != nil {
 		if fms, ok := runningServices.MediaStore.(*media.FileMediaStore); ok {
@@ -421,6 +440,23 @@ func restartServices(
 		logger.InfoCF("voice", "Transcription re-enabled (agent-level)", map[string]any{"provider": transcriber.Name()})
 	} else {
 		logger.InfoCF("voice", "Transcription disabled", nil)
+	}
+
+	if cfg.Heartbeat.Enabled {
+		runningServices.HeartbeatService = heartbeat.NewHeartbeatService(
+			cfg.Heartbeat,
+			cfg.WorkspacePath(),
+			al,
+			msgBus,
+			stateManager,
+		)
+		if err := runningServices.HeartbeatService.Start(); err != nil {
+			logger.WarnCF("heartbeat", "Failed to restart heartbeat service", map[string]any{"error": err.Error()})
+		} else {
+			fmt.Println("  ✓ Heartbeat service restarted")
+		}
+	} else {
+		runningServices.HeartbeatService = nil
 	}
 
 	return nil
