@@ -73,6 +73,21 @@ if [ -z "${SUPRCLAW_ENGINE_PROVIDER_API_KEY:-}" ] && [ -z "${PICOCLAW_PROVIDER_A
 WARN
 fi
 SUPR_CHANNEL_TOKEN="${GATEWAY_TOKEN:-${SUPRCLAW_CHANNELS_SUPR_TOKEN:-${SUPRCLAW_ENGINE_CHANNEL_TOKEN:-${PICOCLAW_CHANNELS_PICO_TOKEN:-suprclaw-pico-token}}}}"
+GATEWAY_ADMIN_SECRET="${SUPRCLAW_GATEWAY_ADMIN_SECRET:-${GATEWAY_TOKEN:-}}"
+if [ -n "${SUPRCLAW_GATEWAY_REMOTE_ADMIN_CONTROL:-}" ]; then
+  GATEWAY_REMOTE_ADMIN_CONTROL="${SUPRCLAW_GATEWAY_REMOTE_ADMIN_CONTROL}"
+elif [ -n "$GATEWAY_ADMIN_SECRET" ]; then
+  GATEWAY_REMOTE_ADMIN_CONTROL="true"
+else
+  GATEWAY_REMOTE_ADMIN_CONTROL="false"
+fi
+if [ -n "${SUPRCLAW_GATEWAY_HOT_RELOAD:-}" ]; then
+  GATEWAY_HOT_RELOAD="${SUPRCLAW_GATEWAY_HOT_RELOAD}"
+elif [ "$GATEWAY_REMOTE_ADMIN_CONTROL" = "true" ]; then
+  GATEWAY_HOT_RELOAD="true"
+else
+  GATEWAY_HOT_RELOAD="false"
+fi
 EXISTING_TOOLS_JSON='{}'
 if [ -f "$RUNTIME_CONFIG" ]; then
   EXISTING_TOOLS_JSON="$(jq -c '.tools // {}' "$RUNTIME_CONFIG" 2>/dev/null || printf '{}')"
@@ -85,6 +100,9 @@ jq -n \
   --arg apiBase "$MODEL_API_BASE" \
   --arg apiKey "$MODEL_API_KEY" \
   --arg suprToken "$SUPR_CHANNEL_TOKEN" \
+  --arg gatewayAdminSecret "$GATEWAY_ADMIN_SECRET" \
+  --arg gatewayRemoteAdmin "$GATEWAY_REMOTE_ADMIN_CONTROL" \
+  --arg gatewayHotReload "$GATEWAY_HOT_RELOAD" \
   --argjson existingTools "$EXISTING_TOOLS_JSON" \
   '{
     agents: {
@@ -117,8 +135,10 @@ jq -n \
     ],
     gateway: {
       host: "0.0.0.0",
-      port: 18790
-    },
+      port: 18790,
+      hot_reload: ($gatewayHotReload == "true"),
+      remote_admin_control: ($gatewayRemoteAdmin == "true")
+    } + (if $gatewayAdminSecret != "" then {admin_secret: $gatewayAdminSecret} else {} end),
     channels: {
       supr: {
         enabled: true,
