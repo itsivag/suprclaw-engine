@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -201,7 +202,8 @@ func (h *adminHandler) showSkill(w http.ResponseWriter, r *http.Request) {
 type skillInstallRequest struct {
 	AgentID       string `json:"agentId"`
 	WorkspacePath string `json:"workspacePath"`
-	Repo          string `json:"repo"`     // e.g. "owner/repo/path" or full GitHub URL
+	Repo          string `json:"repo"`     // e.g. "owner/repo" or full GitHub URL
+	Path          string `json:"path"`     // explicit repo subpath → sparse checkout
 	Registry      string `json:"registry"` // optional: registry name (e.g. "clawhub")
 	Slug          string `json:"slug"`     // required when registry is set
 }
@@ -211,6 +213,24 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
+	}
+
+	// Validate mutually exclusive / dependent fields before workspace resolution.
+	if req.Repo != "" && req.Registry != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo and registry are mutually exclusive"})
+		return
+	}
+	if req.Path != "" && req.Repo == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path requires repo"})
+		return
+	}
+	if req.Path != "" {
+		cleaned := path.Clean(req.Path)
+		if cleaned == "." || path.IsAbs(cleaned) || strings.Contains(cleaned, "..") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path must be relative and must not contain '..'"})
+			return
+		}
+		req.Path = cleaned
 	}
 
 	ws, err := h.resolveSkillsWorkspace(req.AgentID, req.WorkspacePath)
@@ -235,6 +255,32 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Path != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+
+		if err := installer.InstallFromGitHubPath(ctx, req.Repo, req.Path); err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":         "ok",
+			"installedSkill": filepath.Base(req.Path),
+			"agentId":        req.AgentID,
+			"workspacePath":  ws,
+			"source": map[string]string{
+				"repo": req.Repo,
+				"path": req.Path,
+			},
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
@@ -247,12 +293,15 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	skillName := filepath.Base(req.Repo)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":        "ok",
-		"installedSkill": skillName,
-		"agentId":       req.AgentID,
-		"workspacePath": ws,
+		"status":         "ok",
+		"installedSkill": filepath.Base(req.Repo),
+		"agentId":        req.AgentID,
+		"workspacePath":  ws,
+		"source": map[string]string{
+			"repo": req.Repo,
+			"path": "",
+		},
 	})
 }
 

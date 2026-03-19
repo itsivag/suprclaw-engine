@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -262,6 +265,122 @@ func isSkillDirectory(name string) bool {
 		return true
 	}
 	return false
+}
+
+// InstallFromGitHubPath installs a skill from an explicit subpath within a GitHub repo
+// using git sparse checkout (requires git ≥ 2.25). subPath is the path within the repo
+// (e.g. "marketplace/content"). The skill name is derived from filepath.Base(subPath).
+func (si *SkillInstaller) InstallFromGitHubPath(ctx context.Context, repo, subPath string) error {
+	ref, err := parseGitHubRef(repo)
+	if err != nil {
+		return err
+	}
+
+	skillName := filepath.Base(filepath.FromSlash(subPath))
+	skillDirectory := filepath.Join(si.workspace, "skills", skillName)
+
+	if _, err := os.Stat(skillDirectory); err == nil {
+		return fmt.Errorf("skill '%s' already exists", skillName)
+	}
+
+	cloneURL := fmt.Sprintf("https://github.com/%s/%s.git", ref.Owner, ref.RepoName)
+	if si.githubToken != "" {
+		cloneURL = fmt.Sprintf("https://%s@github.com/%s/%s.git", si.githubToken, ref.Owner, ref.RepoName)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "suprclaw-skill-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	run := func(args ...string) error {
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		cmd.Dir = tmpDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git %s: %w\n%s", args[1], err, out)
+		}
+		return nil
+	}
+
+	if err := run("git", "clone", "--no-checkout", "--filter=blob:none", "--sparse", cloneURL, "."); err != nil {
+		return err
+	}
+	if err := run("git", "sparse-checkout", "set", subPath); err != nil {
+		return err
+	}
+	gitRef := ref.Ref
+	if gitRef == "" {
+		gitRef = "main"
+	}
+	if err := run("git", "checkout", gitRef); err != nil {
+		return err
+	}
+
+	skillMD := filepath.Join(tmpDir, filepath.FromSlash(subPath), "SKILL.md")
+	if _, err := os.Stat(skillMD); err != nil {
+		return fmt.Errorf("SKILL.md not found in path %q", subPath)
+	}
+
+	if err := os.MkdirAll(skillDirectory, 0o755); err != nil {
+		return fmt.Errorf("failed to create skill directory: %w", err)
+	}
+
+	return copySkillDir(filepath.Join(tmpDir, filepath.FromSlash(subPath)), skillDirectory)
+}
+
+// copySkillDir copies files from src to dst, skipping .git entries.
+func copySkillDir(src, dst string) error {
+	return filepath.WalkDir(src, func(srcPath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, srcPath)
+		if err != nil {
+			return err
+		}
+		// Skip .git at any level
+		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		dstPath := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dstPath, 0o755)
+		}
+		return copySkillFile(srcPath, dstPath)
+	})
+}
+
+func copySkillFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return os.Chmod(dst, 0o600)
 }
 
 func (si *SkillInstaller) Uninstall(skillName string) error {
