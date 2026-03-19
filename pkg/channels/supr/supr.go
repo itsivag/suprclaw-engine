@@ -2,9 +2,12 @@ package supr
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +21,8 @@ import (
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/identity"
 	"github.com/itsivag/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/media"
+	"github.com/itsivag/suprclaw/pkg/utils"
 )
 
 // agentSummary is a compact agent descriptor sent to clients on connect.
@@ -453,6 +458,9 @@ func (c *SuprChannel) handleMessage(pc *suprConn, msg SuprMessage) {
 	case TypeMessageSend:
 		c.handleMessageSend(pc, msg)
 
+	case TypeMediaSend:
+		c.handleMediaSend(pc, msg)
+
 	default:
 		errMsg := newError("unknown_type", fmt.Sprintf("unknown message type: %s", msg.Type))
 		pc.writeJSON(errMsg)
@@ -504,6 +512,281 @@ func (c *SuprChannel) handleMessageSend(pc *suprConn, msg SuprMessage) {
 	}
 
 	c.HandleMessage(c.ctx, peer, msg.ID, senderID, chatID, content, nil, metadata, sender)
+}
+
+// maxMediaBytes is the maximum decoded media size (25 MB).
+const maxMediaBytes = 25 * 1024 * 1024
+
+// mediaItem is a single attachment parsed from a media.send payload.
+type mediaItem struct {
+	data        string // base64-encoded bytes (mutually exclusive with url)
+	url         string // remote URL to download (mutually exclusive with data)
+	filename    string
+	contentType string
+	caption     string
+}
+
+// resolveMediaItem writes the item's content to a temp file and returns its local path.
+// The caller is responsible for removing the file on error.
+func resolveMediaItem(item mediaItem) (string, error) {
+	if item.filename == "" {
+		item.filename = "upload"
+	}
+
+	if item.url != "" {
+		localPath := utils.DownloadFile(item.url, item.filename, utils.DownloadOptions{
+			LoggerPrefix: "supr",
+		})
+		if localPath == "" {
+			return "", fmt.Errorf("failed to download media from url")
+		}
+		return localPath, nil
+	}
+
+	// Guard against excessively large payloads before decoding.
+	if len(item.data) > (maxMediaBytes/3)*4+4 {
+		return "", fmt.Errorf("media payload exceeds maximum allowed size")
+	}
+
+	rawBytes, err := base64.StdEncoding.DecodeString(item.data)
+	if err != nil {
+		rawBytes, err = base64.URLEncoding.DecodeString(item.data)
+		if err != nil {
+			return "", fmt.Errorf("failed to decode base64 data")
+		}
+	}
+
+	if len(rawBytes) > maxMediaBytes {
+		return "", fmt.Errorf("media payload exceeds maximum allowed size")
+	}
+
+	mediaDir := media.TempDir()
+	if err := os.MkdirAll(mediaDir, 0o700); err != nil {
+		return "", fmt.Errorf("failed to create media directory")
+	}
+	safeName := utils.SanitizeFilename(item.filename)
+	localPath := filepath.Join(mediaDir, uuid.New().String()+"_"+safeName)
+
+	if err := os.WriteFile(localPath, rawBytes, 0o600); err != nil {
+		return "", fmt.Errorf("failed to write media file")
+	}
+	return localPath, nil
+}
+
+// mediaAnnotation returns a content annotation for a MIME type and filename.
+func mediaAnnotation(contentType, filename string) string {
+	switch {
+	case strings.HasPrefix(contentType, "image/"):
+		return "[image: " + filename + "]"
+	case strings.HasPrefix(contentType, "audio/"):
+		return "[audio: " + filename + "]"
+	case strings.HasPrefix(contentType, "video/"):
+		return "[video: " + filename + "]"
+	default:
+		return "[file: " + filename + "]"
+	}
+}
+
+// parseMediaItems extracts one or more mediaItems from a SuprMessage payload.
+// Supports both an "attachments" array and scalar "data"/"url" fields.
+func parseMediaItems(payload map[string]any) ([]mediaItem, error) {
+	if rawList, ok := payload["attachments"]; ok {
+		list, ok := rawList.([]any)
+		if !ok {
+			return nil, fmt.Errorf("attachments must be an array")
+		}
+		if len(list) == 0 {
+			return nil, fmt.Errorf("attachments array is empty")
+		}
+		items := make([]mediaItem, 0, len(list))
+		for i, entry := range list {
+			m, ok := entry.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("attachment %d is not an object", i)
+			}
+			item := mediaItem{
+				data:        stringField(m, "data"),
+				url:         stringField(m, "url"),
+				filename:    stringField(m, "filename"),
+				contentType: stringField(m, "content_type"),
+				caption:     stringField(m, "caption"),
+			}
+			if item.data == "" && item.url == "" {
+				return nil, fmt.Errorf("attachment %d: either data or url is required", i)
+			}
+			items = append(items, item)
+		}
+		return items, nil
+	}
+
+	// Scalar fallback.
+	item := mediaItem{
+		data:        stringField(payload, "data"),
+		url:         stringField(payload, "url"),
+		filename:    stringField(payload, "filename"),
+		contentType: stringField(payload, "content_type"),
+		caption:     stringField(payload, "caption"),
+	}
+	if item.data == "" && item.url == "" {
+		return nil, fmt.Errorf("either data or url field is required")
+	}
+	return []mediaItem{item}, nil
+}
+
+// stringField safely extracts a string value from a map.
+func stringField(m map[string]any, key string) string {
+	v, _ := m[key].(string)
+	return v
+}
+
+// handleMediaSend processes an inbound media.send frame from a client.
+func (c *SuprChannel) handleMediaSend(pc *suprConn, msg SuprMessage) {
+	store := c.GetMediaStore()
+	if store == nil {
+		pc.writeJSON(newError("media_store_unavailable", "media store is not configured"))
+		return
+	}
+
+	items, err := parseMediaItems(msg.Payload)
+	if err != nil {
+		pc.writeJSON(newError("invalid_media_data", err.Error()))
+		return
+	}
+
+	sessionID := msg.SessionID
+	if sessionID == "" {
+		sessionID = pc.sessionID
+	}
+	chatID := "supr:" + sessionID
+	messageID := msg.ID
+	if messageID == "" {
+		messageID = uuid.New().String()
+	}
+	scope := channels.BuildMediaScope("supr", chatID, messageID)
+
+	var refs []string
+	var annotations []string
+
+	for _, item := range items {
+		if item.filename == "" {
+			item.filename = "upload"
+		}
+
+		localPath, err := resolveMediaItem(item)
+		if err != nil {
+			// Clean up any files written so far.
+			for _, ref := range refs {
+				if path, resolveErr := store.Resolve(ref); resolveErr == nil {
+					os.Remove(path)
+				}
+			}
+			pc.writeJSON(newError("media_write_failed", err.Error()))
+			return
+		}
+
+		ref, err := store.Store(localPath, media.MediaMeta{
+			Filename:    item.filename,
+			ContentType: item.contentType,
+			Source:      "supr",
+		}, scope)
+		if err != nil {
+			os.Remove(localPath)
+			for _, r := range refs {
+				if path, resolveErr := store.Resolve(r); resolveErr == nil {
+					os.Remove(path)
+				}
+			}
+			pc.writeJSON(newError("media_write_failed", "failed to register media in store"))
+			return
+		}
+
+		refs = append(refs, ref)
+
+		ann := mediaAnnotation(item.contentType, item.filename)
+		if item.caption != "" {
+			ann = item.caption + "\n" + ann
+		}
+		annotations = append(annotations, ann)
+	}
+
+	// Top-level caption (scalar mode or batch-level caption).
+	topCaption, _ := msg.Payload["caption"].(string)
+	content := strings.Join(annotations, "\n")
+	if topCaption != "" && len(items) > 1 {
+		content = topCaption + "\n" + content
+	}
+
+	senderID := "supr-user"
+	peer := bus.Peer{Kind: "direct", ID: "supr:" + sessionID}
+	metadata := map[string]string{
+		"platform":   "supr",
+		"session_id": sessionID,
+		"conn_id":    pc.id,
+	}
+	sender := bus.SenderInfo{
+		Platform:    "supr",
+		PlatformID:  senderID,
+		CanonicalID: identity.BuildCanonicalID("supr", senderID),
+	}
+
+	if !c.IsAllowedSender(sender) {
+		return
+	}
+
+	logger.DebugCF("supr", "Received media", map[string]any{
+		"session_id": sessionID,
+		"count":      len(items),
+	})
+
+	c.HandleMessage(c.ctx, peer, messageID, senderID, chatID, content, refs, metadata, sender)
+}
+
+// SendMedia implements channels.MediaSender — sends media.create frames to clients.
+func (c *SuprChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMessage) error {
+	if !c.IsRunning() {
+		return channels.ErrNotRunning
+	}
+
+	store := c.GetMediaStore()
+	if store == nil {
+		return fmt.Errorf("supr: media store is not configured")
+	}
+
+	var firstErr error
+	for _, part := range msg.Parts {
+		localPath, err := store.Resolve(part.Ref)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("supr: resolve %s: %w", part.Ref, err)
+			}
+			continue
+		}
+
+		data, err := os.ReadFile(localPath)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("supr: read %s: %w", localPath, err)
+			}
+			continue
+		}
+
+		encoded := base64.StdEncoding.EncodeToString(data)
+		outMsg := newMessage(TypeMediaCreate, map[string]any{
+			"type":         part.Type,
+			"data":         encoded,
+			"filename":     part.Filename,
+			"content_type": part.ContentType,
+			"caption":      part.Caption,
+		})
+
+		if err := c.broadcastToSession(msg.ChatID, outMsg); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+
+	return firstErr
 }
 
 // truncate truncates a string to maxLen runes.
