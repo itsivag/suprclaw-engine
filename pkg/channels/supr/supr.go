@@ -734,6 +734,15 @@ func (c *SuprChannel) handleMediaSend(pc *suprConn, msg SuprMessage) {
 		"session_id": sessionID,
 		"conn_id":    pc.id,
 	}
+
+	if agentID, _ := msg.Payload["agent_id"].(string); agentID != "" {
+		metadata["requested_agent_id"] = agentID
+	}
+
+	if model, _ := msg.Payload["model"].(string); model != "" {
+		metadata["model_override"] = model
+	}
+
 	sender := bus.SenderInfo{
 		Platform:    "supr",
 		PlatformID:  senderID,
