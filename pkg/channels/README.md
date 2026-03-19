@@ -1261,7 +1261,7 @@ make test                                       # Full test suite
 | `pkg/channels/whatsapp/` | `"whatsapp"` | — (Bridge mode) |
 | `pkg/channels/whatsapp_native/` | `"whatsapp_native"` | — (Native whatsmeow mode) |
 | `pkg/channels/maixcam/` | `"maixcam"` | — |
-| `pkg/channels/supr/` | `"supr"` | TypingCapable, PlaceholderCapable, MessageEditor, WebhookHandler |
+| `pkg/channels/supr/` | `"supr"` | TypingCapable, PlaceholderCapable, MessageEditor, MediaSender, WebhookHandler |
 
 ### A.3 Interface Quick Reference
 
@@ -1373,7 +1373,7 @@ agentLoop.Stop()               // Stop Agent
 
 3. **WeCom has two factories**: `"wecom"` (Bot mode, webhook only) and `"wecom_app"` (App mode, supports MediaSender) are registered separately. Both implement `WebhookHandler` and `HealthChecker`.
 
-4. **Supr Protocol**: `pkg/channels/supr/` implements a custom SuprClaw native protocol channel that receives messages via WebSocket webhook (`/supr/ws`).
+4. **Supr Protocol**: `pkg/channels/supr/` implements a custom SuprClaw native protocol channel that receives messages via WebSocket webhook (`/supr/ws`). It now supports multimodal media: inbound `media.send` frames (base64 `data` or `url`, single or `attachments` array) and outbound `media.create` frames via `SendMedia`.
 
 5. **WhatsApp has two modes**: `"whatsapp"` (Bridge mode, communicates via external bridge URL) and `"whatsapp_native"` (native whatsmeow mode, connects directly to WhatsApp). Manager selects which to initialize based on `WhatsAppConfig.UseNative`.
 

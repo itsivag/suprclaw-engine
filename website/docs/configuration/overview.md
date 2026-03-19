@@ -73,12 +73,72 @@ The gateway serves webhook channels (Telegram, Discord, etc.):
 {
   "gateway": {
     "host": "127.0.0.1",
-    "port": 18790
+    "port": 18790,
+    "remote_admin_control": false,
+    "admin_secret": ""
   }
 }
 ```
 
 Set `host` to `0.0.0.0` to expose to the network (e.g. when running in Docker).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `host` | string | `127.0.0.1` | Listen host |
+| `port` | int | `18790` | Listen port |
+| `remote_admin_control` | bool | `false` | Enable the embedded Admin REST API |
+| `admin_secret` | string | — | Bearer token required to call admin endpoints |
+
+## Admin REST API
+
+When `remote_admin_control` is `true` and `admin_secret` is set, the gateway exposes a REST API on the same host/port under `/api/admin/`. All requests must include `Authorization: Bearer <admin_secret>`.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/admin/cron/jobs` | List all scheduled jobs |
+| `POST` | `/api/admin/cron/jobs` | Add a scheduled job |
+| `DELETE` | `/api/admin/cron/jobs/{id}` | Remove a job |
+| `PATCH` | `/api/admin/cron/jobs/{id}` | Enable/disable a job |
+| `GET` | `/api/admin/config` | Read current config |
+| `PUT` | `/api/admin/config` | Replace entire config |
+| `PATCH` | `/api/admin/config` | Partial config update |
+| `POST` | `/api/admin/agents` | Upsert an agent definition |
+| `DELETE` | `/api/admin/agents/{agentId}` | Remove an agent |
+| `POST` | `/api/admin/agents/{agentId}/wake` | Run a one-shot agent message |
+| `POST` | `/api/admin/runtime/reload` | Restart the gateway process |
+| `POST` | `/api/admin/workspaces/bootstrap` | Create/populate an agent workspace |
+| `DELETE` | `/api/admin/workspaces/{agentId}` | Delete an agent workspace |
+| `GET` | `/api/admin/workspaces/{agentId}/files` | List workspace files |
+| `GET` | `/api/admin/workspaces/{agentId}/files/{fileName}` | Read a workspace file |
+| `POST` | `/api/admin/marketplace/install` | Sparse-clone a skill repo into a workspace |
+| `POST` | `/api/admin/mcp/configure` | Set MCP server config |
+
+### Example: add a cron job
+
+```bash
+curl -X POST http://localhost:18790/api/admin/cron/jobs \
+  -H "Authorization: Bearer <admin_secret>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "daily-digest",
+    "message": "Send me the daily news summary",
+    "deliver": true,
+    "channel": "supr",
+    "to": "supr:my-session",
+    "schedule": { "cron": "0 9 * * *" }
+  }'
+```
+
+### Example: wake an agent
+
+```bash
+curl -X POST http://localhost:18790/api/admin/agents/my-agent/wake \
+  -H "Authorization: Bearer <admin_secret>" \
+  -H "Content-Type: application/json" \
+  -d '{ "sessionKey": "my-session", "message": "Good morning!" }'
+```
 
 ## Environment Variables
 

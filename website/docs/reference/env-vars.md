@@ -25,6 +25,8 @@ sidebar_position: 2
 |----------|---------|-------------|
 | `SUPRCLAW_GATEWAY_HOST` | `127.0.0.1` | Gateway listen host |
 | `SUPRCLAW_GATEWAY_PORT` | `18790` | Gateway listen port |
+| `SUPRCLAW_GATEWAY_REMOTE_ADMIN_CONTROL` | `false` | Enable embedded Admin REST API |
+| `SUPRCLAW_GATEWAY_ADMIN_SECRET` | — | Bearer token for admin endpoints |
 
 ## Credential Encryption
 
