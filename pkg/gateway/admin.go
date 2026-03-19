@@ -51,6 +51,15 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 
 	// MCP
 	mux.HandleFunc("POST /api/admin/mcp/configure", h.auth(h.mcpConfigure))
+
+	// Skills — specific paths before wildcard
+	mux.HandleFunc("GET /api/admin/skills", h.auth(h.listSkills))
+	mux.HandleFunc("GET /api/admin/skills/builtin", h.auth(h.listBuiltinSkills))
+	mux.HandleFunc("GET /api/admin/skills/search", h.auth(h.searchSkills))
+	mux.HandleFunc("POST /api/admin/skills/install", h.auth(h.installSkill))
+	mux.HandleFunc("POST /api/admin/skills/install-builtin", h.auth(h.installBuiltinSkills))
+	mux.HandleFunc("GET /api/admin/skills/{name}", h.auth(h.showSkill))
+	mux.HandleFunc("DELETE /api/admin/skills/{name}", h.auth(h.removeSkill))
 }
 
 func (h *adminHandler) auth(next http.HandlerFunc) http.HandlerFunc {
