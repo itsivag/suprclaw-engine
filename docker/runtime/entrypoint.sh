@@ -133,12 +133,12 @@ jq -n \
       + (if $apiBase != "" then {api_base: $apiBase} else {} end)
       + (if $apiKey != "" then {api_key: $apiKey} else {} end))
     ],
-    gateway: {
+    gateway: ({
       host: "0.0.0.0",
       port: 18790,
       hot_reload: ($gatewayHotReload == "true"),
       remote_admin_control: ($gatewayRemoteAdmin == "true")
-    } + (if $gatewayAdminSecret != "" then {admin_secret: $gatewayAdminSecret} else {} end),
+    } + (if $gatewayAdminSecret != "" then {admin_secret: $gatewayAdminSecret} else {} end)),
     channels: {
       supr: {
         enabled: true,
