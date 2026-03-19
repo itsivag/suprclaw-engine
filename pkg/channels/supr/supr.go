@@ -158,10 +158,17 @@ func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 		return channels.ErrNotRunning
 	}
 
-	outMsg := newMessage(TypeMessageCreate, map[string]any{
-		"content": msg.Content,
-	})
+	// Typed error — send as error event, not message.create
+	if msg.ErrorCode != "" {
+		errMsg := newError(msg.ErrorCode, msg.ErrorMessage)
+		return c.broadcastToSession(msg.ChatID, errMsg)
+	}
 
+	payload := map[string]any{"content": msg.Content}
+	if msg.ModelUsed != "" {
+		payload["model_used"] = msg.ModelUsed
+	}
+	outMsg := newMessage(TypeMessageCreate, payload)
 	return c.broadcastToSession(msg.ChatID, outMsg)
 }
 
@@ -494,6 +501,10 @@ func (c *SuprChannel) handleMessageSend(pc *suprConn, msg SuprMessage) {
 
 	if agentID, _ := msg.Payload["agent_id"].(string); agentID != "" {
 		metadata["requested_agent_id"] = agentID
+	}
+
+	if model, _ := msg.Payload["model"].(string); model != "" {
+		metadata["model_override"] = model
 	}
 
 	logger.DebugCF("supr", "Received message", map[string]any{

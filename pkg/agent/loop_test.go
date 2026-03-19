@@ -98,7 +98,7 @@ func TestProcessMessage_IncludesCurrentSenderInDynamicContext(t *testing.T) {
 	provider := &recordingProvider{}
 	al := NewAgentLoop(cfg, msgBus, provider)
 
-	response, err := al.processMessage(context.Background(), bus.InboundMessage{
+	response, _, err := al.processMessage(context.Background(), bus.InboundMessage{
 		Channel:  "discord",
 		SenderID: "discord:123",
 		Sender: bus.SenderInfo{
@@ -449,7 +449,7 @@ func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, ms
 	timeoutCtx, cancel := context.WithTimeout(ctx, responseTimeout)
 	defer cancel()
 
-	response, err := h.al.processMessage(timeoutCtx, msg)
+	response, _, err := h.al.processMessage(timeoutCtx, msg)
 	if err != nil {
 		tb.Fatalf("processMessage failed: %v", err)
 	}

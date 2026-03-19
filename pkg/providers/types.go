@@ -44,6 +44,13 @@ type ThinkingCapable interface {
 	SupportsThinking() bool
 }
 
+// VisionCapable is an optional provider interface to report whether a model supports
+// image (vision) content. If a provider does not implement this, vision is assumed
+// supported (fail-open) to avoid false rejections.
+type VisionCapable interface {
+	SupportsVision(model string) bool
+}
+
 // FailoverReason classifies why an LLM request failed for fallback decisions.
 type FailoverReason string
 

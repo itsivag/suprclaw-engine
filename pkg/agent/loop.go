@@ -68,6 +68,7 @@ type processOptions struct {
 	EnableSummary     bool     // Whether to trigger summarization
 	SendResponse      bool     // Whether to send response via bus
 	MaxTokensOverride int      // If > 0, overrides agent.MaxTokens for this run (heartbeat token budget)
+	ModelOverride     string   // If non-empty, overrides the agent's model for this turn only
 }
 
 const (
@@ -79,6 +80,7 @@ const (
 	metadataKeyParentPeerKind    = "parent_peer_kind"
 	metadataKeyParentPeerID      = "parent_peer_id"
 	metadataKeyRequestedAgentID  = "requested_agent_id"
+	metadataKeyModelOverride     = "model_override"
 )
 
 func NewAgentLoop(
@@ -288,8 +290,19 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			// 	}
 			// }()
 
-			response, err := al.processMessage(ctx, msg)
+			response, modelUsed, err := al.processMessage(ctx, msg)
 			if err != nil {
+				var reqErr *RequestError
+				if errors.As(err, &reqErr) {
+					// Send typed error to client — not as assistant text
+					al.bus.PublishOutbound(ctx, bus.OutboundMessage{
+						Channel:      msg.Channel,
+						ChatID:       msg.ChatID,
+						ErrorCode:    reqErr.Code,
+						ErrorMessage: reqErr.Message,
+					})
+					continue
+				}
 				response = fmt.Sprintf("Error processing message: %v", err)
 			}
 
@@ -309,9 +322,10 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 				if !alreadySent {
 					al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-						Channel: msg.Channel,
-						ChatID:  msg.ChatID,
-						Content: response,
+						Channel:   msg.Channel,
+						ChatID:    msg.ChatID,
+						Content:   response,
+						ModelUsed: modelUsed,
 					})
 					logger.InfoCF("agent", "Published outbound response",
 						map[string]any{
@@ -664,7 +678,8 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 		SessionKey: sessionKey,
 	}
 
-	return al.processMessage(ctx, msg)
+	response, _, err := al.processMessage(ctx, msg)
+	return response, err
 }
 
 // ProcessHeartbeat runs the agent in its main session for a heartbeat turn.
@@ -696,7 +711,7 @@ func (al *AgentLoop) ProcessHeartbeat(
 
 	sessionKey := routing.BuildAgentMainSessionKey(agentInst.ID)
 
-	return al.runAgentLoop(ctx, agentInst, processOptions{
+	content, _, err := al.runAgentLoop(ctx, agentInst, processOptions{
 		SessionKey:        sessionKey,
 		Channel:           deliverChannel,
 		ChatID:            deliverChatID,
@@ -706,6 +721,7 @@ func (al *AgentLoop) ProcessHeartbeat(
 		SendResponse:      false, // heartbeat runner decides delivery after policy check
 		MaxTokensOverride: maxTokens,
 	})
+	return content, err
 }
 
 // PruneLastTurn removes the most recent user+assistant exchange from the session
@@ -737,7 +753,7 @@ func (al *AgentLoop) PruneLastTurn(agentID, sessionKey string) error {
 	return agentInst.Sessions.Save(sessionKey)
 }
 
-func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
+func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, string, error) {
 	// Add message preview to log (show full content for error messages)
 	var logContent string
 	if strings.Contains(msg.Content, "Error:") || strings.Contains(msg.Content, "error") {
@@ -767,12 +783,13 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 
 	// Route system messages to processSystemMessage
 	if msg.Channel == "system" {
-		return al.processSystemMessage(ctx, msg)
+		content, err := al.processSystemMessage(ctx, msg)
+		return content, "", err
 	}
 
 	route, agent, routeErr := al.resolveMessageRoute(msg)
 	if routeErr != nil {
-		return "", routeErr
+		return "", "", routeErr
 	}
 
 	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
@@ -807,12 +824,13 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		DefaultResponse:   defaultResponse,
 		EnableSummary:     true,
 		SendResponse:      true,
+		ModelOverride:     inboundMetadata(msg, metadataKeyModelOverride),
 	}
 
 	// context-dependent commands check their own Runtime fields and report
 	// "unavailable" when the required capability is nil.
 	if response, handled := al.handleCommand(ctx, msg, agent, &opts); handled {
-		return response, nil
+		return response, "", nil
 	}
 
 	return al.runAgentLoop(ctx, agent, opts)
@@ -921,7 +939,7 @@ func (al *AgentLoop) processSystemMessage(
 	// Use the origin session for context
 	sessionKey := routing.BuildAgentMainSessionKey(agent.ID)
 
-	return al.runAgentLoop(ctx, agent, processOptions{
+	content, _, err := al.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
 		Channel:         originChannel,
 		ChatID:          originChatID,
@@ -930,6 +948,7 @@ func (al *AgentLoop) processSystemMessage(
 		EnableSummary:   false,
 		SendResponse:    true,
 	})
+	return content, err
 }
 
 // acquireSessionLock serializes access to a session key across concurrent callers
@@ -947,7 +966,7 @@ func (al *AgentLoop) runAgentLoop(
 	ctx context.Context,
 	agent *AgentInstance,
 	opts processOptions,
-) (string, error) {
+) (string, string, error) {
 	// Serialize concurrent callers for the same session to prevent history interleaving.
 	defer al.acquireSessionLock(opts.SessionKey)()
 
@@ -990,9 +1009,9 @@ func (al *AgentLoop) runAgentLoop(
 	agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
 
 	// 3. Run LLM iteration loop
-	finalContent, iteration, err := al.runLLMIteration(ctx, agent, messages, opts)
+	finalContent, iteration, modelUsed, err := al.runLLMIteration(ctx, agent, messages, opts)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// If last tool had ForUser content and we already sent it, we might not need to send final response
@@ -1022,7 +1041,7 @@ func (al *AgentLoop) runAgentLoop(
 			"final_length": len(finalContent),
 		})
 
-	return finalContent, nil
+	return finalContent, modelUsed, nil
 }
 
 func (al *AgentLoop) targetReasoningChannelID(channelName string) (chatID string) {
@@ -1087,7 +1106,7 @@ func (al *AgentLoop) runLLMIteration(
 	agent *AgentInstance,
 	messages []providers.Message,
 	opts processOptions,
-) (string, int, error) {
+) (string, int, string, error) {
 	iteration := 0
 	var finalContent string
 
@@ -1096,6 +1115,24 @@ func (al *AgentLoop) runLLMIteration(
 	// all tool-follow-up iterations within the same turn so that a multi-step
 	// tool chain doesn't switch models mid-way through.
 	activeCandidates, activeModel := al.selectCandidates(agent, opts.UserMessage, messages)
+
+	if opts.ModelOverride != "" {
+		// Modality check: fail fast if media present and model is known text-only
+		if len(opts.Media) > 0 {
+			if vc, ok := agent.Provider.(providers.VisionCapable); ok {
+				if !vc.SupportsVision(opts.ModelOverride) {
+					return "", 0, "", &RequestError{
+						Code:    ErrCodeModelModalityUnsupported,
+						Message: fmt.Sprintf("model %q does not support image content", opts.ModelOverride),
+					}
+				}
+			}
+			// If provider doesn't implement VisionCapable, fail-open (assume vision supported)
+		}
+		// Single-candidate override — bypasses fallback routing for this turn
+		activeModel = opts.ModelOverride
+		activeCandidates = []providers.FallbackCandidate{{Model: opts.ModelOverride}}
+	}
 
 	for iteration < agent.MaxIterations {
 		iteration++
@@ -1274,7 +1311,7 @@ func (al *AgentLoop) runLLMIteration(
 					"model":     activeModel,
 					"error":     err.Error(),
 				})
-			return "", iteration, fmt.Errorf("LLM call failed after retries: %w", err)
+			return "", iteration, activeModel, fmt.Errorf("LLM call failed after retries: %w", err)
 		}
 
 		go al.handleReasoning(
@@ -1530,7 +1567,7 @@ func (al *AgentLoop) runLLMIteration(
 		})
 	}
 
-	return finalContent, iteration, nil
+	return finalContent, iteration, activeModel, nil
 }
 
 // publishStatus publishes a live status update to the bus for channel display.

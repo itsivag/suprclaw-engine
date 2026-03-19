@@ -34,6 +34,11 @@ type OutboundMessage struct {
 	ChatID           string `json:"chat_id"`
 	Content          string `json:"content"`
 	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
+	// Model override error — if non-empty, Send() emits a typed error event instead of message.create
+	ErrorCode    string `json:"error_code,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	// Resolved model for this turn — echoed in message.create payload
+	ModelUsed string `json:"model_used,omitempty"`
 }
 
 // MediaPart describes a single media attachment to send.
