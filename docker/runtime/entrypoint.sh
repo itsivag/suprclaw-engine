@@ -74,6 +74,10 @@ WARN
 fi
 SUPR_CHANNEL_TOKEN="${GATEWAY_TOKEN:-${SUPRCLAW_CHANNELS_SUPR_TOKEN:-${SUPRCLAW_ENGINE_CHANNEL_TOKEN:-${PICOCLAW_CHANNELS_PICO_TOKEN:-suprclaw-pico-token}}}}"
 GATEWAY_ADMIN_SECRET="${SUPRCLAW_GATEWAY_ADMIN_SECRET:-${GATEWAY_TOKEN:-}}"
+CRON_WEBHOOK_ENABLED="${SUPRCLAW_TOOLS_CRON_WEBHOOK_ENABLED:-}"
+CRON_WEBHOOK_ENDPOINT="${SUPRCLAW_TOOLS_CRON_WEBHOOK_ENDPOINT:-}"
+CRON_WEBHOOK_SECRET="${SUPRCLAW_TOOLS_CRON_WEBHOOK_SECRET:-}"
+CRON_WEBHOOK_USER_ID="${SUPRCLAW_TOOLS_CRON_WEBHOOK_USER_ID:-}"
 if [ -n "${SUPRCLAW_GATEWAY_REMOTE_ADMIN_CONTROL:-}" ]; then
   GATEWAY_REMOTE_ADMIN_CONTROL="${SUPRCLAW_GATEWAY_REMOTE_ADMIN_CONTROL}"
 elif [ -n "$GATEWAY_ADMIN_SECRET" ]; then
@@ -103,6 +107,10 @@ jq -n \
   --arg gatewayAdminSecret "$GATEWAY_ADMIN_SECRET" \
   --arg gatewayRemoteAdmin "$GATEWAY_REMOTE_ADMIN_CONTROL" \
   --arg gatewayHotReload "$GATEWAY_HOT_RELOAD" \
+  --arg cronWebhookEnabled "$CRON_WEBHOOK_ENABLED" \
+  --arg cronWebhookEndpoint "$CRON_WEBHOOK_ENDPOINT" \
+  --arg cronWebhookSecret "$CRON_WEBHOOK_SECRET" \
+  --arg cronWebhookUserId "$CRON_WEBHOOK_USER_ID" \
   --argjson existingTools "$EXISTING_TOOLS_JSON" \
   '{
     agents: {
@@ -146,6 +154,13 @@ jq -n \
       }
     },
     tools: ($existingTools + {
+      cron: (($existingTools.cron // {}) + {
+        webhook: ((($existingTools.cron // {}).webhook // {})
+          + (if $cronWebhookEnabled != "" then {enabled: ($cronWebhookEnabled == "true")} else {} end)
+          + (if $cronWebhookEndpoint != "" then {endpoint: $cronWebhookEndpoint} else {} end)
+          + (if $cronWebhookSecret != "" then {secret: $cronWebhookSecret} else {} end)
+          + (if $cronWebhookUserId != "" then {user_id: $cronWebhookUserId} else {} end))
+      }),
       mcp: (($existingTools.mcp // {}) + {
         servers: ($existingTools.mcp.servers // {})
       })
