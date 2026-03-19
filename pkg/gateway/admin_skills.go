@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,29 +16,67 @@ import (
 
 const adminSkillsSearchMaxResults = 20
 
-// --- helpers ---
+// --- workspace resolution ---
 
-func (h *adminHandler) newSkillsInstaller() (*skills.SkillInstaller, error) {
+// resolveSkillsWorkspace resolves the target workspace for skill operations.
+// agentId is the primary input: the agent's configured workspace is used.
+// workspacePath is an override/escape-hatch when agentId is absent.
+// Never falls back to the default workspace — callers must provide one or the other.
+func (h *adminHandler) resolveSkillsWorkspace(agentID, workspacePath string) (ws string, err error) {
+	if workspacePath != "" {
+		// Direct override — still validate it's not doing path traversal.
+		if strings.Contains(workspacePath, "..") {
+			return "", fmt.Errorf("workspacePath must not contain '..'")
+		}
+		return workspacePath, nil
+	}
+	if agentID == "" {
+		return "", fmt.Errorf("agentId or workspacePath is required")
+	}
+	if err := validateAgentID(agentID); err != nil {
+		return "", err
+	}
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return skills.NewSkillInstaller(
-		cfg.WorkspacePath(),
-		cfg.Tools.Skills.Github.Token,
-		cfg.Tools.Skills.Github.Proxy,
-	)
+	for _, a := range cfg.Agents.List {
+		if a.ID == agentID {
+			if a.Workspace != "" {
+				return expandHomePath(a.Workspace), nil
+			}
+			// Agent exists but has no explicit workspace — use the conventional dir.
+			return h.workspaceDir(agentID), nil
+		}
+	}
+	return "", fmt.Errorf("agent %q not found", agentID)
 }
 
-func (h *adminHandler) newSkillsLoader() (*skills.SkillsLoader, error) {
+// expandHomePath expands a leading ~/ to the user's home directory.
+func expandHomePath(p string) string {
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[2:])
+		}
+	}
+	return p
+}
+
+// --- skills infrastructure helpers ---
+
+func (h *adminHandler) newSkillsInstallerFor(workspace string) (*skills.SkillInstaller, error) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
 		return nil, err
 	}
+	return skills.NewSkillInstaller(workspace, cfg.Tools.Skills.Github.Token, cfg.Tools.Skills.Github.Proxy)
+}
+
+func (h *adminHandler) newSkillsLoaderFor(workspace string) *skills.SkillsLoader {
 	globalDir := filepath.Dir(h.configPath)
 	globalSkillsDir := filepath.Join(globalDir, "skills")
 	builtinSkillsDir := filepath.Join(globalDir, "suprclaw", "skills")
-	return skills.NewSkillsLoader(cfg.WorkspacePath(), globalSkillsDir, builtinSkillsDir), nil
+	return skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir)
 }
 
 func (h *adminHandler) newSkillsRegistryMgr() (*skills.RegistryManager, error) {
@@ -55,19 +94,27 @@ func (h *adminHandler) builtinSkillsDir() string {
 	return filepath.Join(filepath.Dir(h.configPath), "suprclaw", "skills")
 }
 
-// --- GET /api/admin/skills ---
+// --- GET /api/admin/skills?agentId=<id>&workspacePath=<path> ---
 
 func (h *adminHandler) listSkills(w http.ResponseWriter, r *http.Request) {
-	loader, err := h.newSkillsLoader()
+	agentID := r.URL.Query().Get("agentId")
+	workspacePath := r.URL.Query().Get("workspacePath")
+
+	ws, err := h.resolveSkillsWorkspace(agentID, workspacePath)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	list := loader.ListSkills()
+
+	list := h.newSkillsLoaderFor(ws).ListSkills()
 	if list == nil {
 		list = []skills.SkillInfo{}
 	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"agentId":       agentID,
+		"workspacePath": ws,
+		"skills":        list,
+	})
 }
 
 // --- GET /api/admin/skills/builtin ---
@@ -118,7 +165,7 @@ func (h *adminHandler) searchSkills(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, results)
 }
 
-// --- GET /api/admin/skills/{name} ---
+// --- GET /api/admin/skills/{name}?agentId=<id>&workspacePath=<path> ---
 
 func (h *adminHandler) showSkill(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -126,25 +173,37 @@ func (h *adminHandler) showSkill(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid skill name"})
 		return
 	}
-	loader, err := h.newSkillsLoader()
+
+	agentID := r.URL.Query().Get("agentId")
+	workspacePath := r.URL.Query().Get("workspacePath")
+
+	ws, err := h.resolveSkillsWorkspace(agentID, workspacePath)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	content, ok := loader.LoadSkill(name)
+
+	content, ok := h.newSkillsLoaderFor(ws).LoadSkill(name)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "skill not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"name": name, "content": content})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"name":          name,
+		"agentId":       agentID,
+		"workspacePath": ws,
+		"content":       content,
+	})
 }
 
 // --- POST /api/admin/skills/install ---
 
 type skillInstallRequest struct {
-	Repo     string `json:"repo"`     // e.g. "owner/repo/path" or full GitHub URL
-	Registry string `json:"registry"` // optional: registry name (e.g. "clawhub")
-	Slug     string `json:"slug"`     // required when registry is set
+	AgentID       string `json:"agentId"`
+	WorkspacePath string `json:"workspacePath"`
+	Repo          string `json:"repo"`     // e.g. "owner/repo/path" or full GitHub URL
+	Registry      string `json:"registry"` // optional: registry name (e.g. "clawhub")
+	Slug          string `json:"slug"`     // required when registry is set
 }
 
 func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
@@ -154,17 +213,23 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ws, err := h.resolveSkillsWorkspace(req.AgentID, req.WorkspacePath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	if req.Registry != "" {
-		h.installSkillFromRegistry(w, r, req)
+		h.installSkillFromRegistry(w, r, req, ws)
 		return
 	}
 
 	if req.Repo == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo is required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo is required (or provide registry + slug)"})
 		return
 	}
 
-	installer, err := h.newSkillsInstaller()
+	installer, err := h.newSkillsInstallerFor(ws)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -182,10 +247,16 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	skillName := filepath.Base(req.Repo)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":        "ok",
+		"installedSkill": skillName,
+		"agentId":       req.AgentID,
+		"workspacePath": ws,
+	})
 }
 
-func (h *adminHandler) installSkillFromRegistry(w http.ResponseWriter, r *http.Request, req skillInstallRequest) {
+func (h *adminHandler) installSkillFromRegistry(w http.ResponseWriter, r *http.Request, req skillInstallRequest, ws string) {
 	if req.Slug == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug is required for registry installs"})
 		return
@@ -203,19 +274,13 @@ func (h *adminHandler) installSkillFromRegistry(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	cfg, err := config.LoadConfig(h.configPath)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	targetDir := filepath.Join(cfg.WorkspacePath(), "skills", req.Slug)
+	targetDir := filepath.Join(ws, "skills", req.Slug)
 	if _, err := os.Stat(targetDir); err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "skill '" + req.Slug + "' already installed"})
 		return
 	}
 
-	if err := os.MkdirAll(filepath.Join(cfg.WorkspacePath(), "skills"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, "skills"), 0o755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -238,28 +303,47 @@ func (h *adminHandler) installSkillFromRegistry(w http.ResponseWriter, r *http.R
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":        "ok",
+		"installedSkill": req.Slug,
 		"version":       result.Version,
 		"is_suspicious": result.IsSuspicious,
 		"summary":       result.Summary,
+		"agentId":       req.AgentID,
+		"workspacePath": ws,
 	})
 }
 
 // --- POST /api/admin/skills/install-builtin ---
 
+type installBuiltinRequest struct {
+	AgentID       string `json:"agentId"`
+	WorkspacePath string `json:"workspacePath"`
+}
+
 func (h *adminHandler) installBuiltinSkills(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.LoadConfig(h.configPath)
+	var req installBuiltinRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+
+	ws, err := h.resolveSkillsWorkspace(req.AgentID, req.WorkspacePath)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	builtinDir := h.builtinSkillsDir()
-	workspaceSkillsDir := filepath.Join(cfg.WorkspacePath(), "skills")
+	workspaceSkillsDir := filepath.Join(ws, "skills")
 
 	entries, err := os.ReadDir(builtinDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "installed": []string{}})
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":        "ok",
+				"installed":     []string{},
+				"agentId":       req.AgentID,
+				"workspacePath": ws,
+			})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -287,13 +371,15 @@ func (h *adminHandler) installBuiltinSkills(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":    "ok",
-		"installed": installed,
-		"errors":    errs,
+		"status":        "ok",
+		"installed":     installed,
+		"errors":        errs,
+		"agentId":       req.AgentID,
+		"workspacePath": ws,
 	})
 }
 
-// --- DELETE /api/admin/skills/{name} ---
+// --- DELETE /api/admin/skills/{name}?agentId=<id>&workspacePath=<path> ---
 
 func (h *adminHandler) removeSkill(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -302,7 +388,16 @@ func (h *adminHandler) removeSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	installer, err := h.newSkillsInstaller()
+	agentID := r.URL.Query().Get("agentId")
+	workspacePath := r.URL.Query().Get("workspacePath")
+
+	ws, err := h.resolveSkillsWorkspace(agentID, workspacePath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	installer, err := h.newSkillsInstallerFor(ws)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -317,5 +412,10 @@ func (h *adminHandler) removeSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":        "ok",
+		"removedSkill":  name,
+		"agentId":       agentID,
+		"workspacePath": ws,
+	})
 }
