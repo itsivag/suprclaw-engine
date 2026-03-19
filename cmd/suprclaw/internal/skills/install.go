@@ -16,7 +16,7 @@ func newInstallCommand(installerFn func() (*skills.SkillInstaller, error)) *cobr
 		Use:   "install",
 		Short: "Install skill from GitHub",
 		Example: `
-suprclaw skills install sipeed/suprclaw-skills/weather
+suprclaw skills install itsivag/suprclaw-skills/weather
 suprclaw skills install --registry clawhub github
 `,
 		Args: func(cmd *cobra.Command, args []string) error {

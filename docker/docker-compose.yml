@@ -4,7 +4,7 @@ services:
   #   docker compose -f docker/docker-compose.yml run --rm suprclaw-agent -m "Hello"
   # ─────────────────────────────────────────────
   suprclaw-agent:
-    image: docker.io/sipeed/suprclaw:latest
+    image: docker.io/itsivag/suprclaw:latest
     container_name: suprclaw-agent
     profiles:
       - agent
@@ -22,7 +22,7 @@ services:
   #   docker compose -f docker/docker-compose.yml --profile gateway up
   # ─────────────────────────────────────────────
   suprclaw-gateway:
-    image: docker.io/sipeed/suprclaw:latest
+    image: docker.io/itsivag/suprclaw:latest
     container_name: suprclaw-gateway
     restart: on-failure
     profiles:
@@ -38,7 +38,7 @@ services:
   #   docker compose -f docker/docker-compose.yml --profile launcher up
   # ─────────────────────────────────────────────
   suprclaw-launcher:
-    image: docker.io/sipeed/suprclaw:launcher
+    image: docker.io/itsivag/suprclaw:launcher
     container_name: suprclaw-launcher
     restart: on-failure
     profiles:

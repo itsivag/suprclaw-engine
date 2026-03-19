@@ -162,19 +162,19 @@ Using Telegram as an example, the main changes are:
 package channels
 
 import (
-    "github.com/sipeed/suprclaw/pkg/bus"
-    "github.com/sipeed/suprclaw/pkg/config"
+    "github.com/itsivag/suprclaw/pkg/bus"
+    "github.com/itsivag/suprclaw/pkg/config"
 )
 
 // New code (refactored branch)
 package telegram
 
 import (
-    "github.com/sipeed/suprclaw/pkg/bus"
-    "github.com/sipeed/suprclaw/pkg/channels"     // Reference parent package
-    "github.com/sipeed/suprclaw/pkg/config"
-    "github.com/sipeed/suprclaw/pkg/identity"      // New
-    "github.com/sipeed/suprclaw/pkg/media"          // New (if media support needed)
+    "github.com/itsivag/suprclaw/pkg/bus"
+    "github.com/itsivag/suprclaw/pkg/channels"     // Reference parent package
+    "github.com/itsivag/suprclaw/pkg/config"
+    "github.com/itsivag/suprclaw/pkg/identity"      // New
+    "github.com/itsivag/suprclaw/pkg/media"          // New (if media support needed)
 )
 ```
 
@@ -321,9 +321,9 @@ Create `init.go` for your channel:
 package telegram
 
 import (
-    "github.com/sipeed/suprclaw/pkg/bus"
-    "github.com/sipeed/suprclaw/pkg/channels"
-    "github.com/sipeed/suprclaw/pkg/config"
+    "github.com/itsivag/suprclaw/pkg/bus"
+    "github.com/itsivag/suprclaw/pkg/channels"
+    "github.com/itsivag/suprclaw/pkg/config"
 )
 
 func init() {
@@ -338,9 +338,9 @@ func init() {
 ```go
 // cmd/suprclaw/internal/gateway/helpers.go
 import (
-    _ "github.com/sipeed/suprclaw/pkg/channels/telegram"   // Triggers init() registration
-    _ "github.com/sipeed/suprclaw/pkg/channels/discord"
-    _ "github.com/sipeed/suprclaw/pkg/channels/your_new_channel"  // New addition
+    _ "github.com/itsivag/suprclaw/pkg/channels/telegram"   // Triggers init() registration
+    _ "github.com/itsivag/suprclaw/pkg/channels/discord"
+    _ "github.com/itsivag/suprclaw/pkg/channels/your_new_channel"  // New addition
 )
 ```
 
@@ -421,9 +421,9 @@ To add a new chat platform (e.g., `matrix`), you need to:
 package matrix
 
 import (
-    "github.com/sipeed/suprclaw/pkg/bus"
-    "github.com/sipeed/suprclaw/pkg/channels"
-    "github.com/sipeed/suprclaw/pkg/config"
+    "github.com/itsivag/suprclaw/pkg/bus"
+    "github.com/itsivag/suprclaw/pkg/channels"
+    "github.com/itsivag/suprclaw/pkg/config"
 )
 
 func init() {
@@ -442,11 +442,11 @@ import (
     "context"
     "fmt"
 
-    "github.com/sipeed/suprclaw/pkg/bus"
-    "github.com/sipeed/suprclaw/pkg/channels"
-    "github.com/sipeed/suprclaw/pkg/config"
-    "github.com/sipeed/suprclaw/pkg/identity"
-    "github.com/sipeed/suprclaw/pkg/logger"
+    "github.com/itsivag/suprclaw/pkg/bus"
+    "github.com/itsivag/suprclaw/pkg/channels"
+    "github.com/itsivag/suprclaw/pkg/config"
+    "github.com/itsivag/suprclaw/pkg/identity"
+    "github.com/itsivag/suprclaw/pkg/logger"
 )
 
 // MatrixChannel implements channels.Channel for the Matrix protocol.
@@ -812,7 +812,7 @@ if m.config.Channels.Matrix.Enabled && m.config.Channels.Matrix.Token != "" {
 ```go
 // cmd/suprclaw/internal/gateway/helpers.go
 import (
-    _ "github.com/sipeed/suprclaw/pkg/channels/matrix"
+    _ "github.com/itsivag/suprclaw/pkg/channels/matrix"
 )
 ```
 

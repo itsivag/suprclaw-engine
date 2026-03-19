@@ -1,10 +1,10 @@
 ---
 name: project_origin
-description: suprclaw-engine is a fork of sipeed/suprclaw — an ultra-lightweight AI assistant written in Go
+description: suprclaw-engine — an ultra-lightweight AI assistant written in Go
 type: project
 ---
 
-suprclaw-engine is a fork of https://github.com/sipeed/suprclaw (SuprClaw).
+suprclaw-engine is an ultra-lightweight personal AI assistant in Go (https://github.com/itsivag/suprclaw).
 
 **Why:** User is building on top of SuprClaw, an ultra-lightweight personal AI assistant in Go targeting low-resource hardware ($10 hardware, <10MB RAM, multi-arch: x86_64, ARM64, MIPS, RISC-V).
 

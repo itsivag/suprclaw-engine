@@ -41,11 +41,11 @@ Ultra-lightweight personal AI assistant written in Go, inspired by nanobot.
 MIT License - Free and open source
 
 ## Repository
-https://github.com/sipeed/suprclaw
+https://github.com/itsivag/suprclaw
 
 ## Contact
-Issues: https://github.com/sipeed/suprclaw/issues
-Discussions: https://github.com/sipeed/suprclaw/discussions
+Issues: https://github.com/itsivag/suprclaw/issues
+Discussions: https://github.com/itsivag/suprclaw/discussions
 
 ---
 

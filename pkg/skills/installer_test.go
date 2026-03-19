@@ -25,16 +25,16 @@ func TestParseGitHubRef(t *testing.T) {
 	}{
 		{
 			name:         "simple owner/repo",
-			repo:         "sipeed/suprclaw",
-			wantOwner:    "sipeed",
+			repo:         "itsivag/suprclaw",
+			wantOwner:    "itsivag",
 			wantRepoName: "suprclaw",
 			wantRef:      "main",
 			wantSubPath:  "",
 		},
 		{
 			name:         "owner/repo with subpath",
-			repo:         "sipeed/suprclaw/skills/test",
-			wantOwner:    "sipeed",
+			repo:         "itsivag/suprclaw/skills/test",
+			wantOwner:    "itsivag",
 			wantRepoName: "suprclaw",
 			wantRef:      "main",
 			wantSubPath:  "skills/test",
@@ -42,7 +42,7 @@ func TestParseGitHubRef(t *testing.T) {
 		{
 			name:         "full URL with tree",
 			repo:         "https://github.com/itsivag/suprclaw/tree/dev/skills/test",
-			wantOwner:    "sipeed",
+			wantOwner:    "itsivag",
 			wantRepoName: "suprclaw",
 			wantRef:      "dev",
 			wantSubPath:  "skills/test",
@@ -50,7 +50,7 @@ func TestParseGitHubRef(t *testing.T) {
 		{
 			name:         "full URL with blob",
 			repo:         "https://github.com/itsivag/suprclaw/blob/main/README.md",
-			wantOwner:    "sipeed",
+			wantOwner:    "itsivag",
 			wantRepoName: "suprclaw",
 			wantRef:      "main",
 			wantSubPath:  "README.md",
@@ -58,14 +58,14 @@ func TestParseGitHubRef(t *testing.T) {
 		{
 			name:         "full URL without ref",
 			repo:         "https://github.com/itsivag/suprclaw",
-			wantOwner:    "sipeed",
+			wantOwner:    "itsivag",
 			wantRepoName: "suprclaw",
 			wantRef:      "main",
 			wantSubPath:  "",
 		},
 		{
 			name:           "invalid format - single part",
-			repo:           "sipeed",
+			repo:           "itsivag",
 			wantErr:        true,
 			wantErrContain: "expected 'owner/repo'",
 		},
@@ -77,14 +77,14 @@ func TestParseGitHubRef(t *testing.T) {
 		},
 		{
 			name:           "invalid GitHub URL - only one path part",
-			repo:           "https://github.com/sipeed",
+			repo:           "https://github.com/itsivag",
 			wantErr:        true,
 			wantErrContain: "invalid GitHub URL",
 		},
 		{
 			name:         "with whitespace",
-			repo:         "  sipeed/suprclaw  ",
-			wantOwner:    "sipeed",
+			repo:         "  itsivag/suprclaw  ",
+			wantOwner:    "itsivag",
 			wantRepoName: "suprclaw",
 			wantRef:      "main",
 			wantSubPath:  "",
@@ -436,7 +436,7 @@ func TestSkillInstaller_InstallFromGitHub_SkillAlreadyExists(t *testing.T) {
 	os.WriteFile(filepath.Join(existingSkill, "SKILL.md"), []byte("existing"), 0o644)
 
 	// Try to install the same skill - should fail
-	err = installer.InstallFromGitHub(context.Background(), "sipeed/suprclaw")
+	err = installer.InstallFromGitHub(context.Background(), "itsivag/suprclaw")
 	if err == nil {
 		t.Error("InstallFromGitHub() expected error for existing skill, got nil")
 	}
