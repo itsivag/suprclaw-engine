@@ -394,8 +394,12 @@ func (t *CronTool) fireWebhook(job *cron.CronJob, executionMS int64, content str
 	if !t.webhookCfg.Enabled || t.webhookCfg.Endpoint == "" {
 		return
 	}
+	eventID := cron.CronEventID(job.ID, executionMS)
 	event := cron.WebhookEvent{
-		EventID:   cron.CronEventID(job.ID, executionMS),
+		Type:      "chat.message",
+		EventID:   eventID,
+		MessageID: eventID,
+		ThreadKey: fmt.Sprintf("cron-%s", job.ID),
 		CreatedAt: time.UnixMilli(executionMS).UTC().Format(time.RFC3339),
 		Source:    "cron",
 		AgentID:   t.agentID,

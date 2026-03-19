@@ -21,7 +21,10 @@ type WebhookConfig struct {
 
 // WebhookEvent is the payload sent to the webhook endpoint after a successful cron job execution.
 type WebhookEvent struct {
+	Type      string `json:"type"`
 	EventID   string `json:"eventId"`
+	MessageID string `json:"messageId"`
+	ThreadKey string `json:"threadKey"`
 	CreatedAt string `json:"createdAt"` // RFC3339
 	Source    string `json:"source"`    // "cron"
 	AgentID   string `json:"agentId"`
