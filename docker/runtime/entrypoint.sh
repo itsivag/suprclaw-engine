@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUNTIME_HOME="${SUPRCLAW_HOME:-${SUPRCLAW_ENGINE_HOME:-${PICOCLAW_HOME:-/home/picoclaw/.suprclaw}}}"
+RUNTIME_HOME="${SUPRCLAW_HOME:-${SUPRCLAW_ENGINE_HOME:-${PICOCLAW_HOME:-/home/suprclaw/.suprclaw}}}"
 RUNTIME_CONFIG="${SUPRCLAW_CONFIG:-${SUPRCLAW_ENGINE_CONFIG:-${PICOCLAW_CONFIG:-$RUNTIME_HOME/config.json}}}"
 WORKSPACE_DIR="$RUNTIME_HOME/workspace"
 TEMPLATE_DIR="/opt/suprclaw/workspace"
 
 mkdir -p "$RUNTIME_HOME" "$WORKSPACE_DIR"
-chown -R picoclaw:picoclaw /home/picoclaw "$RUNTIME_HOME"
+chown -R suprclaw:suprclaw /home/suprclaw "$RUNTIME_HOME"
 
 if [ -d "$TEMPLATE_DIR" ]; then
   cp -a "$TEMPLATE_DIR/." "$WORKSPACE_DIR/"
-  chown -R picoclaw:picoclaw "$WORKSPACE_DIR"
+  chown -R suprclaw:suprclaw "$WORKSPACE_DIR"
 fi
 
 MODEL_NAME="${SUPRCLAW_ENGINE_MODEL_NAME:-${PICOCLAW_MODEL_NAME:-suprclaw-default}}"
@@ -167,6 +167,6 @@ jq -n \
     })
   }' > "$RUNTIME_CONFIG"
 
-chown picoclaw:picoclaw "$RUNTIME_CONFIG"
+chown suprclaw:suprclaw "$RUNTIME_CONFIG"
 
 exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf -n
