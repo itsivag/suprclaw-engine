@@ -39,6 +39,7 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 
 	// Runtime
 	mux.HandleFunc("POST /api/admin/runtime/reload", h.auth(h.reloadRuntime))
+	mux.HandleFunc("POST /api/admin/runtime/stop", h.auth(h.stopRuntime))
 
 	// Workspaces
 	mux.HandleFunc("POST /api/admin/workspaces/bootstrap", h.auth(h.bootstrapWorkspace))

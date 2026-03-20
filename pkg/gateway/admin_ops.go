@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/itsivag/suprclaw/pkg/config"
@@ -182,6 +183,16 @@ func (h *adminHandler) reloadRuntime(w http.ResponseWriter, r *http.Request) {
 	// Poll until port 18790 is reachable (up to 30s) so callers can block if needed.
 	// We return 202 immediately; the caller may re-poll /health.
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+}
+
+// --- POST /api/admin/runtime/stop ---
+
+func (h *adminHandler) stopRuntime(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		syscall.Kill(os.Getpid(), syscall.SIGTERM) //nolint:errcheck
+	}()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
 }
 
 // waitForPort blocks until addr is connectable or timeout elapses.
