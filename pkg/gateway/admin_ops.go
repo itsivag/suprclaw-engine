@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/itsivag/suprclaw/pkg/config"
@@ -190,7 +189,9 @@ func (h *adminHandler) reloadRuntime(w http.ResponseWriter, r *http.Request) {
 func (h *adminHandler) stopRuntime(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		syscall.Kill(os.Getpid(), syscall.SIGTERM) //nolint:errcheck
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			p.Signal(os.Interrupt) //nolint:errcheck
+		}
 	}()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
 }
