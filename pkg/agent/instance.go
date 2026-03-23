@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/itsivag/suprclaw/pkg/checkpoint"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/media"
 	"github.com/itsivag/suprclaw/pkg/memory"
@@ -52,6 +53,10 @@ type AgentInstance struct {
 	// LightCandidates holds the resolved provider candidates for the light model.
 	// Pre-computed at agent creation to avoid repeated model_list lookups at runtime.
 	LightCandidates []providers.FallbackCandidate
+
+	// CheckpointSvc is non-nil when the checkpoint system is enabled.
+	// It is injected by the gateway after agent construction.
+	CheckpointSvc *checkpoint.Service
 }
 
 // NewAgentInstance creates an agent instance from config.

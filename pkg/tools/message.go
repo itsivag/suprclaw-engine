@@ -21,6 +21,9 @@ func (t *MessageTool) Name() string {
 	return "message"
 }
 
+// SideEffectType returns "external" — message sends to external channels.
+func (t *MessageTool) SideEffectType() string { return "external" }
+
 func (t *MessageTool) Description() string {
 	return "Send a message to user on a chat channel. Use this when you want to communicate something."
 }

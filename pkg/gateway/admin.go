@@ -5,19 +5,35 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/itsivag/suprclaw/pkg/agent"
+	"github.com/itsivag/suprclaw/pkg/checkpoint"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/cron"
 )
 
 type adminHandler struct {
-	configPath  string
-	cronService *cron.CronService
-	secret      string
-	mu          sync.Mutex // serialises all config mutations
+	configPath     string
+	cronService    *cron.CronService
+	secret         string
+	mu             sync.Mutex // serialises all config mutations
+	agentLoop      *agent.AgentLoop
+	checkpointSvc  *checkpoint.Service
 }
 
-func newAdminHandler(configPath string, cs *cron.CronService, secret string) *adminHandler {
-	return &adminHandler{configPath: configPath, cronService: cs, secret: secret}
+func newAdminHandler(
+	configPath string,
+	cs *cron.CronService,
+	secret string,
+	al *agent.AgentLoop,
+	cpSvc *checkpoint.Service,
+) *adminHandler {
+	return &adminHandler{
+		configPath:    configPath,
+		cronService:   cs,
+		secret:        secret,
+		agentLoop:     al,
+		checkpointSvc: cpSvc,
+	}
 }
 
 func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
@@ -52,6 +68,13 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 
 	// MCP
 	mux.HandleFunc("POST /api/admin/mcp/configure", h.auth(h.mcpConfigure))
+
+	// Checkpoint system
+	mux.HandleFunc("GET /api/admin/checkpoints", h.auth(h.listCheckpoints))
+	mux.HandleFunc("POST /api/admin/checkpoints", h.auth(h.createCheckpoint))
+	mux.HandleFunc("POST /api/admin/checkpoints/{commitId}/rollback", h.auth(h.rollbackCheckpoint))
+	mux.HandleFunc("GET /api/admin/audit/actions", h.auth(h.listAuditActions))
+	mux.HandleFunc("POST /api/admin/commits/{commitId}/revoke", h.auth(h.revokeCommit))
 
 	// Skills — specific paths before wildcard
 	mux.HandleFunc("GET /api/admin/skills", h.auth(h.listSkills))

@@ -13,6 +13,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/agent"
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/channels"
+	"github.com/itsivag/suprclaw/pkg/checkpoint"
 	_ "github.com/itsivag/suprclaw/pkg/channels/discord"
 	_ "github.com/itsivag/suprclaw/pkg/channels/irc"
 	_ "github.com/itsivag/suprclaw/pkg/channels/line"
@@ -225,8 +226,32 @@ func setupAndStartServices(
 	runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
 
+	// Build checkpoint service when enabled.
+	var cpSvc *checkpoint.Service
+	if cc := cfg.Agents.Defaults.Checkpoint; cc != nil && cc.Enabled {
+		baseDir := filepath.Dir(cfg.WorkspacePath())
+		cpCfg := &checkpoint.Config{
+			Enabled:            cc.Enabled,
+			EveryNToolCalls:    cc.EveryNToolCalls,
+			CheckpointBefore:   cc.CheckpointBefore,
+			StoreSnapData:      cc.StoreSnapData,
+			MaxSnapFileSize:    cc.MaxSnapFileSize,
+			MaxCommitsPerAgent: cc.MaxCommitsPerAgent,
+		}
+		cpSvc = checkpoint.NewService(baseDir, cpCfg)
+
+		// Inject checkpoint service into each running agent instance.
+		registry := agentLoop.GetRegistry()
+		for _, agentID := range registry.ListAgentIDs() {
+			if inst, ok := registry.GetAgent(agentID); ok {
+				inst.CheckpointSvc = cpSvc
+			}
+		}
+		fmt.Println("✓ Checkpoint service enabled")
+	}
+
 	if cfg.Gateway.RemoteAdminControl {
-		adminH := newAdminHandler(configPath, runningServices.CronService, cfg.Gateway.AdminSecret)
+		adminH := newAdminHandler(configPath, runningServices.CronService, cfg.Gateway.AdminSecret, agentLoop, cpSvc)
 		adminH.registerRoutes(runningServices.ChannelManager.Mux())
 		fmt.Printf("✓ Admin API enabled at http://%s:%d/api/admin/*\n", cfg.Gateway.Host, cfg.Gateway.Port)
 	}
@@ -422,7 +447,7 @@ func restartServices(
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
 
 	if cfg.Gateway.RemoteAdminControl {
-		adminH := newAdminHandler(runningServices.configPath, runningServices.CronService, cfg.Gateway.AdminSecret)
+		adminH := newAdminHandler(runningServices.configPath, runningServices.CronService, cfg.Gateway.AdminSecret, al, nil)
 		adminH.registerRoutes(runningServices.ChannelManager.Mux())
 	}
 

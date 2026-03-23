@@ -279,6 +279,9 @@ func (t *ReadFileTool) Name() string {
 	return "read_file"
 }
 
+// SideEffectType returns "none" — read_file is read-only.
+func (t *ReadFileTool) SideEffectType() string { return "none" }
+
 func (t *ReadFileTool) Description() string {
 	return "Read the contents of a file. Supports pagination via `offset` and `length`."
 }
@@ -495,6 +498,9 @@ func (t *WriteFileTool) Name() string {
 	return "write_file"
 }
 
+// SideEffectType returns "local" — write_file only modifies workspace files.
+func (t *WriteFileTool) SideEffectType() string { return "local" }
+
 func (t *WriteFileTool) Description() string {
 	return "Write content to a file"
 }
@@ -549,6 +555,9 @@ func NewListDirTool(workspace string, restrict bool, allowPaths ...[]*regexp.Reg
 func (t *ListDirTool) Name() string {
 	return "list_dir"
 }
+
+// SideEffectType returns "none" — list_dir is read-only.
+func (t *ListDirTool) SideEffectType() string { return "none" }
 
 func (t *ListDirTool) Description() string {
 	return "List files and directories in a path"

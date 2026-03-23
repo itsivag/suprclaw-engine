@@ -21,6 +21,7 @@ import (
 
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/channels"
+	"github.com/itsivag/suprclaw/pkg/checkpoint"
 	"github.com/itsivag/suprclaw/pkg/commands"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/constants"
@@ -1110,6 +1111,12 @@ func (al *AgentLoop) runLLMIteration(
 	iteration := 0
 	var finalContent string
 
+	// Create a per-turn checkpoint hook if the service is enabled.
+	var cpHook *checkpoint.ToolHook
+	if agent.CheckpointSvc != nil {
+		cpHook = agent.CheckpointSvc.NewHook(agent.ID, opts.SessionKey, agent.Workspace)
+	}
+
 	// Determine effective model tier for this conversation turn.
 	// selectCandidates evaluates routing once and the decision is sticky for
 	// all tool-follow-up iterations within the same turn so that a multi-step
@@ -1421,6 +1428,16 @@ func (al *AgentLoop) runLLMIteration(
 		agentResults := make([]indexedAgentResult, len(normalizedToolCalls))
 		var wg sync.WaitGroup
 
+		// Pre-checkpoint: if any requested tool is in checkpoint_before, take a snapshot
+		// of the current session+workspace state before tools execute.
+		if cpHook != nil {
+			currentMsgs := agent.Sessions.GetHistory(opts.SessionKey)
+			if err := cpHook.CheckpointBefore(ctx, toolNames, currentMsgs); err != nil {
+				logger.WarnCF("checkpoint", "Pre-checkpoint failed",
+					map[string]any{"agent_id": agent.ID, "error": err.Error()})
+			}
+		}
+
 		for i, tc := range normalizedToolCalls {
 			agentResults[i].tc = tc
 
@@ -1489,9 +1506,31 @@ func (al *AgentLoop) runLLMIteration(
 					asyncCallback,
 				)
 				agentResults[idx].result = toolResult
+
+				// Audit log: record this tool call result (goroutine-safe).
+				if cpHook != nil {
+					sideEffect := "external" // conservative default
+					if t, ok := agent.Tools.Get(tc.Name); ok {
+						if sc, ok := t.(tools.SideEffectClassifier); ok {
+							sideEffect = sc.SideEffectType()
+						}
+					}
+					cpHook.LogToolCall(tc.Name, tc.Arguments,
+						toolResult.ForLLM, toolResult.IsError, sideEffect)
+				}
 			}(i, tc)
 		}
 		wg.Wait()
+
+		// Periodic checkpoint: increment counter and take snapshot if threshold reached.
+		// Called from main goroutine (after wg.Wait) — safe to access workspace.
+		if cpHook != nil {
+			currentMsgs := agent.Sessions.GetHistory(opts.SessionKey)
+			if err := cpHook.IncrementAndMaybeCheckpoint(ctx, len(normalizedToolCalls), currentMsgs); err != nil {
+				logger.WarnCF("checkpoint", "Periodic checkpoint failed",
+					map[string]any{"agent_id": agent.ID, "error": err.Error()})
+			}
+		}
 
 		if agent.StatusUpdates {
 			al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{

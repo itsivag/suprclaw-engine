@@ -28,6 +28,9 @@ func (t *EditFileTool) Name() string {
 	return "edit_file"
 }
 
+// SideEffectType returns "local" — edit_file only modifies workspace files.
+func (t *EditFileTool) SideEffectType() string { return "local" }
+
 func (t *EditFileTool) Description() string {
 	return "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
 }
@@ -90,6 +93,9 @@ func NewAppendFileTool(workspace string, restrict bool, allowPaths ...[]*regexp.
 func (t *AppendFileTool) Name() string {
 	return "append_file"
 }
+
+// SideEffectType returns "local" — append_file only modifies workspace files.
+func (t *AppendFileTool) SideEffectType() string { return "local" }
 
 func (t *AppendFileTool) Description() string {
 	return "Append content to the end of a file"

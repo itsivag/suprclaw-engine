@@ -81,6 +81,20 @@ type AsyncExecutor interface {
 	ExecuteAsync(ctx context.Context, args map[string]any, cb AsyncCallback) *ToolResult
 }
 
+// SideEffectClassifier is an optional interface that tools can implement to
+// declare their side-effect category for the checkpoint audit system.
+// If a tool does not implement this interface, the audit system assumes
+// SideEffectExternal ("external") as the safest conservative default.
+//
+// Return values:
+//
+//	"none"     — read-only, no state changes (e.g. read_file, list_dir)
+//	"local"    — modifies workspace files only (e.g. write_file, edit_file)
+//	"external" — calls external services/processes (e.g. MCP tools, exec, send_message)
+type SideEffectClassifier interface {
+	SideEffectType() string
+}
+
 func ToolToSchema(tool Tool) map[string]any {
 	return map[string]any{
 		"type": "function",

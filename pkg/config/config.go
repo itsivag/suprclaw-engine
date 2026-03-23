@@ -244,8 +244,18 @@ type RoutingConfig struct {
 	Threshold  float64 `json:"threshold"`   // complexity score in [0,1]; score >= threshold → primary model
 }
 
+// CheckpointConfig controls the git-like state versioning system.
+type CheckpointConfig struct {
+	Enabled            bool     `json:"enabled"`
+	EveryNToolCalls    int      `json:"every_n_tool_calls"`    // 0 = disabled
+	CheckpointBefore   []string `json:"checkpoint_before"`     // tool names triggering pre-checkpoint
+	StoreSnapData      bool     `json:"store_snap_data"`       // copy workspace files + session
+	MaxSnapFileSize    int64    `json:"max_snap_file_size"`    // bytes; default 5 MB
+	MaxCommitsPerAgent int      `json:"max_commits_per_agent"` // default 100
+}
+
 type AgentDefaults struct {
-	Workspace                 string         `json:"workspace"                       env:"SUPRCLAW_AGENTS_DEFAULTS_WORKSPACE"`
+	Workspace                 string            `json:"workspace"                       env:"SUPRCLAW_AGENTS_DEFAULTS_WORKSPACE"`
 	RestrictToWorkspace       bool           `json:"restrict_to_workspace"           env:"SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
 	AllowReadOutsideWorkspace bool           `json:"allow_read_outside_workspace"    env:"SUPRCLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
 	Provider                  string         `json:"provider"                        env:"SUPRCLAW_AGENTS_DEFAULTS_PROVIDER"`
@@ -260,8 +270,9 @@ type AgentDefaults struct {
 	SummarizeMessageThreshold int            `json:"summarize_message_threshold"     env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
 	SummarizeTokenPercent     int            `json:"summarize_token_percent"         env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
 	MaxMediaSize              int            `json:"max_media_size,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
-	StatusUpdates             bool           `json:"status_updates,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_STATUS_UPDATES"`
-	Routing                   *RoutingConfig `json:"routing,omitempty"`
+	StatusUpdates             bool              `json:"status_updates,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_STATUS_UPDATES"`
+	Routing                   *RoutingConfig    `json:"routing,omitempty"`
+	Checkpoint                *CheckpointConfig `json:"checkpoint,omitempty"`
 }
 
 const DefaultMaxMediaSize = 20 * 1024 * 1024 // 20 MB

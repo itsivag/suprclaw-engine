@@ -199,6 +199,9 @@ func (t *MCPTool) Parameters() map[string]any {
 	return result
 }
 
+// SideEffectType returns "external" — MCP tools always call external processes/HTTP.
+func (t *MCPTool) SideEffectType() string { return "external" }
+
 // Execute executes the MCP tool
 func (t *MCPTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
 	result, err := t.manager.CallTool(ctx, t.serverName, t.tool.Name, args)
