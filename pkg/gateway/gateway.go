@@ -238,6 +238,13 @@ func setupAndStartServices(
 			MaxSnapFileSize:    cc.MaxSnapFileSize,
 			MaxCommitsPerAgent: cc.MaxCommitsPerAgent,
 		}
+		for _, r := range cc.Compensations {
+			cpCfg.Compensations = append(cpCfg.Compensations, checkpoint.CompensationRule{
+				ToolName:    r.ToolName,
+				InverseTool: r.InverseTool,
+				InverseArgs: r.InverseArgs,
+			})
+		}
 		cpSvc = checkpoint.NewService(baseDir, cpCfg)
 
 		// Inject checkpoint service into each running agent instance.

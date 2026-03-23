@@ -40,7 +40,7 @@ func newToolHook(svc *Service, agentID, sessionKey, workspace string, cfg *Confi
 func (h *ToolHook) LogToolCall(
 	toolName string,
 	args map[string]any,
-	resultPreview string,
+	result string,
 	isError bool,
 	sideEffect string,
 ) {
@@ -49,14 +49,19 @@ func (h *ToolHook) LogToolCall(
 		SessionKey:    h.sessionKey,
 		ToolName:      toolName,
 		ArgsDigest:    DigestArgs(args),
-		ResultPreview: truncate(resultPreview, 200),
+		ResultPreview: truncate(result, 200),
 		IsError:       isError,
 		SideEffect:    sideEffect,
 	}
 
-	// For external side-effects, store full args for forensic value.
+	// For external side-effects, store full args + result for forensic value,
+	// and resolve any compensation plan.
 	if sideEffect == SideEffectExternal {
 		entry.ArgsFull = args
+		entry.ResultFull = result
+		if len(h.cfg.Compensations) > 0 {
+			entry.Compensation = ResolveCompensation(h.cfg.Compensations, toolName, args, result)
+		}
 	}
 
 	if lastID, ok := h.lastCommit.Load().(string); ok {

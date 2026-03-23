@@ -21,6 +21,7 @@ Runs on $10 hardware with <10MB RAM. Single binary, 1-second boot, works across 
 - **Multi-channel** — Telegram, Discord, WhatsApp, Matrix, LINE, and more
 - **Scheduled tasks** — built-in cron
 - **Sandboxed** — agent restricted to workspace by default
+- **Checkpoints** — git-like session + workspace rollback with full audit log
 
 ---
 
@@ -485,6 +486,47 @@ suprclaw agent -m "Remind me in 30 minutes"
 ```
 
 Jobs are stored in `~/.suprclaw/workspace/cron/` and run automatically.
+
+---
+
+## Checkpoints & Rollback
+
+SuprClaw can automatically snapshot agent state before risky tool calls and let you roll back session history or workspace files via the Admin API.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "checkpoint": {
+        "enabled": true,
+        "every_n_tool_calls": 5,
+        "checkpoint_before": ["write_file", "edit_file", "exec"],
+        "store_snap_data": true
+      }
+    }
+  }
+}
+```
+
+**Admin API** (requires `remote_admin_control: true`):
+
+```bash
+# List commits
+GET /api/admin/checkpoints?agentId=main
+
+# Roll back session + workspace
+POST /api/admin/checkpoints/{commitId}/rollback   {"agentId":"main","scope":"all"}
+
+# View full audit log
+GET /api/admin/audit/actions?agentId=main
+
+# Revoke a commit
+POST /api/admin/commits/{commitId}/revoke   {"agentId":"main"}
+```
+
+Every tool call is classified (`none` / `local` / `external`). External calls (MCP, exec, channel messages) that cannot be automatically undone are always enumerated in the rollback response as `unrestoable_side_effects`. Optional compensation rules let you define inverse MCP tool calls to execute during rollback.
+
+See [docs/checkpoint.md](docs/checkpoint.md) for the full reference.
 
 ---
 

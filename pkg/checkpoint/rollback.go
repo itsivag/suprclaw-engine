@@ -8,10 +8,11 @@ import (
 
 // RollbackResult describes the outcome of a rollback operation.
 type RollbackResult struct {
-	RestoredCommit         *CommitManifest `json:"restored_commit"`
-	SessionMessagesRestored int            `json:"session_messages_restored"`
-	WorkspaceFilesRestored  []string       `json:"workspace_files_restored"`
-	UnrestoableSideEffects  []ActionEntry  `json:"unrestoable_side_effects"`
+	RestoredCommit          *CommitManifest      `json:"restored_commit"`
+	SessionMessagesRestored int                  `json:"session_messages_restored"`
+	WorkspaceFilesRestored  []string             `json:"workspace_files_restored"`
+	UnrestoableSideEffects  []ActionEntry        `json:"unrestoable_side_effects"`
+	Compensations           []CompensationResult `json:"compensations,omitempty"`
 }
 
 // SetHistoryFunc is a callback used to restore session history.
@@ -36,31 +37,28 @@ func RollbackWorkspace(snapDir, workspace string, commit *CommitManifest) ([]str
 	return RestoreSnapData(snapDir, workspace, commit)
 }
 
+// commitCutSeq finds the highest action log seq that references targetCommit.
+// all must be newest-first (as returned by actionLog.Query).
+// Returns 0 if no entry references the commit.
+func commitCutSeq(all []ActionEntry, targetCommitID string) int64 {
+	for _, e := range all {
+		if e.CommitID == targetCommitID {
+			return e.Seq
+		}
+	}
+	return 0
+}
+
 // FindSideEffectsBetween returns action entries with side_effect=external that
 // occurred after the target commit was created. These represent operations
 // that cannot be automatically undone.
 func (s *Service) FindSideEffectsBetween(agentID string, targetCommit *CommitManifest) ([]ActionEntry, error) {
-	// Find the sequence number of the last entry at the time of the target commit.
-	// We approximate this by looking at entries that reference the targetCommit.ID.
-	// A simpler approach: return all external actions that happened after the target.
-	// Since action entries are append-only and ordered by seq, we find the seq
-	// of the last entry referencing targetCommit and return all external entries after it.
-
 	all, err := s.actionLog.Query(agentID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint: query audit: %w", err)
 	}
 
-	// Find the highest seq that references this commitID (or earlier commits).
-	// Since all is newest-first, find the first entry (highest seq) that references
-	// this commit and note entries after that.
-	var cutSeq int64
-	for _, e := range all {
-		if e.CommitID == targetCommit.ID {
-			cutSeq = e.Seq
-			break
-		}
-	}
+	cutSeq := commitCutSeq(all, targetCommit.ID)
 
 	var result []ActionEntry
 	for _, e := range all {
@@ -72,4 +70,15 @@ func (s *Service) FindSideEffectsBetween(agentID string, targetCommit *CommitMan
 		}
 	}
 	return result, nil
+}
+
+// entriesAfterCommit returns all action log entries (oldest-first) with seq > the
+// cutSeq derived from the target commit, for use in compensation execution.
+func (s *Service) entriesAfterCommit(agentID string, targetCommit *CommitManifest) ([]ActionEntry, error) {
+	all, err := s.actionLog.Query(agentID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint: query audit: %w", err)
+	}
+	cutSeq := commitCutSeq(all, targetCommit.ID)
+	return s.actionLog.QueryAfterSeq(agentID, cutSeq)
 }

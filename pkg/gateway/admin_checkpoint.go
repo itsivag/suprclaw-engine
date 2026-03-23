@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -40,6 +42,32 @@ func (h *adminHandler) resolveAgentAssets(w http.ResponseWriter, agentID string)
 		return "", nil, false
 	}
 	return inst.Workspace, inst.Sessions, true
+}
+
+// buildToolExecutor constructs a ToolExecutorFunc from the live agent instance's tool registry.
+// Returns nil if the agent or its tools are unavailable.
+func (h *adminHandler) buildToolExecutor(agentID string) checkpoint.ToolExecutorFunc {
+	if h.agentLoop == nil {
+		return nil
+	}
+	registry := h.agentLoop.GetRegistry()
+	inst, found := registry.GetAgent(agentID)
+	if !found {
+		inst = registry.GetDefaultAgent()
+	}
+	if inst == nil || inst.Tools == nil {
+		return nil
+	}
+	return func(ctx context.Context, toolName string, args map[string]any) (string, error) {
+		result := inst.Tools.Execute(ctx, toolName, args)
+		if result.IsError {
+			if result.Err != nil {
+				return result.ForLLM, result.Err
+			}
+			return result.ForLLM, fmt.Errorf("%s", result.ForLLM)
+		}
+		return result.ForLLM, nil
+	}
 }
 
 // --- GET /api/admin/checkpoints?agentId=&sessionKey= ---
@@ -152,7 +180,9 @@ func (h *adminHandler) rollbackCheckpoint(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	result, err := h.checkpointSvc.Rollback(req.AgentID, commitID, scope, workspace, setHistory)
+	executor := h.buildToolExecutor(req.AgentID)
+
+	result, err := h.checkpointSvc.Rollback(r.Context(), req.AgentID, commitID, scope, workspace, setHistory, executor)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

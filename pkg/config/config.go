@@ -244,14 +244,24 @@ type RoutingConfig struct {
 	Threshold  float64 `json:"threshold"`   // complexity score in [0,1]; score >= threshold → primary model
 }
 
+// CompensationRule maps a tool call to an inverse tool call for rollback compensation.
+type CompensationRule struct {
+	ToolName    string `json:"tool_name"`
+	InverseTool string `json:"inverse_tool"`
+	// InverseArgs is a Go text/template producing a JSON object.
+	// Template data: {Args map[string]any, Result map[string]any, ResultRaw string}
+	InverseArgs string `json:"inverse_args"`
+}
+
 // CheckpointConfig controls the git-like state versioning system.
 type CheckpointConfig struct {
-	Enabled            bool     `json:"enabled"`
-	EveryNToolCalls    int      `json:"every_n_tool_calls"`    // 0 = disabled
-	CheckpointBefore   []string `json:"checkpoint_before"`     // tool names triggering pre-checkpoint
-	StoreSnapData      bool     `json:"store_snap_data"`       // copy workspace files + session
-	MaxSnapFileSize    int64    `json:"max_snap_file_size"`    // bytes; default 5 MB
-	MaxCommitsPerAgent int      `json:"max_commits_per_agent"` // default 100
+	Enabled            bool               `json:"enabled"`
+	EveryNToolCalls    int                `json:"every_n_tool_calls"`      // 0 = disabled
+	CheckpointBefore   []string           `json:"checkpoint_before"`       // tool names triggering pre-checkpoint
+	StoreSnapData      bool               `json:"store_snap_data"`         // copy workspace files + session
+	MaxSnapFileSize    int64              `json:"max_snap_file_size"`      // bytes; default 5 MB
+	MaxCommitsPerAgent int                `json:"max_commits_per_agent"`   // default 100
+	Compensations      []CompensationRule `json:"compensations,omitempty"` // inverse-call rules for external tools
 }
 
 type AgentDefaults struct {

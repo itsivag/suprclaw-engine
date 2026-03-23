@@ -11,12 +11,13 @@ const (
 
 // Config holds checkpoint configuration.
 type Config struct {
-	Enabled            bool     `json:"enabled"`
-	EveryNToolCalls    int      `json:"every_n_tool_calls"`   // 0 = disabled
-	CheckpointBefore   []string `json:"checkpoint_before"`    // tool names that trigger pre-checkpoint
-	StoreSnapData      bool     `json:"store_snap_data"`      // whether to copy workspace files + session
-	MaxSnapFileSize    int64    `json:"max_snap_file_size"`   // bytes, default 5 MB
-	MaxCommitsPerAgent int      `json:"max_commits_per_agent"` // default 100
+	Enabled            bool               `json:"enabled"`
+	EveryNToolCalls    int                `json:"every_n_tool_calls"`    // 0 = disabled
+	CheckpointBefore   []string           `json:"checkpoint_before"`     // tool names that trigger pre-checkpoint
+	StoreSnapData      bool               `json:"store_snap_data"`       // whether to copy workspace files + session
+	MaxSnapFileSize    int64              `json:"max_snap_file_size"`    // bytes, default 5 MB
+	MaxCommitsPerAgent int                `json:"max_commits_per_agent"` // default 100
+	Compensations      []CompensationRule `json:"compensations,omitempty"` // inverse-call rules for external tools
 }
 
 // MaxSnapFileSizeBytes returns the effective file size limit.
@@ -39,18 +40,20 @@ func (c *Config) HasTool(name string) bool {
 
 // ActionEntry is one JSONL line in the per-agent audit log.
 type ActionEntry struct {
-	Seq           int64          `json:"seq"`
-	Ts            time.Time      `json:"ts"`
-	AgentID       string         `json:"agent_id"`
-	SessionKey    string         `json:"session_key"`
-	ToolName      string         `json:"tool_name"`
-	ArgsDigest    string         `json:"args_digest"`
-	ArgsFull      map[string]any `json:"args_full,omitempty"` // only populated for external side-effects
-	ResultPreview string         `json:"result_preview"`
-	IsError       bool           `json:"is_error"`
-	SideEffect    string         `json:"side_effect"`
-	CommitID      string         `json:"commit_id,omitempty"`
-	Revoked       bool           `json:"revoked"`
+	Seq           int64             `json:"seq"`
+	Ts            time.Time         `json:"ts"`
+	AgentID       string            `json:"agent_id"`
+	SessionKey    string            `json:"session_key"`
+	ToolName      string            `json:"tool_name"`
+	ArgsDigest    string            `json:"args_digest"`
+	ArgsFull      map[string]any    `json:"args_full,omitempty"`    // only populated for external side-effects
+	ResultPreview string            `json:"result_preview"`
+	ResultFull    string            `json:"result_full,omitempty"`  // full result for external tools
+	Compensation  *CompensationPlan `json:"compensation,omitempty"` // resolved inverse call, if a rule matched
+	IsError       bool              `json:"is_error"`
+	SideEffect    string            `json:"side_effect"`
+	CommitID      string            `json:"commit_id,omitempty"`
+	Revoked       bool              `json:"revoked"`
 }
 
 // FileSnapshot records one file's metadata at checkpoint time.

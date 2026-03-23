@@ -128,10 +128,14 @@ func (s *Service) GetCommit(agentID, commitID string) (*CommitManifest, error) {
 // scope is "session", "workspace", or "all".
 // setHistory is called if session rollback is requested.
 // workspace is the agent's workspace directory for workspace rollback.
+// executor, if non-nil, is used to execute compensation calls for external tool calls
+// that occurred after the target commit. Pass nil to skip compensation execution.
 func (s *Service) Rollback(
+	ctx context.Context,
 	agentID, commitID, scope string,
 	workspace string,
 	setHistory SetHistoryFunc,
+	executor ToolExecutorFunc,
 ) (*RollbackResult, error) {
 	commit, err := s.commitStore.Read(agentID, commitID)
 	if err != nil {
@@ -145,13 +149,41 @@ func (s *Service) Rollback(
 	snapDir := s.commitStore.SnapDir(agentID, commitID)
 	result := &RollbackResult{RestoredCommit: commit}
 
-	// Find unrestorable side effects before actually rolling back
+	// Find unrestorable side effects before actually rolling back.
 	sideEffects, err := s.FindSideEffectsBetween(agentID, commit)
 	if err != nil {
 		logger.WarnCF("checkpoint", "Could not query side effects",
 			map[string]any{"error": err.Error()})
 	}
 	result.UnrestoableSideEffects = sideEffects
+
+	// Execute compensations for external tool calls that have a plan.
+	if executor != nil {
+		allAfter, err := s.entriesAfterCommit(agentID, commit)
+		if err != nil {
+			logger.WarnCF("checkpoint", "Could not query entries for compensation",
+				map[string]any{"error": err.Error()})
+		} else {
+			compResults := ExecuteCompensations(ctx, allAfter, executor)
+			if len(compResults) > 0 {
+				result.Compensations = compResults
+				// Remove successfully compensated entries from UnrestoableSideEffects.
+				compensatedSeqs := make(map[int64]bool, len(compResults))
+				for _, cr := range compResults {
+					if cr.Error == "" && !cr.Skipped {
+						compensatedSeqs[cr.Seq] = true
+					}
+				}
+				filtered := result.UnrestoableSideEffects[:0]
+				for _, e := range result.UnrestoableSideEffects {
+					if !compensatedSeqs[e.Seq] {
+						filtered = append(filtered, e)
+					}
+				}
+				result.UnrestoableSideEffects = filtered
+			}
+		}
+	}
 
 	doSession := scope == "session" || scope == "all"
 	doWorkspace := scope == "workspace" || scope == "all"
