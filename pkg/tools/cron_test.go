@@ -17,7 +17,7 @@ func newTestCronToolWithConfig(t *testing.T, cfg *config.Config) *CronTool {
 	storePath := filepath.Join(t.TempDir(), "cron.json")
 	cronService := cron.NewCronService(storePath, nil)
 	msgBus := bus.NewMessageBus()
-	tool, err := NewCronTool(cronService, nil, msgBus, t.TempDir(), true, 0, cfg)
+	tool, err := NewCronTool(cronService, nil, msgBus, t.TempDir(), true, 0, cfg, cron.WebhookConfig{}, "", "")
 	if err != nil {
 		t.Fatalf("NewCronTool() error: %v", err)
 	}
@@ -206,6 +206,33 @@ func TestCronTool_NonCommandJobDefaultsDeliverToFalse(t *testing.T) {
 	}
 	if jobs[0].Payload.Deliver {
 		t.Fatal("expected deliver=false by default for non-command jobs")
+	}
+}
+
+func TestCronTool_AddJob_ToOverridesChatID(t *testing.T) {
+	tool := newTestCronTool(t)
+	// Lead agent runs on supr channel with its own chatID.
+	ctx := WithToolContext(context.Background(), "supr", "supr:agent:main:main")
+	result := tool.Execute(ctx, map[string]any{
+		"action":     "add",
+		"message":    "write weekly report",
+		"every_seconds": float64(3600),
+		"to":         "supr:agent:content-writer:content-writer",
+	})
+
+	if result.IsError {
+		t.Fatalf("expected job add to succeed, got: %s", result.ForLLM)
+	}
+
+	jobs := tool.cronService.ListJobs(false)
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	if got := jobs[0].Payload.To; got != "supr:agent:content-writer:content-writer" {
+		t.Errorf("expected job.Payload.To = %q, got %q", "supr:agent:content-writer:content-writer", got)
+	}
+	if got := jobs[0].Payload.Channel; got != "supr" {
+		t.Errorf("expected job.Payload.Channel = %q, got %q", "supr", got)
 	}
 }
 

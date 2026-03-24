@@ -122,6 +122,10 @@ func (t *CronTool) Parameters() map[string]any {
 				"type":        "boolean",
 				"description": "If true, send message directly to channel. If false, let agent process message (for complex tasks). Default: false",
 			},
+			"to": map[string]any{
+				"type":        "string",
+				"description": "Optional: Override the delivery target (chat_id) for the scheduled job. Useful when scheduling on behalf of a different agent or channel recipient. Defaults to the current session's chat_id.",
+			},
 		},
 		"required": []string{"action"},
 	}
@@ -156,6 +160,12 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 
 	if channel == "" || chatID == "" {
 		return ErrorResult("no session context (channel/chat_id not set). Use this tool in an active conversation.")
+	}
+
+	// If caller explicitly specifies a target, override the chatID so the job
+	// is delivered to the requested recipient rather than the calling session.
+	if to, ok := args["to"].(string); ok && to != "" {
+		chatID = to
 	}
 
 	message, ok := args["message"].(string)
