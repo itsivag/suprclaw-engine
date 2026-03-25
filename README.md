@@ -5,7 +5,7 @@
 Runs on $10 hardware with <10MB RAM. Single binary, 1-second boot, works across x86_64, ARM64, MIPS, and RISC-V.
 
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-Elastic%20License%202.0-blue)
 
 **[Documentation](https://itsivag.github.io/suprclaw-engine/)**
 
@@ -558,4 +558,4 @@ PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and [ROADMAP.md](ROADMAP.md)
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Elastic License 2.0 — see [LICENSE](LICENSE).

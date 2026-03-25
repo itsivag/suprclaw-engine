@@ -1,5 +1,5 @@
 // SuprClaw - Ultra-lightweight personal AI agent
-// License: MIT
+// License: Elastic License 2.0
 //
 // Copyright (c) 2026 SuprClaw contributors
 

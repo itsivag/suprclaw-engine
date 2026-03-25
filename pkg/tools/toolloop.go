@@ -1,6 +1,6 @@
 // SuprClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
+// License: Elastic License 2.0
 //
 // Copyright (c) 2026 SuprClaw contributors
 
