@@ -34,11 +34,10 @@ RUN useradd -m -s /bin/bash suprclaw && mkdir -p /home/suprclaw/.suprclaw \
 
 COPY --from=builder /src/build/suprclaw /usr/local/bin/suprclaw
 COPY docker/runtime/entrypoint.sh /entrypoint.sh
-COPY docker/runtime/start-gateway-with-mcp-wait.sh /usr/local/bin/start-gateway-with-mcp-wait.sh
 COPY docker/runtime/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY --chown=suprclaw:suprclaw docker/runtime/workspace/ /opt/suprclaw/workspace/
 
-RUN chmod 755 /entrypoint.sh /usr/local/bin/suprclaw /usr/local/bin/start-gateway-with-mcp-wait.sh
+RUN chmod 755 /entrypoint.sh /usr/local/bin/suprclaw
 
 EXPOSE 18790
 
