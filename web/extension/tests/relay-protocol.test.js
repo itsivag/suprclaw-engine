@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  relayAuthGoogleExtensionURL,
   relayBootstrapTokenURL,
   relayPairingURL,
   relaySessionStateURL,
@@ -52,6 +53,13 @@ test("relay setup and pairing urls map from extension URL", () => {
     "https://api.suprclaw.com/api/browser-relay/bootstrap-token"
   );
   assert.equal(
+    relayAuthGoogleExtensionURL(
+      "wss://api.suprclaw.com/browser-relay/extension",
+      "https://example.chromiumapp.org/callback"
+    ),
+    "https://auth.suprclaw.com/auth/firebase/google/extension?redirect_uri=https%3A%2F%2Fexample.chromiumapp.org%2Fcallback"
+  );
+  assert.equal(
     relayPairingURL("wss://api.suprclaw.com/browser-relay/extension"),
     "https://api.suprclaw.com/api/browser-relay/pairing"
   );
@@ -62,5 +70,12 @@ test("relay setup and pairing urls map from extension URL", () => {
   assert.equal(
     relaySessionStopURL("wss://api.suprclaw.com/browser-relay/extension"),
     "https://api.suprclaw.com/api/browser-relay/session/stop"
+  );
+  assert.equal(
+    relayAuthGoogleExtensionURL(
+      "ws://127.0.0.1:18800/browser-relay/extension",
+      "https://example.chromiumapp.org/local"
+    ),
+    "http://127.0.0.1:18800/auth/firebase/google/extension?redirect_uri=https%3A%2F%2Fexample.chromiumapp.org%2Flocal"
   );
 });

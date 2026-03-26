@@ -3,6 +3,9 @@ const tokenEl = document.getElementById("token");
 const autoSetupBtn = document.getElementById("autoSetupBtn");
 const saveBtn = document.getElementById("saveBtn");
 const testBtn = document.getElementById("testBtn");
+const googleSignInBtn = document.getElementById("googleSignInBtn");
+const googleSignOutBtn = document.getElementById("googleSignOutBtn");
+const authStatusEl = document.getElementById("authStatus");
 const diagnosticsEl = document.getElementById("diagnostics");
 
 function send(message) {
@@ -17,7 +20,18 @@ async function load() {
   const state = await send({ type: "getState" });
   relayUrlEl.value = state.relayUrl || "";
   tokenEl.value = "";
+  renderAuthStatus(state);
   diagnosticsEl.textContent = JSON.stringify(state, null, 2);
+}
+
+function renderAuthStatus(state) {
+  if (state && state.hasFirebaseAuthToken) {
+    const expiry = Number(state.firebaseAuthExpiresAtEpochSeconds) || 0;
+    const when = expiry > 0 ? new Date(expiry * 1000).toLocaleString() : "unknown";
+    authStatusEl.textContent = `Google auth linked. Token expiry: ${when}`;
+    return;
+  }
+  authStatusEl.textContent = "Not signed in. Use Google Sign-In before Auto Setup.";
 }
 
 saveBtn.addEventListener("click", async () => {
@@ -58,6 +72,27 @@ autoSetupBtn.addEventListener("click", async () => {
     relayUrlEl.value = resp.relayUrl || relayUrlEl.value;
     tokenEl.value = "";
   }
+  const state = await send({ type: "getState" });
+  renderAuthStatus(state);
+});
+
+googleSignInBtn.addEventListener("click", async () => {
+  const resp = await send({
+    type: "authGoogleSignIn",
+    payload: {
+      relayUrl: relayUrlEl.value
+    }
+  });
+  diagnosticsEl.textContent = JSON.stringify(resp, null, 2);
+  const state = await send({ type: "getState" });
+  renderAuthStatus(state);
+});
+
+googleSignOutBtn.addEventListener("click", async () => {
+  const resp = await send({ type: "authGoogleSignOut" });
+  diagnosticsEl.textContent = JSON.stringify(resp, null, 2);
+  const state = await send({ type: "getState" });
+  renderAuthStatus(state);
 });
 
 load();

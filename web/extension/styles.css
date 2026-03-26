@@ -97,6 +97,12 @@ button:disabled {
   color: var(--muted);
 }
 
+.muted {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .hidden {
   display: none;
 }

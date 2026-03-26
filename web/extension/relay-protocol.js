@@ -30,6 +30,13 @@ export function relayBootstrapTokenURL(inputRelayURL) {
   return relayAPIURL(inputRelayURL, "bootstrap-token");
 }
 
+export function relayAuthGoogleExtensionURL(inputRelayURL, redirectURI) {
+  const authBase = relayAuthBaseURL(inputRelayURL);
+  const url = new URL("/auth/firebase/google/extension", authBase);
+  url.searchParams.set("redirect_uri", String(redirectURI || ""));
+  return url.toString();
+}
+
 export function relayPairingURL(inputRelayURL) {
   return relayAPIURL(inputRelayURL, "pairing");
 }
@@ -48,4 +55,17 @@ function relayAPIURL(inputRelayURL, endpoint) {
     .replace(/^ws:/i, "http:")
     .replace(/^wss:/i, "https:")
     .replace(/\/browser-relay\/extension.*$/, `/api/browser-relay/${endpoint}`);
+}
+
+function relayAuthBaseURL(inputRelayURL) {
+  const relay = new URL(normalizeRelayURL(inputRelayURL));
+  const scheme = relay.protocol.toLowerCase() === "wss:" ? "https:" : "http:";
+  const localHosts = new Set(["localhost", "127.0.0.1"]);
+  if (localHosts.has(relay.hostname)) {
+    return `${scheme}//${relay.host}`;
+  }
+  const authHost = relay.hostname.startsWith("api.")
+    ? `auth.${relay.hostname.slice(4)}`
+    : `auth.${relay.hostname}`;
+  return `${scheme}//${authHost}`;
 }

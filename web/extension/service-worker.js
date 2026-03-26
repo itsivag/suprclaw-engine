@@ -1,5 +1,6 @@
 import { badgeForState, buildTargets, normalizeRelayURL } from "./relay-core.js";
 import {
+  relayAuthGoogleExtensionURL,
   relayBootstrapTokenURL,
   relayPairingURL,
   relaySessionStopURL,
@@ -15,6 +16,8 @@ const LEGACY_LOCAL_DEFAULT_URL = "ws://127.0.0.1:18800/browser-relay/extension";
 const DEFAULT_SETTINGS = {
   relayUrl: CLOUD_RELAY_DEFAULT_URL,
   token: "",
+  firebaseAuthToken: "",
+  firebaseAuthExpiresAtEpochSeconds: 0,
   desiredConnected: false
 };
 
@@ -33,7 +36,13 @@ async function loadSettings() {
   const stored = data[STORAGE_KEY] || {};
   settings = { ...DEFAULT_SETTINGS, ...stored };
   settings.relayUrl = normalizeRelayURL(settings.relayUrl);
+  settings.firebaseAuthToken = String(settings.firebaseAuthToken || "").trim();
+  settings.firebaseAuthExpiresAtEpochSeconds = Number(settings.firebaseAuthExpiresAtEpochSeconds) || 0;
   settings.desiredConnected = Boolean(settings.desiredConnected);
+  if (!hasUsableFirebaseAuthToken()) {
+    settings.firebaseAuthToken = "";
+    settings.firebaseAuthExpiresAtEpochSeconds = 0;
+  }
 
   // Upgrade older extension installs that persisted the localhost relay default.
   const normalizedLegacyDefault = normalizeRelayURL(LEGACY_LOCAL_DEFAULT_URL);
@@ -48,6 +57,16 @@ async function saveSettings(nextSettings) {
     ...settings,
     ...nextSettings,
     relayUrl: normalizeRelayURL(nextSettings.relayUrl || settings.relayUrl),
+    firebaseAuthToken: String(
+      typeof nextSettings.firebaseAuthToken === "string"
+        ? nextSettings.firebaseAuthToken
+        : settings.firebaseAuthToken || ""
+    ).trim(),
+    firebaseAuthExpiresAtEpochSeconds: Number(
+      typeof nextSettings.firebaseAuthExpiresAtEpochSeconds === "number"
+        ? nextSettings.firebaseAuthExpiresAtEpochSeconds
+        : settings.firebaseAuthExpiresAtEpochSeconds || 0
+    ) || 0,
     desiredConnected: Boolean(
       typeof nextSettings.desiredConnected === "boolean"
         ? nextSettings.desiredConnected
@@ -55,6 +74,93 @@ async function saveSettings(nextSettings) {
     )
   };
   await chrome.storage.sync.set({ [STORAGE_KEY]: settings });
+}
+
+function decodeJwtExpEpoch(token) {
+  const raw = String(token || "").trim();
+  if (!raw) return 0;
+  const parts = raw.split(".");
+  if (parts.length < 2) return 0;
+  try {
+    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payloadJson = atob(normalized);
+    const payload = JSON.parse(payloadJson);
+    return Number(payload.exp) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function hasUsableFirebaseAuthToken() {
+  if (!settings.firebaseAuthToken) return false;
+  const exp = Number(settings.firebaseAuthExpiresAtEpochSeconds) || 0;
+  if (!exp) return true;
+  const now = Math.floor(Date.now() / 1000);
+  return exp > (now + 30);
+}
+
+function launchWebAuthFlow(url, interactive) {
+  return new Promise((resolve, reject) => {
+    chrome.identity.launchWebAuthFlow(
+      { url, interactive: Boolean(interactive) },
+      (responseURL) => {
+        const runtimeError = chrome.runtime.lastError;
+        if (runtimeError) {
+          reject(new Error(runtimeError.message || "launchWebAuthFlow failed"));
+          return;
+        }
+        resolve(String(responseURL || ""));
+      }
+    );
+  });
+}
+
+async function signInWithGoogle({ relayUrl, interactive = true } = {}) {
+  const targetRelayUrl = normalizeRelayURL(relayUrl || settings.relayUrl);
+  const redirectUri = chrome.identity.getRedirectURL("firebase-google");
+  const authURL = relayAuthGoogleExtensionURL(targetRelayUrl, redirectUri);
+  try {
+    const responseURL = await launchWebAuthFlow(authURL, interactive);
+    if (!responseURL) {
+      return { ok: false, error: "no response URL from auth flow", url: authURL };
+    }
+    const parsed = new URL(responseURL);
+    const hash = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash;
+    const params = new URLSearchParams(hash);
+    const authError = String(params.get("error") || "").trim();
+    if (authError) {
+      return { ok: false, error: authError, url: authURL };
+    }
+    const idToken = String(params.get("id_token") || "").trim();
+    if (!idToken) {
+      return { ok: false, error: "missing id_token in auth response", url: authURL };
+    }
+    const expiry = decodeJwtExpEpoch(idToken);
+    await saveSettings({
+      relayUrl: targetRelayUrl,
+      firebaseAuthToken: idToken,
+      firebaseAuthExpiresAtEpochSeconds: expiry
+    });
+    return {
+      ok: true,
+      hasFirebaseAuthToken: true,
+      firebaseAuthExpiresAtEpochSeconds: expiry
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err.message || "google sign-in failed",
+      url: authURL
+    };
+  }
+}
+
+async function signOutGoogle() {
+  await saveSettings({
+    firebaseAuthToken: "",
+    firebaseAuthExpiresAtEpochSeconds: 0
+  });
+  return { ok: true };
 }
 
 function setBadge(state) {
@@ -150,22 +256,27 @@ async function autoSetupRelay({ relayUrl, tokenHint }) {
   let bootstrapToken = String(tokenHint || "").trim();
 
   if (!bootstrapToken) {
+    const bootstrapAuthToken = hasUsableFirebaseAuthToken() ? settings.firebaseAuthToken : "";
     const bootstrapURL = relayBootstrapTokenURL(relayUrl);
     try {
       const bootstrapResp = await fetch(bootstrapURL, {
         method: "POST",
         credentials: "include",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          ...(bootstrapAuthToken ? { Authorization: `Bearer ${bootstrapAuthToken}` } : {})
         },
         body: JSON.stringify({ ttl_seconds: 120 })
       });
       const bootstrapData = await bootstrapResp.json().catch(() => ({}));
       if (!bootstrapResp.ok) {
+        const unauthorizedHint = bootstrapResp.status === 401
+          ? "unauthorized (sign in with Google first)"
+          : "";
         return {
           ok: false,
           status: bootstrapResp.status,
-          error: bootstrapData.error || "bootstrap token request failed",
+          error: bootstrapData.error || unauthorizedHint || "bootstrap token request failed",
           url: bootstrapURL
         };
       }
@@ -463,6 +574,8 @@ async function diagnostics() {
     connected: Boolean(socket && socket.readyState === WebSocket.OPEN),
     relayUrl: settings.relayUrl,
     hasToken: Boolean(settings.token),
+    hasFirebaseAuthToken: Boolean(settings.firebaseAuthToken),
+    firebaseAuthExpiresAtEpochSeconds: Number(settings.firebaseAuthExpiresAtEpochSeconds) || 0,
     desiredConnected: Boolean(settings.desiredConnected),
     hardStopped: hardStoppedByServer,
     activeTabId: tab && typeof tab.id === "number" ? String(tab.id) : "",
@@ -517,6 +630,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse(await autoSetupRelay({ relayUrl, tokenHint: setupToken }));
         break;
       }
+      case "authGoogleSignIn": {
+        const relayUrl = normalizeRelayURL((message.payload && message.payload.relayUrl) || settings.relayUrl);
+        sendResponse(await signInWithGoogle({ relayUrl, interactive: true }));
+        break;
+      }
+      case "authGoogleSignOut":
+        sendResponse(await signOutGoogle());
+        break;
       case "createPairing": {
         const pairingURL = relayPairingURL(settings.relayUrl);
         if (!settings.token) {
