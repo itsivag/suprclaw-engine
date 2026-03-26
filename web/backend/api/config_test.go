@@ -165,3 +165,32 @@ func TestHandlePatchConfig_AllowsInvalidDenyRegexPatternsWhenDenyPatternsDisable
 		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 }
+
+func TestHandlePatchConfig_RejectsNonLoopbackBrowserRelayHost(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
+		"tools": {
+			"browser_relay": {
+				"enabled": true,
+				"host": "192.168.1.20",
+				"port": 18792
+			}
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("tools.browser_relay.host")) {
+		t.Fatalf("expected browser_relay.host validation error, body=%s", rec.Body.String())
+	}
+}

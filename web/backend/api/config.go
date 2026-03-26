@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/itsivag/suprclaw/pkg/config"
 )
@@ -200,7 +202,35 @@ func validateConfig(cfg *config.Config) []string {
 			validateRegexPatterns("tools.exec.custom_allow_patterns", cfg.Tools.Exec.CustomAllowPatterns)...)
 	}
 
+	if cfg.Tools.BrowserRelay.Enabled {
+		host := strings.TrimSpace(cfg.Tools.BrowserRelay.Host)
+		if host == "" {
+			errs = append(errs, "tools.browser_relay.host is required when browser relay is enabled")
+		} else if !isLoopbackHost(host) {
+			errs = append(errs, "tools.browser_relay.host must be a loopback address in this milestone")
+		}
+		if cfg.Tools.BrowserRelay.Port < 1 || cfg.Tools.BrowserRelay.Port > 65535 {
+			errs = append(errs, fmt.Sprintf(
+				"tools.browser_relay.port %d is out of valid range (1-65535)",
+				cfg.Tools.BrowserRelay.Port))
+		}
+	}
+
 	return errs
+}
+
+func isLoopbackHost(host string) bool {
+	normalized := strings.TrimSpace(strings.Trim(host, "[]"))
+	if normalized == "" {
+		return false
+	}
+	if strings.EqualFold(normalized, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(normalized); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func validateRegexPatterns(field string, patterns []string) []string {

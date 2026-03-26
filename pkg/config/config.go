@@ -95,7 +95,7 @@ type Config struct {
 // HeartbeatConfig configures the periodic heartbeat awareness system.
 type HeartbeatConfig struct {
 	Enabled         bool   `json:"enabled"`
-	IntervalMinutes int    `json:"interval_minutes"`    // default: 30, min: 5
+	IntervalMinutes int    `json:"interval_minutes"`   // default: 30, min: 5
 	AgentID         string `json:"agent_id,omitempty"` // default: default agent
 
 	// Token-saving features
@@ -266,20 +266,20 @@ type CheckpointConfig struct {
 
 type AgentDefaults struct {
 	Workspace                 string            `json:"workspace"                       env:"SUPRCLAW_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace       bool           `json:"restrict_to_workspace"           env:"SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	AllowReadOutsideWorkspace bool           `json:"allow_read_outside_workspace"    env:"SUPRCLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
-	Provider                  string         `json:"provider"                        env:"SUPRCLAW_AGENTS_DEFAULTS_PROVIDER"`
-	ModelName                 string         `json:"model_name"                      env:"SUPRCLAW_AGENTS_DEFAULTS_MODEL_NAME"`
-	Model                     string         `json:"model,omitempty"                 env:"SUPRCLAW_AGENTS_DEFAULTS_MODEL"` // Deprecated: use model_name instead
-	ModelFallbacks            []string       `json:"model_fallbacks,omitempty"`
-	ImageModel                string         `json:"image_model,omitempty"           env:"SUPRCLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks       []string       `json:"image_model_fallbacks,omitempty"`
-	MaxTokens                 int            `json:"max_tokens"                      env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_TOKENS"`
-	Temperature               *float64       `json:"temperature,omitempty"           env:"SUPRCLAW_AGENTS_DEFAULTS_TEMPERATURE"`
-	MaxToolIterations         int            `json:"max_tool_iterations"             env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	SummarizeMessageThreshold int            `json:"summarize_message_threshold"     env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
-	SummarizeTokenPercent     int            `json:"summarize_token_percent"         env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
-	MaxMediaSize              int            `json:"max_media_size,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
+	RestrictToWorkspace       bool              `json:"restrict_to_workspace"           env:"SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	AllowReadOutsideWorkspace bool              `json:"allow_read_outside_workspace"    env:"SUPRCLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
+	Provider                  string            `json:"provider"                        env:"SUPRCLAW_AGENTS_DEFAULTS_PROVIDER"`
+	ModelName                 string            `json:"model_name"                      env:"SUPRCLAW_AGENTS_DEFAULTS_MODEL_NAME"`
+	Model                     string            `json:"model,omitempty"                 env:"SUPRCLAW_AGENTS_DEFAULTS_MODEL"` // Deprecated: use model_name instead
+	ModelFallbacks            []string          `json:"model_fallbacks,omitempty"`
+	ImageModel                string            `json:"image_model,omitempty"           env:"SUPRCLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks       []string          `json:"image_model_fallbacks,omitempty"`
+	MaxTokens                 int               `json:"max_tokens"                      env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_TOKENS"`
+	Temperature               *float64          `json:"temperature,omitempty"           env:"SUPRCLAW_AGENTS_DEFAULTS_TEMPERATURE"`
+	MaxToolIterations         int               `json:"max_tool_iterations"             env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	SummarizeMessageThreshold int               `json:"summarize_message_threshold"     env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
+	SummarizeTokenPercent     int               `json:"summarize_token_percent"         env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
+	MaxMediaSize              int               `json:"max_media_size,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
 	StatusUpdates             bool              `json:"status_updates,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_STATUS_UPDATES"`
 	Routing                   *RoutingConfig    `json:"routing,omitempty"`
 	Checkpoint                *CheckpointConfig `json:"checkpoint,omitempty"`
@@ -563,11 +563,11 @@ func (c *ModelConfig) Validate() error {
 }
 
 type GatewayConfig struct {
-	Host                string `json:"host"                  env:"SUPRCLAW_GATEWAY_HOST"`
-	Port                int    `json:"port"                  env:"SUPRCLAW_GATEWAY_PORT"`
-	HotReload           bool   `json:"hot_reload"            env:"SUPRCLAW_GATEWAY_HOT_RELOAD"`
-	RemoteAdminControl  bool   `json:"remote_admin_control"  env:"SUPRCLAW_GATEWAY_REMOTE_ADMIN_CONTROL"`
-	AdminSecret         string `json:"admin_secret"          env:"SUPRCLAW_GATEWAY_ADMIN_SECRET"`
+	Host               string `json:"host"                  env:"SUPRCLAW_GATEWAY_HOST"`
+	Port               int    `json:"port"                  env:"SUPRCLAW_GATEWAY_PORT"`
+	HotReload          bool   `json:"hot_reload"            env:"SUPRCLAW_GATEWAY_HOT_RELOAD"`
+	RemoteAdminControl bool   `json:"remote_admin_control"  env:"SUPRCLAW_GATEWAY_REMOTE_ADMIN_CONTROL"`
+	AdminSecret        string `json:"admin_secret"          env:"SUPRCLAW_GATEWAY_ADMIN_SECRET"`
 }
 
 type ToolDiscoveryConfig struct {
@@ -650,8 +650,8 @@ type CronWebhookConfig struct {
 
 type CronToolsConfig struct {
 	ToolConfig         `     envPrefix:"SUPRCLAW_TOOLS_CRON_"`
-	ExecTimeoutMinutes int              `env:"SUPRCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES" json:"exec_timeout_minutes"` // 0 means no timeout
-	AllowCommand       bool             `env:"SUPRCLAW_TOOLS_CRON_ALLOW_COMMAND"        json:"allow_command"`
+	ExecTimeoutMinutes int               `env:"SUPRCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES" json:"exec_timeout_minutes"` // 0 means no timeout
+	AllowCommand       bool              `env:"SUPRCLAW_TOOLS_CRON_ALLOW_COMMAND"        json:"allow_command"`
 	Webhook            CronWebhookConfig `json:"webhook"`
 }
 
@@ -672,6 +672,17 @@ type SkillsToolsConfig struct {
 	SearchCache           SearchCacheConfig      `                                   json:"search_cache"`
 }
 
+type BrowserRelayConfig struct {
+	ToolConfig      `                        envPrefix:"SUPRCLAW_TOOLS_BROWSER_RELAY_"`
+	Host            string `json:"host"               env:"SUPRCLAW_TOOLS_BROWSER_RELAY_HOST"`
+	Port            int    `json:"port"               env:"SUPRCLAW_TOOLS_BROWSER_RELAY_PORT"`
+	Token           string `json:"token"              env:"SUPRCLAW_TOOLS_BROWSER_RELAY_TOKEN"`
+	CompatOpenClaw  bool   `json:"compat_openclaw"    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_COMPAT_OPENCLAW"`
+	MaxClients      int    `json:"max_clients"        env:"SUPRCLAW_TOOLS_BROWSER_RELAY_MAX_CLIENTS"`
+	IdleTimeoutSec  int    `json:"idle_timeout_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_IDLE_TIMEOUT_SEC"`
+	AllowTokenQuery bool   `json:"allow_token_query"  env:"SUPRCLAW_TOOLS_BROWSER_RELAY_ALLOW_TOKEN_QUERY"`
+}
+
 type MediaCleanupConfig struct {
 	ToolConfig `    envPrefix:"SUPRCLAW_MEDIA_CLEANUP_"`
 	MaxAge     int `                                    env:"SUPRCLAW_MEDIA_CLEANUP_MAX_AGE"  json:"max_age_minutes"`
@@ -690,6 +701,7 @@ type ToolsConfig struct {
 	Cron            CronToolsConfig    `json:"cron"`
 	Exec            ExecConfig         `json:"exec"`
 	Skills          SkillsToolsConfig  `json:"skills"`
+	BrowserRelay    BrowserRelayConfig `json:"browser_relay"`
 	MediaCleanup    MediaCleanupConfig `json:"media_cleanup"`
 	MCP             MCPConfig          `json:"mcp"`
 	AppendFile      ToolConfig         `json:"append_file"                                              envPrefix:"SUPRCLAW_TOOLS_APPEND_FILE_"`
@@ -1038,6 +1050,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.Exec.Enabled
 	case "skills":
 		return t.Skills.Enabled
+	case "browser_relay":
+		return t.BrowserRelay.Enabled
 	case "media_cleanup":
 		return t.MediaCleanup.Enabled
 	case "append_file":

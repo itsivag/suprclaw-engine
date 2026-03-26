@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/itsivag/suprclaw/pkg/browserrelay"
 	"github.com/itsivag/suprclaw/web/backend/launcherconfig"
 )
 
@@ -17,6 +18,8 @@ type Handler struct {
 	oauthMu              sync.Mutex
 	oauthFlows           map[string]*oauthFlow
 	oauthState           map[string]string
+	browserRelayMu       sync.Mutex
+	browserRelay         *browserrelay.Manager
 }
 
 // NewHandler creates an instance of the API handler.
@@ -44,6 +47,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Supr Channel (WebSocket chat)
 	h.registerSuprRoutes(mux)
+	h.registerBrowserRelayRoutes(mux)
 
 	// Gateway process lifecycle
 	h.registerGatewayRoutes(mux)
@@ -71,4 +75,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	h.registerLauncherConfigRoutes(mux)
 }
 
-func (h *Handler) Shutdown() {}
+func (h *Handler) Shutdown() {
+	h.browserRelayMu.Lock()
+	defer h.browserRelayMu.Unlock()
+	if h.browserRelay != nil {
+		h.browserRelay.Close()
+		h.browserRelay = nil
+	}
+}

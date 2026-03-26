@@ -119,9 +119,53 @@ jobs:
             --draft=${{ inputs.draft }} \
             --prerelease=${{ inputs.prerelease }}
 
+  package-extension:
+    name: Package Browser Relay Extension
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag }}
+
+      - name: Package extension zip
+        id: package
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          test -f web/extension/manifest.json
+
+          mkdir -p dist/extension
+          rsync -av --delete \
+            --exclude 'tests' \
+            --exclude '*.test.js' \
+            --exclude 'node_modules' \
+            --exclude '.DS_Store' \
+            web/extension/ dist/extension/
+
+          ASSET_NAME="suprclaw-browser-relay-extension-${TAG}.zip"
+          (cd dist/extension && zip -r "../${ASSET_NAME}" .)
+          echo "asset=dist/${ASSET_NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload extension asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          ASSET: ${{ steps.package.outputs.asset }}
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" "${ASSET}" --clobber
+
   upload-tos:
     name: Upload to TOS
-    needs: release
+    needs: [release, package-extension]
     if: ${{ inputs.upload_tos }}
     uses: ./.github/workflows/upload-tos.yml
     with:

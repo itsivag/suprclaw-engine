@@ -412,6 +412,18 @@ func DefaultConfig() *Config {
 					TTLSeconds: 300,
 				},
 			},
+			BrowserRelay: BrowserRelayConfig{
+				ToolConfig: ToolConfig{
+					Enabled: false,
+				},
+				Host:            "127.0.0.1",
+				Port:            18792,
+				Token:           "",
+				CompatOpenClaw:  true,
+				MaxClients:      16,
+				IdleTimeoutSec:  60,
+				AllowTokenQuery: false,
+			},
 			SendFile: ToolConfig{
 				Enabled: true,
 			},

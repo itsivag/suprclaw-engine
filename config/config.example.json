@@ -389,6 +389,16 @@
         "ttl_seconds": 300
       }
     },
+    "browser_relay": {
+      "enabled": false,
+      "host": "127.0.0.1",
+      "port": 18792,
+      "token": "",
+      "compat_openclaw": true,
+      "max_clients": 16,
+      "idle_timeout_sec": 60,
+      "allow_token_query": false
+    },
     "media_cleanup": {
       "enabled": true,
       "max_age_minutes": 30,

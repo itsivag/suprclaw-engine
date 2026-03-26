@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "SuprClaw Browser Relay",
+  "description": "OpenClaw-inspired browser automation relay extension for SuprClaw.",
+  "version": "0.1.0",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "SuprClaw Relay",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}
