@@ -488,6 +488,48 @@ func TestLoadConfig_WebToolsProxy(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_SkillsGlobalDir_FromFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "agents": {"defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20}},
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}],
+  "tools": {"skills":{"global_dir":"./shared-skills"}}
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.Tools.Skills.GlobalDir != "./shared-skills" {
+		t.Fatalf("Tools.Skills.GlobalDir = %q, want %q", cfg.Tools.Skills.GlobalDir, "./shared-skills")
+	}
+}
+
+func TestLoadConfig_SkillsGlobalDir_FromEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "agents": {"defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20}},
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+	t.Setenv("SUPRCLAW_TOOLS_SKILLS_GLOBAL_DIR", "~/env-shared-skills")
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.Tools.Skills.GlobalDir != "~/env-shared-skills" {
+		t.Fatalf("Tools.Skills.GlobalDir = %q, want %q", cfg.Tools.Skills.GlobalDir, "~/env-shared-skills")
+	}
+}
+
 // TestDefaultConfig_DMScope verifies the default dm_scope value
 // TestDefaultConfig_SummarizationThresholds verifies summarization defaults
 func TestDefaultConfig_SummarizationThresholds(t *testing.T) {

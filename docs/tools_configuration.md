@@ -295,6 +295,12 @@ dynamically only when requested by the user.*
 
 The skills tool configures skill discovery and installation via registries like ClawHub.
 
+### General
+
+| Config       | Type   | Default               | Description                                                              |
+|--------------|--------|-----------------------|--------------------------------------------------------------------------|
+| `global_dir` | string | `<SUPRCLAW_HOME>/skills` | Shared global skills directory loaded after workspace skills and before builtin skills |
+
 ### Registries
 
 | Config                             | Type   | Default              | Description                                  |
@@ -312,6 +318,7 @@ The skills tool configures skill discovery and installation via registries like 
 {
   "tools": {
     "skills": {
+      "global_dir": "~/.suprclaw/skills",
       "registries": {
         "clawhub": {
           "enabled": true,
@@ -337,6 +344,7 @@ For example:
 - `SUPRCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS=false`
 - `SUPRCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES=10`
 - `SUPRCLAW_TOOLS_MCP_ENABLED=true`
+- `SUPRCLAW_TOOLS_SKILLS_GLOBAL_DIR=~/.suprclaw/skills`
 
 Note: Nested map-style config (for example `tools.mcp.servers.<name>.*`) is configured in `config.json` rather than
 environment variables.

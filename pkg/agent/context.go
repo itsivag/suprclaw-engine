@@ -51,18 +51,7 @@ func (cb *ContextBuilder) WithToolDiscovery(useBM25, useRegex bool) *ContextBuil
 	return cb
 }
 
-func getGlobalConfigDir() string {
-	if home := os.Getenv("SUPRCLAW_HOME"); home != "" {
-		return home
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".suprclaw")
-}
-
-func NewContextBuilder(workspace string) *ContextBuilder {
+func defaultBuiltinSkillsDir() string {
 	// builtin skills: skills directory in current project
 	// Use the skills/ directory under the current working directory
 	builtinSkillsDir := strings.TrimSpace(os.Getenv("SUPRCLAW_BUILTIN_SKILLS"))
@@ -70,7 +59,21 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 		wd, _ := os.Getwd()
 		builtinSkillsDir = filepath.Join(wd, "skills")
 	}
-	globalSkillsDir := filepath.Join(getGlobalConfigDir(), "skills")
+	return builtinSkillsDir
+}
+
+func NewContextBuilder(workspace string) *ContextBuilder {
+	globalSkillsDir := config.ResolveGlobalSkillsDir("")
+	return NewContextBuilderWithSkillDirs(workspace, globalSkillsDir, "")
+}
+
+func NewContextBuilderWithSkillDirs(workspace, globalSkillsDir, builtinSkillsDir string) *ContextBuilder {
+	if strings.TrimSpace(globalSkillsDir) == "" {
+		globalSkillsDir = config.ResolveGlobalSkillsDir("")
+	}
+	if strings.TrimSpace(builtinSkillsDir) == "" {
+		builtinSkillsDir = defaultBuiltinSkillsDir()
+	}
 
 	return &ContextBuilder{
 		workspace:    workspace,

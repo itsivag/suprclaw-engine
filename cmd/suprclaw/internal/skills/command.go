@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/itsivag/suprclaw/cmd/suprclaw/internal"
+	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/skills"
 )
 
@@ -14,6 +15,13 @@ type deps struct {
 	workspace    string
 	installer    *skills.SkillInstaller
 	skillsLoader *skills.SkillsLoader
+}
+
+func resolveSkillsLoaderPaths(cfg *config.Config) (globalSkillsDir, builtinSkillsDir string) {
+	globalSkillsDir = config.ResolveGlobalSkillsDir(cfg.Tools.Skills.GlobalDir)
+	globalDir := filepath.Dir(internal.GetConfigPath())
+	builtinSkillsDir = filepath.Join(globalDir, "suprclaw", "skills")
+	return globalSkillsDir, builtinSkillsDir
 }
 
 func NewSkillsCommand() *cobra.Command {
@@ -39,10 +47,7 @@ func NewSkillsCommand() *cobra.Command {
 			}
 			d.installer = installer
 
-			// get global config directory and builtin skills directory
-			globalDir := filepath.Dir(internal.GetConfigPath())
-			globalSkillsDir := filepath.Join(globalDir, "skills")
-			builtinSkillsDir := filepath.Join(globalDir, "suprclaw", "skills")
+			globalSkillsDir, builtinSkillsDir := resolveSkillsLoaderPaths(cfg)
 			d.skillsLoader = skills.NewSkillsLoader(d.workspace, globalSkillsDir, builtinSkillsDir)
 
 			return nil

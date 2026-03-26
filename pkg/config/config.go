@@ -666,6 +666,7 @@ type ExecConfig struct {
 
 type SkillsToolsConfig struct {
 	ToolConfig            `                       envPrefix:"SUPRCLAW_TOOLS_SKILLS_"`
+	GlobalDir             string                 `                                   json:"global_dir,omitempty" env:"SUPRCLAW_TOOLS_SKILLS_GLOBAL_DIR"`
 	Registries            SkillsRegistriesConfig `                                   json:"registries"`
 	Github                SkillsGithubConfig     `                                   json:"github"`
 	MaxConcurrentSearches int                    `                                   json:"max_concurrent_searches" env:"SUPRCLAW_TOOLS_SKILLS_MAX_CONCURRENT_SEARCHES"`

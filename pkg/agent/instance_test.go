@@ -246,3 +246,42 @@ func TestNewAgentInstance_AllowsMediaTempDirForReadListAndExec(t *testing.T) {
 		t.Fatalf("exec output missing media content: %s", execResult.ForLLM)
 	}
 }
+
+func TestNewAgentInstance_UsesConfiguredGlobalSkillsDir(t *testing.T) {
+	workspace := t.TempDir()
+	globalDir := t.TempDir()
+
+	skillDir := filepath.Join(globalDir, "shared-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(skillDir) error = %v", err)
+	}
+	skillContent := `---
+name: shared-skill
+description: shared-global-skill
+---
+# Shared Skill
+`
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace: workspace,
+				ModelName: "test-model",
+			},
+		},
+		Tools: config.ToolsConfig{
+			Skills: config.SkillsToolsConfig{
+				GlobalDir: globalDir,
+			},
+		},
+	}
+
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, &mockProvider{})
+	prompt := agent.ContextBuilder.BuildSystemPrompt()
+	if !strings.Contains(prompt, "shared-global-skill") {
+		t.Fatalf("expected system prompt to include shared global skill description, got: %s", prompt)
+	}
+}

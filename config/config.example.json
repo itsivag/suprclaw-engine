@@ -366,6 +366,7 @@
     },
     "skills": {
       "enabled": true,
+      "global_dir": "~/.suprclaw/skills",
       "registries": {
         "clawhub": {
           "enabled": true,

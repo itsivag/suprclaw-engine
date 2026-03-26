@@ -73,11 +73,15 @@ func (h *adminHandler) newSkillsInstallerFor(workspace string) (*skills.SkillIns
 	return skills.NewSkillInstaller(workspace, cfg.Tools.Skills.Github.Token, cfg.Tools.Skills.Github.Proxy)
 }
 
-func (h *adminHandler) newSkillsLoaderFor(workspace string) *skills.SkillsLoader {
-	globalDir := filepath.Dir(h.configPath)
-	globalSkillsDir := filepath.Join(globalDir, "skills")
-	builtinSkillsDir := filepath.Join(globalDir, "suprclaw", "skills")
-	return skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir)
+func (h *adminHandler) newSkillsLoaderFor(workspace string) (*skills.SkillsLoader, error) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	globalSkillsDir := config.ResolveGlobalSkillsDir(cfg.Tools.Skills.GlobalDir)
+	builtinSkillsDir := h.builtinSkillsDir()
+	return skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir), nil
 }
 
 func (h *adminHandler) newSkillsRegistryMgr() (*skills.RegistryManager, error) {
@@ -107,7 +111,13 @@ func (h *adminHandler) listSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list := h.newSkillsLoaderFor(ws).ListSkills()
+	loader, err := h.newSkillsLoaderFor(ws)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	list := loader.ListSkills()
 	if list == nil {
 		list = []skills.SkillInfo{}
 	}
@@ -184,7 +194,13 @@ func (h *adminHandler) showSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, ok := h.newSkillsLoaderFor(ws).LoadSkill(name)
+	loader, err := h.newSkillsLoaderFor(ws)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	content, ok := loader.LoadSkill(name)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "skill not found"})
 		return
@@ -351,13 +367,13 @@ func (h *adminHandler) installSkillFromRegistry(w http.ResponseWriter, r *http.R
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":        "ok",
+		"status":         "ok",
 		"installedSkill": req.Slug,
-		"version":       result.Version,
-		"is_suspicious": result.IsSuspicious,
-		"summary":       result.Summary,
-		"agentId":       req.AgentID,
-		"workspacePath": ws,
+		"version":        result.Version,
+		"is_suspicious":  result.IsSuspicious,
+		"summary":        result.Summary,
+		"agentId":        req.AgentID,
+		"workspacePath":  ws,
 	})
 }
 

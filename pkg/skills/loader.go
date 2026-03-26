@@ -61,7 +61,7 @@ func (info SkillInfo) validate() error {
 type SkillsLoader struct {
 	workspace       string
 	workspaceSkills string // workspace skills (project-level)
-	globalSkills    string // global skills (~/.suprclaw/skills)
+	globalSkills    string // shared global skills directory
 	builtinSkills   string // builtin skills
 }
 
@@ -92,7 +92,7 @@ func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string
 	return &SkillsLoader{
 		workspace:       workspace,
 		workspaceSkills: filepath.Join(workspace, "skills"),
-		globalSkills:    globalSkills, // ~/.suprclaw/skills
+		globalSkills:    globalSkills,
 		builtinSkills:   builtinSkills,
 	}
 }
@@ -156,7 +156,7 @@ func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
 		}
 	}
 
-	// 2. then load from global skills (~/.suprclaw/skills)
+	// 2. then load from shared global skills directory
 	if sl.globalSkills != "" {
 		skillFile := filepath.Join(sl.globalSkills, name, "SKILL.md")
 		if content, err := os.ReadFile(skillFile); err == nil {

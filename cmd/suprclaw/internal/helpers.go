@@ -12,11 +12,7 @@ const Logo = "🦞"
 // GetSuprclawHome returns the suprclaw home directory.
 // Priority: $SUPRCLAW_HOME > ~/.suprclaw
 func GetSuprclawHome() string {
-	if home := os.Getenv("SUPRCLAW_HOME"); home != "" {
-		return home
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".suprclaw")
+	return config.ResolveSuprclawHome()
 }
 
 func GetConfigPath() string {

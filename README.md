@@ -298,6 +298,7 @@ Config file: `~/.suprclaw/config.json`
 | `SUPRCLAW_CONFIG`                                 | Path to config file                      | `~/.suprclaw/config.json` |
 | `SUPRCLAW_HOME`                                   | Root directory for all suprclaw data     | `~/.suprclaw`             |
 | `SUPRCLAW_BUILTIN_SKILLS`                         | Override builtin skills path             | —                         |
+| `SUPRCLAW_TOOLS_SKILLS_GLOBAL_DIR`                | Override shared global skills directory  | `<SUPRCLAW_HOME>/skills`  |
 | `SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE`  | Restrict agent to workspace              | `true`                    |
 
 ### Workspace Layout
@@ -320,8 +321,8 @@ Config file: `~/.suprclaw/config.json`
 
 Skills are loaded in this order:
 
-1. `~/.suprclaw/workspace/skills`
-2. `~/.suprclaw/skills`
+1. `{workspace}/skills`
+2. `tools.skills.global_dir` (default: `<SUPRCLAW_HOME>/skills`)
 3. `<cwd>/skills`
 
 ### Security Sandbox

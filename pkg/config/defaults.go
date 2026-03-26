@@ -6,7 +6,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 )
 
@@ -14,13 +13,7 @@ import (
 func DefaultConfig() *Config {
 	// Determine the base path for the workspace.
 	// Priority: $SUPRCLAW_HOME > ~/.suprclaw
-	var homePath string
-	if suprclawHome := os.Getenv("SUPRCLAW_HOME"); suprclawHome != "" {
-		homePath = suprclawHome
-	} else {
-		userHome, _ := os.UserHomeDir()
-		homePath = filepath.Join(userHome, ".suprclaw")
-	}
+	homePath := ResolveSuprclawHome()
 	workspacePath := filepath.Join(homePath, "workspace")
 
 	return &Config{
@@ -400,6 +393,7 @@ func DefaultConfig() *Config {
 				ToolConfig: ToolConfig{
 					Enabled: true,
 				},
+				GlobalDir: "",
 				Registries: SkillsRegistriesConfig{
 					ClawHub: ClawHubRegistryConfig{
 						Enabled: true,
