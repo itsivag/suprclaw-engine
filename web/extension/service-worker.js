@@ -2,6 +2,7 @@ import { badgeForState, buildTargets, normalizeRelayURL } from "./relay-core.js"
 import { relayStatusURL, validateRelayRequest } from "./relay-protocol.js";
 
 const STORAGE_KEY = "suprclawRelaySettings";
+const RELAY_SUBPROTOCOL = "suprclaw-relay";
 const DEFAULT_SETTINGS = {
   relayUrl: "ws://127.0.0.1:18800/browser-relay/extension",
   token: ""
@@ -91,7 +92,7 @@ async function connectRelay() {
   setBadge("connecting");
 
   return new Promise((resolve) => {
-    const ws = new WebSocket(settings.relayUrl, [`token.${settings.token}`]);
+    const ws = new WebSocket(settings.relayUrl, [RELAY_SUBPROTOCOL, `token.${settings.token}`]);
 
     ws.onopen = async () => {
       socket = ws;
