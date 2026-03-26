@@ -20,6 +20,7 @@ type Handler struct {
 	oauthState           map[string]string
 	browserRelayMu       sync.Mutex
 	browserRelay         *browserrelay.Manager
+	browserRelayStateMu  sync.Mutex
 }
 
 // NewHandler creates an instance of the API handler.

@@ -143,7 +143,8 @@ async function autoSetupRelay({ relayUrl, tokenHint }) {
   try {
     const resp = await fetch(setupURL, {
       method: "POST",
-      headers
+      headers,
+      credentials: "include"
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
@@ -384,7 +385,8 @@ async function hardStopRelay() {
       method: "POST",
       headers: {
         Authorization: `Bearer ${settings.token}`
-      }
+      },
+      credentials: "include"
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
@@ -450,7 +452,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const statusURL = relayStatusURL(relayUrl);
         try {
           const resp = await fetch(statusURL, {
-            headers: testToken ? { Authorization: `Bearer ${testToken}` } : {}
+            headers: testToken ? { Authorization: `Bearer ${testToken}` } : {},
+            credentials: "include"
           });
           sendResponse({ ok: resp.ok, status: resp.status, url: statusURL });
         } catch (err) {
@@ -489,6 +492,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               Authorization: `Bearer ${settings.token}`,
               "Content-Type": "application/json"
             },
+            credentials: "include",
             body: JSON.stringify({ ttl_seconds: ttlSeconds })
           });
           const data = await resp.json().catch(() => ({}));

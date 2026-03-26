@@ -183,3 +183,109 @@ func TestBrowserRelayWSEnforcesSubprotocolToken(t *testing.T) {
 	}
 	_ = conn.Close()
 }
+
+func TestBrowserRelaySetupAllowsTrustedBootstrapHeader(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.BrowserRelay.Token = "relay-token"
+	cfg.Tools.BrowserRelay.Host = "127.0.0.1"
+	cfg.Tools.BrowserRelay.BootstrapIdentityHeader = "X-Relay-Identity"
+	if err = config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/browser-relay/setup", strings.NewReader(`{}`))
+	req.Header.Set("X-Relay-Identity", "user-1")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestBrowserRelayPairClaimAndHardStopWithSessionToken(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.BrowserRelay.Token = "relay-token"
+	cfg.Tools.BrowserRelay.Host = "127.0.0.1"
+	if err = config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/browser-relay/pairing", strings.NewReader(`{}`))
+	createReq.Header.Set("Authorization", "Bearer relay-token")
+	createRec := httptest.NewRecorder()
+	mux.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("pairing status = %d, want %d, body=%s", createRec.Code, http.StatusOK, createRec.Body.String())
+	}
+
+	var createResp map[string]any
+	if err = json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("pairing unmarshal error: %v", err)
+	}
+	code, _ := createResp["code"].(string)
+	if code == "" {
+		t.Fatalf("pairing code empty: %v", createResp)
+	}
+
+	claimReq := httptest.NewRequest(http.MethodPost, "/api/browser-relay/pairing/claim?code="+code, nil)
+	claimRec := httptest.NewRecorder()
+	mux.ServeHTTP(claimRec, claimReq)
+	if claimRec.Code != http.StatusOK {
+		t.Fatalf("claim status = %d, want %d, body=%s", claimRec.Code, http.StatusOK, claimRec.Body.String())
+	}
+
+	var claimResp map[string]any
+	if err = json.Unmarshal(claimRec.Body.Bytes(), &claimResp); err != nil {
+		t.Fatalf("claim unmarshal error: %v", err)
+	}
+	sessionToken, _ := claimResp["session_token"].(string)
+	if sessionToken == "" {
+		t.Fatalf("session_token empty: %v", claimResp)
+	}
+
+	targetsReq := httptest.NewRequest(http.MethodGet, "/api/browser-relay/targets", nil)
+	targetsReq.Header.Set("Authorization", "Bearer "+sessionToken)
+	targetsRec := httptest.NewRecorder()
+	mux.ServeHTTP(targetsRec, targetsReq)
+	if targetsRec.Code != http.StatusOK {
+		t.Fatalf("targets status = %d, want %d, body=%s", targetsRec.Code, http.StatusOK, targetsRec.Body.String())
+	}
+
+	stopReq := httptest.NewRequest(http.MethodPost, "/api/browser-relay/session/stop", nil)
+	stopReq.Header.Set("Authorization", "Bearer "+sessionToken)
+	stopRec := httptest.NewRecorder()
+	mux.ServeHTTP(stopRec, stopReq)
+	if stopRec.Code != http.StatusOK {
+		t.Fatalf("stop status = %d, want %d, body=%s", stopRec.Code, http.StatusOK, stopRec.Body.String())
+	}
+
+	targetsReq2 := httptest.NewRequest(http.MethodGet, "/api/browser-relay/targets", nil)
+	targetsReq2.Header.Set("Authorization", "Bearer "+sessionToken)
+	targetsRec2 := httptest.NewRecorder()
+	mux.ServeHTTP(targetsRec2, targetsReq2)
+	if targetsRec2.Code != http.StatusUnauthorized {
+		t.Fatalf("targets-after-stop status = %d, want %d, body=%s", targetsRec2.Code, http.StatusUnauthorized, targetsRec2.Body.String())
+	}
+}

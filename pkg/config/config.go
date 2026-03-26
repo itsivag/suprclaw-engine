@@ -673,14 +673,18 @@ type SkillsToolsConfig struct {
 }
 
 type BrowserRelayConfig struct {
-	ToolConfig      `                        envPrefix:"SUPRCLAW_TOOLS_BROWSER_RELAY_"`
-	Host            string `json:"host"               env:"SUPRCLAW_TOOLS_BROWSER_RELAY_HOST"`
-	Port            int    `json:"port"               env:"SUPRCLAW_TOOLS_BROWSER_RELAY_PORT"`
-	Token           string `json:"token"              env:"SUPRCLAW_TOOLS_BROWSER_RELAY_TOKEN"`
-	CompatOpenClaw  bool   `json:"compat_openclaw"    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_COMPAT_OPENCLAW"`
-	MaxClients      int    `json:"max_clients"        env:"SUPRCLAW_TOOLS_BROWSER_RELAY_MAX_CLIENTS"`
-	IdleTimeoutSec  int    `json:"idle_timeout_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_IDLE_TIMEOUT_SEC"`
-	AllowTokenQuery bool   `json:"allow_token_query"  env:"SUPRCLAW_TOOLS_BROWSER_RELAY_ALLOW_TOKEN_QUERY"`
+	ToolConfig              `                         envPrefix:"SUPRCLAW_TOOLS_BROWSER_RELAY_"`
+	Host                    string `json:"host"                    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_HOST"`
+	Port                    int    `json:"port"                    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_PORT"`
+	Token                   string `json:"token"                   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_TOKEN"`
+	CompatOpenClaw          bool   `json:"compat_openclaw"         env:"SUPRCLAW_TOOLS_BROWSER_RELAY_COMPAT_OPENCLAW"`
+	MaxClients              int    `json:"max_clients"             env:"SUPRCLAW_TOOLS_BROWSER_RELAY_MAX_CLIENTS"`
+	IdleTimeoutSec          int    `json:"idle_timeout_sec"        env:"SUPRCLAW_TOOLS_BROWSER_RELAY_IDLE_TIMEOUT_SEC"`
+	AllowTokenQuery         bool   `json:"allow_token_query"       env:"SUPRCLAW_TOOLS_BROWSER_RELAY_ALLOW_TOKEN_QUERY"`
+	BootstrapIdentityHeader string `json:"bootstrap_identity_header" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_BOOTSTRAP_IDENTITY_HEADER"`
+	PairingCodeTTLSec       int    `json:"pairing_code_ttl_sec"    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_PAIRING_CODE_TTL_SEC"`
+	SessionTokenTTLSec      int    `json:"session_token_ttl_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SESSION_TOKEN_TTL_SEC"`
+	RefreshTokenTTLSec      int    `json:"refresh_token_ttl_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_REFRESH_TOKEN_TTL_SEC"`
 }
 
 type MediaCleanupConfig struct {

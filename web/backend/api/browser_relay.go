@@ -40,6 +40,12 @@ func (h *Handler) registerBrowserRelayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/browser-relay/setup", h.handleBrowserRelaySetup)
 	mux.HandleFunc("GET /api/browser-relay/token", h.handleBrowserRelayToken)
 	mux.HandleFunc("POST /api/browser-relay/token", h.handleBrowserRelayRegenerateToken)
+	mux.HandleFunc("POST /api/browser-relay/pairing", h.handleBrowserRelayPairing)
+	mux.HandleFunc("POST /api/browser-relay/pairing/claim", h.handleBrowserRelayPairingClaim)
+	mux.HandleFunc("GET /api/browser-relay/pairing/qr/{code}", h.handleBrowserRelayPairingQR)
+	mux.HandleFunc("GET /api/browser-relay/session/state", h.handleBrowserRelaySessionState)
+	mux.HandleFunc("POST /api/browser-relay/session/refresh", h.handleBrowserRelaySessionRefresh)
+	mux.HandleFunc("POST /api/browser-relay/session/stop", h.handleBrowserRelaySessionStop)
 	mux.HandleFunc("GET /api/browser-relay/targets", h.handleBrowserRelayTargets)
 	mux.HandleFunc("POST /api/browser-relay/actions/{action}", h.handleBrowserRelayAction)
 
@@ -84,38 +90,16 @@ func (h *Handler) handleBrowserRelaySetup(w http.ResponseWriter, r *http.Request
 	}
 
 	if token := strings.TrimSpace(cfg.Tools.BrowserRelay.Token); token != "" {
-		if !h.isBrowserRelayHTTPAuthorized(r, cfg) {
+		if !h.isBrowserRelayBootstrapAuthorized(r, cfg) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 	}
-
-	relayCfg := normalizeBrowserRelayConfig(cfg.Tools.BrowserRelay)
-	changed := false
-
-	if !relayCfg.Enabled {
-		relayCfg.Enabled = true
-		changed = true
-	}
-	if strings.TrimSpace(relayCfg.Token) == "" {
-		relayCfg.Token = generateSecureToken()
-		changed = true
-	}
-	if !isLoopbackHost(relayCfg.Host) {
-		http.Error(w, "tools.browser_relay.host must be loopback", http.StatusBadRequest)
+	relayCfg, changed, err := h.browserRelayEnsureConfigured(cfg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	cfg.Tools.BrowserRelay = relayCfg
-	if changed {
-		if err = config.SaveConfig(h.configPath, cfg); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	manager := h.browserRelayManager(cfg)
-	manager.ApplyConfig(browserRelayConfigFromConfig(cfg))
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -135,7 +119,7 @@ func (h *Handler) handleBrowserRelayToken(w http.ResponseWriter, r *http.Request
 		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
 		return
 	}
-	if strings.TrimSpace(cfg.Tools.BrowserRelay.Token) != "" && !h.isBrowserRelayHTTPAuthorized(r, cfg) {
+	if strings.TrimSpace(cfg.Tools.BrowserRelay.Token) != "" && !h.isBrowserRelayBootstrapAuthorized(r, cfg) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -179,7 +163,7 @@ func (h *Handler) handleBrowserRelayRegenerateToken(w http.ResponseWriter, r *ht
 }
 
 func (h *Handler) handleBrowserRelayTargets(w http.ResponseWriter, r *http.Request) {
-	cfg, relayCfg, manager, ok := h.requireBrowserRelayEnabled(w, r, true)
+	cfg, relayCfg, manager, ok := h.requireBrowserRelayEnabled(w, r, true, true)
 	if !ok {
 		return
 	}
@@ -204,7 +188,7 @@ type browserRelayActionRequest struct {
 }
 
 func (h *Handler) handleBrowserRelayAction(w http.ResponseWriter, r *http.Request) {
-	_, _, manager, ok := h.requireBrowserRelayEnabled(w, r, true)
+	_, _, manager, ok := h.requireBrowserRelayEnabled(w, r, true, true)
 	if !ok {
 		return
 	}
@@ -555,7 +539,7 @@ func mapBrowserRelayError(err error) int {
 }
 
 func (h *Handler) handleBrowserRelayExtensionWS(w http.ResponseWriter, r *http.Request) {
-	cfg, relayCfg, manager, ok := h.requireBrowserRelayEnabled(w, r, false)
+	cfg, relayCfg, manager, ok := h.requireBrowserRelayEnabled(w, r, false, false)
 	if !ok {
 		return
 	}
@@ -601,7 +585,7 @@ func (h *Handler) handleBrowserRelayCompatWS(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) handleBrowserRelayCDPWSWithCompat(w http.ResponseWriter, r *http.Request, compatOnly bool) {
-	_, relayCfg, manager, ok := h.requireBrowserRelayEnabled(w, r, false)
+	_, relayCfg, manager, ok := h.requireBrowserRelayEnabled(w, r, false, false)
 	if !ok {
 		return
 	}
@@ -686,7 +670,7 @@ func (h *Handler) handleBrowserRelayCDPWSWithCompat(w http.ResponseWriter, r *ht
 }
 
 func (h *Handler) handleBrowserRelayJSONVersion(w http.ResponseWriter, r *http.Request) {
-	_, relayCfg, _, ok := h.requireBrowserRelayEnabled(w, r, true)
+	_, relayCfg, _, ok := h.requireBrowserRelayEnabled(w, r, true, true)
 	if !ok {
 		return
 	}
@@ -705,7 +689,7 @@ func (h *Handler) handleBrowserRelayJSONVersion(w http.ResponseWriter, r *http.R
 }
 
 func (h *Handler) handleBrowserRelayJSONList(w http.ResponseWriter, r *http.Request) {
-	_, relayCfg, manager, ok := h.requireBrowserRelayEnabled(w, r, true)
+	_, relayCfg, manager, ok := h.requireBrowserRelayEnabled(w, r, true, true)
 	if !ok {
 		return
 	}
@@ -741,6 +725,7 @@ func (h *Handler) requireBrowserRelayEnabled(
 	w http.ResponseWriter,
 	r *http.Request,
 	requireAuth bool,
+	allowSessionAuth bool,
 ) (*config.Config, config.BrowserRelayConfig, *browserrelay.Manager, bool) {
 	cfg, err := config.LoadConfig(h.configPath)
 	if err != nil {
@@ -756,8 +741,25 @@ func (h *Handler) requireBrowserRelayEnabled(
 		http.Error(w, "browser relay host must be loopback", http.StatusBadRequest)
 		return nil, config.BrowserRelayConfig{}, nil, false
 	}
-	if requireAuth && !h.isBrowserRelayHTTPAuthorized(r, cfg) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if requireAuth {
+		if !h.isBrowserRelayHTTPAuthorized(r, cfg) {
+			if !allowSessionAuth {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return nil, config.BrowserRelayConfig{}, nil, false
+			}
+			if _, err := h.browserRelaySessionClaimsFromRequest(r, cfg); err != nil {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return nil, config.BrowserRelayConfig{}, nil, false
+			}
+		}
+	}
+	state, stateErr := h.withBrowserRelayLeaseState(nil)
+	if stateErr != nil {
+		http.Error(w, fmt.Sprintf("failed to load relay lease state: %v", stateErr), http.StatusInternalServerError)
+		return nil, config.BrowserRelayConfig{}, nil, false
+	}
+	if state.LeaseState == browserRelayLeaseStopped {
+		http.Error(w, "relay lease is stopped", http.StatusConflict)
 		return nil, config.BrowserRelayConfig{}, nil, false
 	}
 	return cfg, relayCfg, h.browserRelayManager(cfg), true
@@ -775,6 +777,15 @@ func normalizeBrowserRelayConfig(cfg config.BrowserRelayConfig) config.BrowserRe
 	}
 	if cfg.IdleTimeoutSec <= 0 {
 		cfg.IdleTimeoutSec = defaultBrowserRelayIdleTimeoutSec
+	}
+	if cfg.PairingCodeTTLSec <= 0 {
+		cfg.PairingCodeTTLSec = 180
+	}
+	if cfg.SessionTokenTTLSec <= 0 {
+		cfg.SessionTokenTTLSec = 900
+	}
+	if cfg.RefreshTokenTTLSec <= 0 {
+		cfg.RefreshTokenTTLSec = 7 * 24 * 60 * 60
 	}
 	return cfg
 }

@@ -39,7 +39,7 @@ async function refresh() {
 
   const tabLabel = state.activeTabId ? `Tab ${state.activeTabId}` : "No active tab";
   tabMetaEl.textContent = `${tabLabel} • ${state.attached ? "Attached" : "Detached"}`;
-  pairBtn.disabled = !state.connected || !state.hasToken;
+  pairBtn.disabled = !state.connected;
 }
 
 connectBtn.addEventListener("click", async () => {
