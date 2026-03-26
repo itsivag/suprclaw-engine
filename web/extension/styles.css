@@ -13,7 +13,7 @@
 
 body {
   margin: 0;
-  font-family: "Segoe UI", "Avenir Next", sans-serif;
+  font-family: "Poppins", "Avenir Next", "Segoe UI", sans-serif;
   background: radial-gradient(circle at top left, #d6eef4 0%, var(--bg) 45%);
   color: var(--text);
 }
@@ -143,4 +143,222 @@ button:disabled {
   padding: 10px;
   max-height: 280px;
   overflow: auto;
+}
+
+/* Side panel (Apple semantic palette) */
+.sidepanel-body {
+  margin: 0;
+  min-height: 100vh;
+  color-scheme: light dark;
+  font-family: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sc-bg: #f2f2f7;
+  --sc-surface: #ffffff;
+  --sc-surface-alt: #f5f5f7;
+  --sc-text: #1c1c1e;
+  --sc-muted: #6e6e73;
+  --sc-border: #d2d2d7;
+  --sc-link: #007aff;
+  --sc-shadow: rgb(0 0 0 / 12%);
+  background: var(--sc-bg);
+  color: var(--sc-text);
+}
+
+@media (prefers-color-scheme: dark) {
+  .sidepanel-body {
+    --sc-bg: #000000;
+    --sc-surface: #1c1c1e;
+    --sc-surface-alt: #2c2c2e;
+    --sc-text: #f2f2f7;
+    --sc-muted: #aeaeb2;
+    --sc-border: #3a3a3c;
+    --sc-link: #0a84ff;
+    --sc-shadow: rgb(0 0 0 / 40%);
+  }
+}
+
+.sidepanel-shell {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 14px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidepanel-body .hidden {
+  display: none !important;
+}
+
+.auth-gate {
+  flex: 1;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 18px;
+}
+
+.auth-gate-actions {
+  margin-top: 0;
+}
+
+.auth-signin-btn {
+  min-width: 120px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  padding: 10px 16px;
+  background: #000000;
+  color: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .auth-signin-btn {
+    background: #ffffff;
+    color: #000000;
+  }
+}
+
+#mainContent {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wallet-top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 2px;
+}
+
+.wallet-top-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wallet-status {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 10px;
+  border: 1px solid var(--sc-border);
+  background: var(--sc-surface-alt);
+  color: var(--sc-muted);
+}
+
+.wallet-status[data-state="connected"] {
+  color: var(--sc-link);
+}
+
+.menu-wrap {
+  position: relative;
+}
+
+.menu-trigger {
+  border: 1px solid var(--sc-border);
+  background: var(--sc-surface-alt);
+  color: var(--sc-text);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 150px;
+  border: 1px solid var(--sc-border);
+  border-radius: 10px;
+  background: var(--sc-surface);
+  box-shadow: 0 8px 20px var(--sc-shadow);
+  padding: 6px;
+  z-index: 20;
+}
+
+.menu-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--sc-text);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.menu-item:hover {
+  background: var(--sc-surface-alt);
+}
+
+.wallet-card {
+  border: 1px solid var(--sc-border);
+  background: var(--sc-surface);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.wallet-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sc-text);
+}
+
+.wallet-subtitle {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--sc-muted);
+}
+
+.sidepanel-body .row {
+  margin: 10px 0 0;
+  flex-wrap: wrap;
+}
+
+.sidepanel-body button {
+  border: 1px solid var(--sc-border);
+  background: var(--sc-surface-alt);
+  color: var(--sc-text);
+}
+
+.sidepanel-body button.secondary {
+  background: var(--sc-surface-alt);
+  color: var(--sc-text);
+  border: 1px solid var(--sc-border);
+}
+
+.sidepanel-body .pairing {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--sc-surface-alt);
+  border: 1px solid var(--sc-border);
+}
+
+.sidepanel-body .pairing img {
+  width: min(240px, 100%);
+  height: auto;
+  aspect-ratio: 1 / 1;
+  display: block;
+  margin: 0 auto 8px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid var(--sc-border);
+}
+
+.sidepanel-body .meta {
+  color: var(--sc-muted);
+}
+
+.sidepanel-body .pairing a {
+  color: var(--sc-link);
 }

@@ -1,6 +1,5 @@
 const relayUrlEl = document.getElementById("relayUrl");
 const tokenEl = document.getElementById("token");
-const autoSetupBtn = document.getElementById("autoSetupBtn");
 const saveBtn = document.getElementById("saveBtn");
 const testBtn = document.getElementById("testBtn");
 const googleSignInBtn = document.getElementById("googleSignInBtn");
@@ -16,8 +15,34 @@ function send(message) {
   });
 }
 
+function shouldAutoSetupFromAuth(state) {
+  return Boolean(state && state.hasFirebaseAuthToken && !state.hasToken);
+}
+
+async function runAutoSetup() {
+  const resp = await send({
+    type: "autoSetup",
+    payload: {
+      relayUrl: relayUrlEl.value,
+      token: tokenEl.value
+    }
+  });
+  diagnosticsEl.textContent = JSON.stringify(resp, null, 2);
+  if (resp && resp.ok) {
+    relayUrlEl.value = resp.relayUrl || relayUrlEl.value;
+    tokenEl.value = "";
+  }
+  return resp;
+}
+
 async function load() {
-  const state = await send({ type: "getState" });
+  let state = await send({ type: "getState" });
+  if (shouldAutoSetupFromAuth(state)) {
+    const autoSetupResp = await runAutoSetup();
+    if (autoSetupResp && autoSetupResp.ok) {
+      state = await send({ type: "getState" });
+    }
+  }
   relayUrlEl.value = state.relayUrl || "";
   tokenEl.value = "";
   renderAuthStatus(state);
@@ -59,23 +84,6 @@ testBtn.addEventListener("click", async () => {
   diagnosticsEl.textContent = JSON.stringify(resp, null, 2);
 });
 
-autoSetupBtn.addEventListener("click", async () => {
-  const resp = await send({
-    type: "autoSetup",
-    payload: {
-      relayUrl: relayUrlEl.value,
-      token: tokenEl.value
-    }
-  });
-  diagnosticsEl.textContent = JSON.stringify(resp, null, 2);
-  if (resp && resp.ok) {
-    relayUrlEl.value = resp.relayUrl || relayUrlEl.value;
-    tokenEl.value = "";
-  }
-  const state = await send({ type: "getState" });
-  renderAuthStatus(state);
-});
-
 googleSignInBtn.addEventListener("click", async () => {
   const resp = await send({
     type: "authGoogleSignIn",
@@ -84,7 +92,13 @@ googleSignInBtn.addEventListener("click", async () => {
     }
   });
   diagnosticsEl.textContent = JSON.stringify(resp, null, 2);
-  const state = await send({ type: "getState" });
+  let state = await send({ type: "getState" });
+  if (resp && resp.ok && shouldAutoSetupFromAuth(state)) {
+    const autoSetupResp = await runAutoSetup();
+    if (autoSetupResp && autoSetupResp.ok) {
+      state = await send({ type: "getState" });
+    }
+  }
   renderAuthStatus(state);
 });
 

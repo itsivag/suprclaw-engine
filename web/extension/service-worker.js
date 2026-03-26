@@ -900,6 +900,13 @@ async function bootstrap() {
   await loadSettings();
   await loadAttachedTargets();
   await restoreAttachedTargets();
+  if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+    try {
+      await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    } catch (err) {
+      console.warn("side panel behavior unavailable", err);
+    }
+  }
   if (settings.desiredConnected) {
     await connectRelay({ persistDesired: false });
     return;
@@ -907,8 +914,32 @@ async function bootstrap() {
   setBadge("disconnected");
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   await bootstrap();
+  if (!details || details.reason !== "install") {
+    return;
+  }
+  if (hasUsableFirebaseAuthToken()) {
+    return;
+  }
+
+  const authResp = await signInWithGoogle({
+    relayUrl: settings.relayUrl,
+    interactive: true
+  });
+  if (!authResp || !authResp.ok) {
+    return;
+  }
+
+  const setupResp = await autoSetupRelay({
+    relayUrl: settings.relayUrl,
+    tokenHint: ""
+  });
+  if (!setupResp || !setupResp.ok) {
+    return;
+  }
+
+  await connectRelay({ persistDesired: true }).catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(async () => {

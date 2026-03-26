@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Surclaw Browser Connect</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="sidepanel-body">
+  <main class="sidepanel-shell">
+    <section id="authGate" class="auth-gate hidden">
+      <div class="row auth-gate-actions">
+        <button id="signInBtn" class="auth-signin-btn">Sign In</button>
+      </div>
+    </section>
+
+    <div id="mainContent">
+      <header class="wallet-top">
+        <div class="wallet-top-right">
+          <p id="status" class="wallet-status" data-state="disconnected">Disconnected</p>
+          <div class="menu-wrap">
+            <button id="menuBtn" class="menu-trigger" aria-haspopup="true" aria-expanded="false" title="Menu">⋯</button>
+            <div id="menuPanel" class="menu-panel hidden" role="menu">
+              <button id="manualSetupBtn" class="menu-item" role="menuitem">Manual Setup</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section id="pairingCard" class="wallet-card">
+        <h2 class="wallet-card-title">Pair your device</h2>
+        <p id="pairHint" class="wallet-subtitle">
+          Scan the QR code to connect this device.
+        </p>
+        <section id="pairingPanel" class="pairing hidden">
+          <img id="pairQrImg" alt="Mobile pairing QR code" />
+          <p id="pairMeta" class="meta"></p>
+          <a id="pairClaimUrl" target="_blank" rel="noreferrer">Open claim URL</a>
+        </section>
+        <div class="row">
+          <button id="pairBtn">Refresh QR</button>
+        </div>
+      </section>
+
+      <section id="controlsCard" class="wallet-card">
+        <h2 class="wallet-card-title">Browser control</h2>
+        <p id="tabState" class="meta">No active tab • not attached</p>
+        <div class="row">
+          <button id="attachBtn">Attach Current Tab</button>
+          <button id="detachBtn" class="secondary">Detach Current Tab</button>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

@@ -1,15 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "SuprClaw Browser Relay",
-  "description": "OpenClaw-inspired browser automation relay extension for SuprClaw.",
+  "name": "Surclaw Browser Connect",
+  "description": "Browser automation relay extension for Surclaw.",
   "version": "0.1.0",
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "32": "assets/icons/icon32.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
   "permissions": [
     "debugger",
     "tabs",
     "storage",
     "activeTab",
     "scripting",
-    "identity"
+    "identity",
+    "sidePanel"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -19,8 +26,16 @@
     "type": "module"
   },
   "action": {
-    "default_title": "SuprClaw Relay",
-    "default_popup": "popup.html"
+    "default_title": "Surclaw Browser Connect",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "32": "assets/icons/icon32.png",
+      "48": "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "options_page": "options.html"
 }
