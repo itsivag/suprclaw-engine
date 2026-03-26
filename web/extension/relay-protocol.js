@@ -19,9 +19,21 @@ export function validateRelayRequest(message, attachedTargets) {
 }
 
 export function relayStatusURL(inputRelayURL) {
+  return relayAPIURL(inputRelayURL, "status");
+}
+
+export function relaySetupURL(inputRelayURL) {
+  return relayAPIURL(inputRelayURL, "setup");
+}
+
+export function relayPairingURL(inputRelayURL) {
+  return relayAPIURL(inputRelayURL, "pairing");
+}
+
+function relayAPIURL(inputRelayURL, endpoint) {
   const relayUrl = normalizeRelayURL(inputRelayURL);
   return relayUrl
     .replace(/^ws:/i, "http:")
     .replace(/^wss:/i, "https:")
-    .replace(/\/browser-relay\/extension.*$/, "/api/browser-relay/status");
+    .replace(/\/browser-relay\/extension.*$/, `/api/browser-relay/${endpoint}`);
 }

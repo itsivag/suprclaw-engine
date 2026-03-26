@@ -7,14 +7,23 @@ Chrome-first MV3 extension for the `browser-relay` subsystem.
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Click **Load unpacked** and select this `web/extension` directory.
-4. Open extension **Options** and set relay URL/token from:
-   - `suprclaw browser-relay setup`
+4. Open extension **Options** and set relay URL (for cloud: `wss://api.suprclaw.com/browser-relay/extension`).
+5. Click **Auto Setup** to fetch and save relay token automatically.
+
+## Mobile Pairing (QR)
+
+1. Open extension popup.
+2. Click **Connect Relay**.
+3. Attach a normal web tab.
+4. Click **Pair Mobile (QR)**.
+5. Scan QR in your mobile app and claim via `POST /api/browser-relay/pairing/claim?code=<CODE>`.
+6. Use returned `token` + `extension_ws_url`/`cdp_ws_url_template` from the claim response.
 
 ## Local Smoke
 
 1. Start web backend (`web/backend`) so relay endpoints are available.
-2. Run: `suprclaw browser-relay setup`
-3. Configure Options with returned `extension_ws_url` + `token`.
+2. Open extension **Options** and set local relay URL.
+3. Click **Auto Setup**.
 4. Connect relay, then attach active tab from popup.
 5. Verify targets: `suprclaw browser-relay targets`.
 

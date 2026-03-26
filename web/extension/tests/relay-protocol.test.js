@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { relayStatusURL, validateRelayRequest } from "../relay-protocol.js";
+import { relayPairingURL, relaySetupURL, relayStatusURL, validateRelayRequest } from "../relay-protocol.js";
 
 test("validateRelayRequest rejects unattached targets", () => {
   const result = validateRelayRequest({
@@ -31,5 +31,16 @@ test("relayStatusURL maps extension WS URL to status endpoint", () => {
   assert.equal(
     relayStatusURL("ws://127.0.0.1:18800/browser-relay/extension"),
     "http://127.0.0.1:18800/api/browser-relay/status"
+  );
+});
+
+test("relay setup and pairing urls map from extension URL", () => {
+  assert.equal(
+    relaySetupURL("wss://api.suprclaw.com/browser-relay/extension"),
+    "https://api.suprclaw.com/api/browser-relay/setup"
+  );
+  assert.equal(
+    relayPairingURL("wss://api.suprclaw.com/browser-relay/extension"),
+    "https://api.suprclaw.com/api/browser-relay/pairing"
   );
 });

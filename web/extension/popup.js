@@ -6,6 +6,11 @@ const connectBtn = document.getElementById("connectBtn");
 const attachBtn = document.getElementById("attachBtn");
 const detachBtn = document.getElementById("detachBtn");
 const optionsBtn = document.getElementById("optionsBtn");
+const pairBtn = document.getElementById("pairBtn");
+const pairingPanel = document.getElementById("pairingPanel");
+const pairQrImg = document.getElementById("pairQrImg");
+const pairMeta = document.getElementById("pairMeta");
+const pairClaimUrl = document.getElementById("pairClaimUrl");
 
 function send(message) {
   return new Promise((resolve) => {
@@ -27,6 +32,7 @@ async function refresh() {
 
   const tabLabel = state.activeTabId ? `Tab ${state.activeTabId}` : "No active tab";
   tabMetaEl.textContent = `${tabLabel} • ${state.attached ? "Attached" : "Detached"}`;
+  pairBtn.disabled = !state.connected || !state.hasToken;
 }
 
 connectBtn.addEventListener("click", async () => {
@@ -51,6 +57,28 @@ detachBtn.addEventListener("click", async () => {
 
 optionsBtn.addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
+});
+
+pairBtn.addEventListener("click", async () => {
+  const resp = await send({ type: "createPairing", payload: { ttlSeconds: 180 } });
+  if (!resp || !resp.ok) {
+    pairingPanel.classList.remove("hidden");
+    pairMeta.textContent = resp && resp.error ? `Pairing failed: ${resp.error}` : "Pairing failed";
+    pairQrImg.removeAttribute("src");
+    pairClaimUrl.removeAttribute("href");
+    return;
+  }
+
+  const expiresAt = resp.expires_at ? new Date(resp.expires_at) : null;
+  const expiresLabel = expiresAt && !Number.isNaN(expiresAt.getTime())
+    ? expiresAt.toLocaleTimeString()
+    : "soon";
+
+  pairingPanel.classList.remove("hidden");
+  pairQrImg.src = `${resp.qr_svg_url}${resp.qr_svg_url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+  pairMeta.textContent = `Code ${resp.code} • Expires ${expiresLabel}`;
+  pairClaimUrl.href = resp.claim_url;
+  pairClaimUrl.textContent = "Open claim URL";
 });
 
 refresh();

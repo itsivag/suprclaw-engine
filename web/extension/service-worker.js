@@ -1,5 +1,5 @@
 import { badgeForState, buildTargets, normalizeRelayURL } from "./relay-core.js";
-import { relayStatusURL, validateRelayRequest } from "./relay-protocol.js";
+import { relayPairingURL, relaySetupURL, relayStatusURL, validateRelayRequest } from "./relay-protocol.js";
 
 const STORAGE_KEY = "suprclawRelaySettings";
 const RELAY_SUBPROTOCOL = "suprclaw-relay";
@@ -267,6 +267,78 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           sendResponse({ ok: resp.ok, status: resp.status, url: statusURL });
         } catch (err) {
           sendResponse({ ok: false, error: err.message || "connection test failed", url: statusURL });
+        }
+        break;
+      }
+      case "autoSetup": {
+        const relayUrl = normalizeRelayURL((message.payload && message.payload.relayUrl) || settings.relayUrl);
+        const setupURL = relaySetupURL(relayUrl);
+        const setupToken = (message.payload && message.payload.token) || settings.token;
+        const headers = {};
+        if (setupToken) {
+          headers.Authorization = `Bearer ${setupToken}`;
+        }
+        try {
+          const resp = await fetch(setupURL, {
+            method: "POST",
+            headers
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            sendResponse({
+              ok: false,
+              status: resp.status,
+              error: data.error || "setup failed",
+              url: setupURL
+            });
+            break;
+          }
+          const nextRelayUrl = normalizeRelayURL(data.extension_ws_url || relayUrl);
+          const nextToken = String(data.token || "").trim();
+          await saveSettings({
+            relayUrl: nextRelayUrl,
+            token: nextToken || settings.token
+          });
+          sendResponse({
+            ok: true,
+            relayUrl: nextRelayUrl,
+            hasToken: Boolean(nextToken),
+            setupURL
+          });
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message || "setup request failed", url: setupURL });
+        }
+        break;
+      }
+      case "createPairing": {
+        const pairingURL = relayPairingURL(settings.relayUrl);
+        if (!settings.token) {
+          sendResponse({ ok: false, error: "token is required before creating QR pairing" });
+          break;
+        }
+        const ttlSeconds = Number(message.payload && message.payload.ttlSeconds) || 180;
+        try {
+          const resp = await fetch(pairingURL, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${settings.token}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ ttl_seconds: ttlSeconds })
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            sendResponse({
+              ok: false,
+              status: resp.status,
+              error: data.error || "pairing creation failed",
+              url: pairingURL
+            });
+            break;
+          }
+          sendResponse({ ok: true, ...data });
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message || "pairing request failed", url: pairingURL });
         }
         break;
       }
