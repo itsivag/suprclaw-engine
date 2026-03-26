@@ -10,6 +10,8 @@ import {
 } from "./relay-protocol.js";
 
 const STORAGE_KEY = "suprclawRelaySettings";
+const ATTACHED_TARGETS_STORAGE_KEY = "suprclawAttachedTargets";
+const ATTACHED_TARGET_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RELAY_SUBPROTOCOL = "suprclaw-relay";
 const CLOUD_RELAY_DEFAULT_URL = "wss://api.suprclaw.com/browser-relay/extension";
 const LEGACY_LOCAL_DEFAULT_URL = "ws://127.0.0.1:18800/browser-relay/extension";
@@ -30,6 +32,192 @@ let connectInFlight = null;
 let connectionState = "disconnected";
 let hardStoppedByServer = false;
 const attachedTargets = {};
+const attachedTargetLease = {};
+
+function nowMs() {
+  return Date.now();
+}
+
+function normalizeTargetId(targetId) {
+  return String(targetId || "").trim();
+}
+
+function clearInMemoryAttachedTargets() {
+  for (const key of Object.keys(attachedTargets)) {
+    delete attachedTargets[key];
+  }
+  for (const key of Object.keys(attachedTargetLease)) {
+    delete attachedTargetLease[key];
+  }
+}
+
+function setAttachedTarget(targetId, ttlMs = ATTACHED_TARGET_TTL_MS) {
+  const key = normalizeTargetId(targetId);
+  if (!key) return;
+  const expiresAtEpochMs = nowMs() + Math.max(30000, Number(ttlMs) || ATTACHED_TARGET_TTL_MS);
+  attachedTargets[key] = true;
+  attachedTargetLease[key] = { expiresAtEpochMs };
+}
+
+function clearAttachedTarget(targetId) {
+  const key = normalizeTargetId(targetId);
+  if (!key) return;
+  delete attachedTargets[key];
+  delete attachedTargetLease[key];
+}
+
+function pruneExpiredAttachedTargets() {
+  const ts = nowMs();
+  let changed = false;
+  for (const [targetId, lease] of Object.entries(attachedTargetLease)) {
+    const expiresAtEpochMs = Number(lease && lease.expiresAtEpochMs) || 0;
+    if (expiresAtEpochMs <= ts) {
+      clearAttachedTarget(targetId);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function snapshotAttachedTargetsForStorage() {
+  const ts = nowMs();
+  const out = {};
+  for (const [targetId, lease] of Object.entries(attachedTargetLease)) {
+    const expiresAtEpochMs = Number(lease && lease.expiresAtEpochMs) || 0;
+    if (expiresAtEpochMs > ts) {
+      out[targetId] = { expiresAtEpochMs };
+    }
+  }
+  return out;
+}
+
+async function persistAttachedTargets() {
+  await chrome.storage.local.set({
+    [ATTACHED_TARGETS_STORAGE_KEY]: snapshotAttachedTargetsForStorage()
+  });
+}
+
+async function loadAttachedTargets() {
+  clearInMemoryAttachedTargets();
+  const data = await chrome.storage.local.get(ATTACHED_TARGETS_STORAGE_KEY);
+  const stored = data[ATTACHED_TARGETS_STORAGE_KEY] || {};
+  const ts = nowMs();
+  for (const [targetIdRaw, lease] of Object.entries(stored)) {
+    const targetId = normalizeTargetId(targetIdRaw);
+    const expiresAtEpochMs = Number(lease && lease.expiresAtEpochMs) || 0;
+    if (!targetId || expiresAtEpochMs <= ts) {
+      continue;
+    }
+    attachedTargets[targetId] = true;
+    attachedTargetLease[targetId] = { expiresAtEpochMs };
+  }
+  await persistAttachedTargets();
+}
+
+function debuggerAttach(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach({ tabId }, "1.3", () => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message || "attach failed"));
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+function debuggerDetach(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.detach({ tabId }, () => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message || "detach failed"));
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+function debuggerGetTargets() {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.getTargets((targets) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message || "getTargets failed"));
+        return;
+      }
+      resolve(Array.isArray(targets) ? targets : []);
+    });
+  });
+}
+
+function canAttachToTab(tab) {
+  const tabUrl = String(tab && tab.url ? tab.url : "");
+  if (!tabUrl) return true;
+  return !(
+    tabUrl.startsWith("chrome://") ||
+    tabUrl.startsWith("chrome-extension://") ||
+    tabUrl.startsWith("edge://") ||
+    tabUrl.startsWith("about:")
+  );
+}
+
+async function restoreAttachedTargets() {
+  if (pruneExpiredAttachedTargets()) {
+    await persistAttachedTargets();
+  }
+  const targetIds = Object.keys(attachedTargets);
+  if (!targetIds.length) return;
+
+  const [tabs, debuggerTargets] = await Promise.all([
+    chrome.tabs.query({}),
+    debuggerGetTargets().catch(() => [])
+  ]);
+  const tabById = new Map(tabs.map((tab) => [tab.id, tab]));
+  const debuggerByTabId = new Map();
+  for (const target of debuggerTargets) {
+    if (typeof target.tabId === "number") {
+      debuggerByTabId.set(target.tabId, target);
+    }
+  }
+
+  let changed = false;
+  for (const targetId of targetIds) {
+    const tabId = Number(targetId);
+    if (!Number.isFinite(tabId)) {
+      clearAttachedTarget(targetId);
+      changed = true;
+      continue;
+    }
+    const tab = tabById.get(tabId);
+    if (!tab || !canAttachToTab(tab)) {
+      clearAttachedTarget(targetId);
+      changed = true;
+      continue;
+    }
+
+    const dbg = debuggerByTabId.get(tabId);
+    if (dbg && dbg.attached) {
+      continue;
+    }
+
+    try {
+      await debuggerAttach(tabId);
+    } catch (err) {
+      const message = String(err && err.message ? err.message : "");
+      if (message.toLowerCase().includes("already attached")) {
+        continue;
+      }
+      clearAttachedTarget(targetId);
+      changed = true;
+    }
+  }
+  if (changed) {
+    await persistAttachedTargets();
+  }
+}
 
 async function loadSettings() {
   const data = await chrome.storage.sync.get(STORAGE_KEY);
@@ -210,6 +398,9 @@ function scheduleReconnect() {
 async function publishTargets(kind = "heartbeat") {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return;
+  }
+  if (pruneExpiredAttachedTargets()) {
+    await persistAttachedTargets();
   }
   const tabs = await chrome.tabs.query({});
   const targets = buildTargets(tabs, attachedTargets);
@@ -492,18 +683,9 @@ async function attachCurrentTab() {
     return { ok: false, error: "no active tab" };
   }
 
-  await new Promise((resolve, reject) => {
-    chrome.debugger.attach({ tabId: tab.id }, "1.3", () => {
-      const runtimeError = chrome.runtime.lastError;
-      if (runtimeError) {
-        reject(new Error(runtimeError.message || "attach failed"));
-      } else {
-        resolve();
-      }
-    });
-  });
-
-  attachedTargets[String(tab.id)] = true;
+  await debuggerAttach(tab.id);
+  setAttachedTarget(String(tab.id));
+  await persistAttachedTargets();
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: "attach", targetId: String(tab.id) }));
   }
@@ -517,18 +699,9 @@ async function detachCurrentTab() {
     return { ok: false, error: "no active tab" };
   }
 
-  await new Promise((resolve, reject) => {
-    chrome.debugger.detach({ tabId: tab.id }, () => {
-      const runtimeError = chrome.runtime.lastError;
-      if (runtimeError) {
-        reject(new Error(runtimeError.message || "detach failed"));
-      } else {
-        resolve();
-      }
-    });
-  });
-
-  delete attachedTargets[String(tab.id)];
+  await debuggerDetach(tab.id);
+  clearAttachedTarget(String(tab.id));
+  await persistAttachedTargets();
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: "detach", targetId: String(tab.id) }));
   }
@@ -711,14 +884,22 @@ chrome.debugger.onDetach.addListener((source) => {
   if (!source || typeof source.tabId !== "number") {
     return;
   }
-  delete attachedTargets[String(source.tabId)];
+  clearAttachedTarget(String(source.tabId));
+  persistAttachedTargets().catch(() => {});
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: "detached", targetId: String(source.tabId) }));
   }
 });
 
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearAttachedTarget(String(tabId));
+  persistAttachedTargets().catch(() => {});
+});
+
 async function bootstrap() {
   await loadSettings();
+  await loadAttachedTargets();
+  await restoreAttachedTargets();
   if (settings.desiredConnected) {
     await connectRelay({ persistDesired: false });
     return;
