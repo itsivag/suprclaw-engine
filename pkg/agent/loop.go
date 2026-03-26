@@ -53,6 +53,11 @@ type AgentLoop struct {
 	activeRequests sync.WaitGroup
 	// sessionLocks serializes concurrent runAgentLoop calls for the same session key
 	sessionLocks sync.Map
+	// Context compaction / budget observability counters.
+	compactionTriggeredTotal atomic.Uint64
+	compactionStageFailTotal atomic.Uint64
+	contextBudgetUnfitTotal  atomic.Uint64
+	providerContext400Total  atomic.Uint64
 }
 
 // processOptions configures how a message is processed
@@ -72,15 +77,15 @@ type processOptions struct {
 }
 
 const (
-	defaultResponse              = "I've completed processing but have no response to give. Increase `max_tool_iterations` in config.json."
-	sessionKeyAgentPrefix        = "agent:"
-	metadataKeyAccountID         = "account_id"
-	metadataKeyGuildID           = "guild_id"
-	metadataKeyTeamID            = "team_id"
-	metadataKeyParentPeerKind    = "parent_peer_kind"
-	metadataKeyParentPeerID      = "parent_peer_id"
-	metadataKeyRequestedAgentID  = "requested_agent_id"
-	metadataKeyModelOverride     = "model_override"
+	defaultResponse             = "I've completed processing but have no response to give. Increase `max_tool_iterations` in config.json."
+	sessionKeyAgentPrefix       = "agent:"
+	metadataKeyAccountID        = "account_id"
+	metadataKeyGuildID          = "guild_id"
+	metadataKeyTeamID           = "team_id"
+	metadataKeyParentPeerKind   = "parent_peer_kind"
+	metadataKeyParentPeerID     = "parent_peer_id"
+	metadataKeyRequestedAgentID = "requested_agent_id"
+	metadataKeyModelOverride    = "model_override"
 )
 
 func NewAgentLoop(
@@ -753,6 +758,59 @@ func (al *AgentLoop) PruneLastTurn(agentID, sessionKey string) error {
 	return agentInst.Sessions.Save(sessionKey)
 }
 
+// ResetSession clears history and summary for a given agent session key.
+func (al *AgentLoop) ResetSession(agentID, sessionKey string) error {
+	if strings.TrimSpace(sessionKey) == "" {
+		return fmt.Errorf("session key is required")
+	}
+
+	registry := al.GetRegistry()
+	var agentInst *AgentInstance
+	if agentID != "" {
+		if a, ok := registry.GetAgent(agentID); ok {
+			agentInst = a
+		}
+	}
+	if agentInst == nil {
+		agentInst = registry.GetDefaultAgent()
+	}
+	if agentInst == nil {
+		return fmt.Errorf("no agent found for ResetSession (agentID=%q)", agentID)
+	}
+
+	defer al.acquireSessionLock(sessionKey)()
+
+	agentInst.Sessions.SetHistory(sessionKey, make([]providers.Message, 0))
+	agentInst.Sessions.SetSummary(sessionKey, "")
+	return agentInst.Sessions.Save(sessionKey)
+}
+
+// CompactSession compacts a session by summarizing older history and truncating
+// to recent messages, preserving continuity.
+func (al *AgentLoop) CompactSession(agentID, sessionKey string) error {
+	if strings.TrimSpace(sessionKey) == "" {
+		return fmt.Errorf("session key is required")
+	}
+
+	registry := al.GetRegistry()
+	var agentInst *AgentInstance
+	if agentID != "" {
+		if a, ok := registry.GetAgent(agentID); ok {
+			agentInst = a
+		}
+	}
+	if agentInst == nil {
+		agentInst = registry.GetDefaultAgent()
+	}
+	if agentInst == nil {
+		return fmt.Errorf("no agent found for CompactSession (agentID=%q)", agentID)
+	}
+
+	defer al.acquireSessionLock(sessionKey)()
+	al.summarizeSession(agentInst, sessionKey)
+	return agentInst.Sessions.Save(sessionKey)
+}
+
 func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, string, error) {
 	// Add message preview to log (show full content for error messages)
 	var logContent string
@@ -1134,6 +1192,11 @@ func (al *AgentLoop) runLLMIteration(
 		activeCandidates = []providers.FallbackCandidate{{Model: opts.ModelOverride}}
 	}
 
+	activeCandidates = al.orderCandidatesByContextWindow(agent, activeCandidates)
+	if len(activeCandidates) == 1 {
+		activeModel = activeCandidates[0].Model
+	}
+
 	for iteration < agent.MaxIterations {
 		iteration++
 
@@ -1171,6 +1234,7 @@ func (al *AgentLoop) runLLMIteration(
 				"tools_count":       len(providerToolDefs),
 				"max_tokens":        agent.MaxTokens,
 				"temperature":       agent.Temperature,
+				"context_window":    agent.ContextWindow,
 				"system_prompt_len": len(messages[0].Content),
 			})
 
@@ -1236,7 +1300,44 @@ func (al *AgentLoop) runLLMIteration(
 
 		// Retry loop for context/token errors
 		maxRetries := 2
+		compactionCycles := 0
+		forceEmergencyCompaction := false
+		guard := normalizeContextGuard(agent.ContextGuard)
+		maxCompactionCycles := guard.MaxCompactionPasses * 2
+		if maxCompactionCycles < 3 {
+			maxCompactionCycles = 3
+		}
 		for retry := 0; retry <= maxRetries; retry++ {
+			if guard.Enabled {
+				if compactionCycles >= maxCompactionCycles {
+					al.contextBudgetUnfitTotal.Add(1)
+					return "", iteration, activeModel, &RequestError{
+						Code: ErrCodeContextBudgetUnfit,
+						Message: fmt.Sprintf(
+							"context compaction circuit breaker tripped after %d cycles",
+							compactionCycles,
+						),
+					}
+				}
+
+				compacted, compactErr := al.compactToBudget(
+					ctx,
+					agent,
+					messages,
+					opts,
+					activeModel,
+					providerToolDefs,
+					llmOpts,
+					activeCandidates,
+					forceEmergencyCompaction,
+				)
+				compactionCycles++
+				if compactErr != nil {
+					return "", iteration, activeModel, compactErr
+				}
+				messages = compacted
+			}
+
 			response, err = callLLM()
 			if err == nil {
 				break
@@ -1274,6 +1375,7 @@ func (al *AgentLoop) runLLMIteration(
 			}
 
 			if isContextError && retry < maxRetries {
+				al.providerContext400Total.Add(1)
 				logger.WarnCF(
 					"agent",
 					"Context window error detected, attempting compression",
@@ -1290,14 +1392,7 @@ func (al *AgentLoop) runLLMIteration(
 						Content: "Context window exceeded. Compressing history and retrying...",
 					})
 				}
-
-				al.forceCompression(agent, opts.SessionKey)
-				newHistory := agent.Sessions.GetHistory(opts.SessionKey)
-				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
-				messages = agent.ContextBuilder.BuildMessages(
-					newHistory, newSummary, "",
-					nil, opts.Channel, opts.ChatID, opts.SenderID, opts.SenderDisplayName,
-				)
+				forceEmergencyCompaction = true
 				continue
 			}
 			break
@@ -1638,55 +1733,22 @@ func (al *AgentLoop) maybeSummarize(agent *AgentInstance, sessionKey, channel, c
 }
 
 // forceCompression aggressively reduces context when the limit is hit.
-// It drops the oldest 50% of messages (keeping system prompt and last user message).
+// Legacy helper kept for compatibility with older call paths.
 func (al *AgentLoop) forceCompression(agent *AgentInstance, sessionKey string) {
 	history := agent.Sessions.GetHistory(sessionKey)
-	if len(history) <= 4 {
+	if len(history) <= 2 {
 		return
 	}
 
-	// Keep system prompt (usually [0]) and the very last message (user's trigger)
-	// We want to drop the oldest half of the *conversation*
-	// Assuming [0] is system, [1:] is conversation
-	conversation := history[1 : len(history)-1]
-	if len(conversation) == 0 {
-		return
-	}
-
-	// Helper to find the mid-point of the conversation
-	mid := len(conversation) / 2
-
-	// New history structure:
-	// 1. System Prompt (with compression note appended)
-	// 2. Second half of conversation
-	// 3. Last message
-
-	droppedCount := mid
-	keptConversation := conversation[mid:]
-
-	newHistory := make([]providers.Message, 0, 1+len(keptConversation)+1)
-
-	// Append compression note to the original system prompt instead of adding a new system message
-	// This avoids having two consecutive system messages which some APIs (like Zhipu) reject
-	compressionNote := fmt.Sprintf(
-		"\n\n[System Note: Emergency compression dropped %d oldest messages due to context limit]",
-		droppedCount,
-	)
-	enhancedSystemPrompt := history[0]
-	enhancedSystemPrompt.Content = enhancedSystemPrompt.Content + compressionNote
-	newHistory = append(newHistory, enhancedSystemPrompt)
-
-	newHistory = append(newHistory, keptConversation...)
-	newHistory = append(newHistory, history[len(history)-1]) // Last message
+	newHistory := emergencyTrimMessages(history, 0.5, 4)
 
 	// Update session
 	agent.Sessions.SetHistory(sessionKey, newHistory)
 	agent.Sessions.Save(sessionKey)
 
 	logger.WarnCF("agent", "Forced compression executed", map[string]any{
-		"session_key":  sessionKey,
-		"dropped_msgs": droppedCount,
-		"new_count":    len(newHistory),
+		"session_key": sessionKey,
+		"new_count":   len(newHistory),
 	})
 }
 
@@ -2093,6 +2155,18 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			agent.Sessions.SetSummary(opts.SessionKey, "")
 			agent.Sessions.Save(opts.SessionKey)
 			return nil
+		}
+		rt.NewSession = func() error {
+			if opts == nil {
+				return fmt.Errorf("process options not available")
+			}
+			return al.ResetSession(agent.ID, opts.SessionKey)
+		}
+		rt.CompactSession = func() error {
+			if opts == nil {
+				return fmt.Errorf("process options not available")
+			}
+			return al.CompactSession(agent.ID, opts.SessionKey)
 		}
 	}
 	return rt

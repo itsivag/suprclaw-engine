@@ -33,6 +33,7 @@ type AgentInstance struct {
 	ContextWindow             int
 	SummarizeMessageThreshold int
 	SummarizeTokenPercent     int
+	ContextGuard              config.ContextGuardConfig
 	Provider                  providers.LLMProvider
 	Sessions                  session.SessionStore
 	ContextBuilder            *ContextBuilder
@@ -52,6 +53,9 @@ type AgentInstance struct {
 	// LightCandidates holds the resolved provider candidates for the light model.
 	// Pre-computed at agent creation to avoid repeated model_list lookups at runtime.
 	LightCandidates []providers.FallbackCandidate
+	// CandidateContextWindows maps provider/model keys to configured context windows.
+	// Key format: providers.ModelKey(provider, model)
+	CandidateContextWindows map[string]int
 }
 
 // NewAgentInstance creates an agent instance from config.
@@ -139,8 +143,10 @@ func NewAgentInstance(
 	}
 
 	var thinkingLevelStr string
+	modelContextWindow := 0
 	if mc, err := cfg.GetModelConfig(model); err == nil {
 		thinkingLevelStr = mc.ThinkingLevel
+		modelContextWindow = mc.ContextWindow
 	}
 	thinkingLevel := parseThinkingLevel(thinkingLevelStr)
 
@@ -153,6 +159,17 @@ func NewAgentInstance(
 	if summarizeTokenPercent == 0 {
 		summarizeTokenPercent = 75
 	}
+
+	contextWindow := modelContextWindow
+	if contextWindow <= 0 {
+		// Keep a practical default separation between output tokens and total window.
+		contextWindow = maxTokens * 4
+	}
+	if contextWindow <= maxTokens {
+		contextWindow = maxTokens + 4096
+	}
+
+	contextGuard := normalizeContextGuard(defaults.ContextGuard)
 
 	// Resolve fallback candidates
 	modelCfg := providers.ModelConfig{
@@ -201,6 +218,27 @@ func NewAgentInstance(
 
 	candidates := providers.ResolveCandidatesWithLookup(modelCfg, defaults.Provider, resolveFromModelList)
 
+	candidateContextWindows := make(map[string]int)
+	if cfg != nil {
+		for i := range cfg.ModelList {
+			mc := cfg.ModelList[i]
+			if mc.ContextWindow <= 0 || strings.TrimSpace(mc.Model) == "" {
+				continue
+			}
+			protocol, modelID := providers.ExtractProtocol(mc.Model)
+			key := providers.ModelKey(protocol, modelID)
+			candidateContextWindows[key] = mc.ContextWindow
+		}
+	}
+
+	// Ensure the primary candidate has at least the agent-level context window.
+	if len(candidates) > 0 {
+		primaryKey := providers.ModelKey(candidates[0].Provider, candidates[0].Model)
+		if candidateContextWindows[primaryKey] <= 0 {
+			candidateContextWindows[primaryKey] = contextWindow
+		}
+	}
+
 	// Model routing setup: pre-resolve light model candidates at creation time
 	// to avoid repeated model_list lookups on every incoming message.
 	var router *routing.Router
@@ -230,9 +268,10 @@ func NewAgentInstance(
 		MaxTokens:                 maxTokens,
 		Temperature:               temperature,
 		ThinkingLevel:             thinkingLevel,
-		ContextWindow:             maxTokens,
+		ContextWindow:             contextWindow,
 		SummarizeMessageThreshold: summarizeMessageThreshold,
 		SummarizeTokenPercent:     summarizeTokenPercent,
+		ContextGuard:              contextGuard,
 		Provider:                  provider,
 		Sessions:                  sessions,
 		ContextBuilder:            contextBuilder,
@@ -242,6 +281,7 @@ func NewAgentInstance(
 		Candidates:                candidates,
 		Router:                    router,
 		LightCandidates:           lightCandidates,
+		CandidateContextWindows:   candidateContextWindows,
 		StatusUpdates:             defaults.StatusUpdates,
 	}
 }

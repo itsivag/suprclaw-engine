@@ -543,6 +543,74 @@ func TestDefaultConfig_SummarizationThresholds(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_ContextGuardDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	guard := cfg.Agents.Defaults.ContextGuard
+
+	if !guard.Enabled {
+		t.Fatal("ContextGuard.Enabled should default to true")
+	}
+	if guard.SafetyMarginTokens != 2048 {
+		t.Fatalf("ContextGuard.SafetyMarginTokens = %d, want 2048", guard.SafetyMarginTokens)
+	}
+	if guard.TargetInputRatio != 0.78 {
+		t.Fatalf("ContextGuard.TargetInputRatio = %v, want 0.78", guard.TargetInputRatio)
+	}
+	if guard.EmergencyInputRatio != 0.60 {
+		t.Fatalf("ContextGuard.EmergencyInputRatio = %v, want 0.60", guard.EmergencyInputRatio)
+	}
+	if guard.MaxCompactionPasses != 3 {
+		t.Fatalf("ContextGuard.MaxCompactionPasses = %d, want 3", guard.MaxCompactionPasses)
+	}
+	if guard.PreserveRecentMessages != 6 {
+		t.Fatalf("ContextGuard.PreserveRecentMessages = %d, want 6", guard.PreserveRecentMessages)
+	}
+}
+
+func TestLoadConfig_ContextGuardFromEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "agents": {"defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20}},
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_ENABLED", "false")
+	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_SAFETY_MARGIN_TOKENS", "111")
+	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_TARGET_INPUT_RATIO", "0.50")
+	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_EMERGENCY_INPUT_RATIO", "0.40")
+	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_MAX_COMPACTION_PASSES", "2")
+	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_PRESERVE_RECENT_MESSAGES", "4")
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+
+	guard := cfg.Agents.Defaults.ContextGuard
+	if guard.Enabled {
+		t.Fatal("ContextGuard.Enabled should be false from env")
+	}
+	if guard.SafetyMarginTokens != 111 {
+		t.Fatalf("ContextGuard.SafetyMarginTokens = %d, want 111", guard.SafetyMarginTokens)
+	}
+	if guard.TargetInputRatio != 0.50 {
+		t.Fatalf("ContextGuard.TargetInputRatio = %v, want 0.50", guard.TargetInputRatio)
+	}
+	if guard.EmergencyInputRatio != 0.40 {
+		t.Fatalf("ContextGuard.EmergencyInputRatio = %v, want 0.40", guard.EmergencyInputRatio)
+	}
+	if guard.MaxCompactionPasses != 2 {
+		t.Fatalf("ContextGuard.MaxCompactionPasses = %d, want 2", guard.MaxCompactionPasses)
+	}
+	if guard.PreserveRecentMessages != 4 {
+		t.Fatalf("ContextGuard.PreserveRecentMessages = %d, want 4", guard.PreserveRecentMessages)
+	}
+}
+
 func TestDefaultConfig_DMScope(t *testing.T) {
 	cfg := DefaultConfig()
 

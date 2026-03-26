@@ -4,6 +4,7 @@ const (
 	ErrCodeModelNotFound            = "MODEL_NOT_FOUND"
 	ErrCodeModelUnavailable         = "MODEL_UNAVAILABLE"
 	ErrCodeModelModalityUnsupported = "MODEL_MODALITY_UNSUPPORTED"
+	ErrCodeContextBudgetUnfit       = "CONTEXT_BUDGET_UNFIT"
 )
 
 // RequestError is a typed, client-visible error for per-request validation failures.

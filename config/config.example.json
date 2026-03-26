@@ -8,7 +8,15 @@
       "temperature": 0.7,
       "max_tool_iterations": 20,
       "summarize_message_threshold": 20,
-      "summarize_token_percent": 75
+      "summarize_token_percent": 75,
+      "context_guard": {
+        "enabled": true,
+        "safety_margin_tokens": 2048,
+        "target_input_ratio": 0.78,
+        "emergency_input_ratio": 0.60,
+        "max_compaction_passes": 3,
+        "preserve_recent_messages": 6
+      }
     }
   },
   "model_list": [

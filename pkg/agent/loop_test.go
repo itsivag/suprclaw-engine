@@ -67,6 +67,14 @@ func newTestAgentLoop(
 				Model:             "test-model",
 				MaxTokens:         4096,
 				MaxToolIterations: 10,
+				ContextGuard: config.ContextGuardConfig{
+					Enabled:                true,
+					SafetyMarginTokens:     64,
+					TargetInputRatio:       0.78,
+					EmergencyInputRatio:    0.60,
+					MaxCompactionPasses:    3,
+					PreserveRecentMessages: 4,
+				},
 			},
 		},
 	}
@@ -585,11 +593,76 @@ func TestProcessMessage_CommandOutcomes(t *testing.T) {
 		Content:  "/new",
 		Peer:     baseMsg.Peer,
 	})
-	if newResp != "LLM reply" {
+	if newResp != "Started a new conversation." {
 		t.Fatalf("unexpected /new reply: %q", newResp)
 	}
-	if provider.calls != 2 {
-		t.Fatalf("LLM should be called for passthrough /new command, calls=%d", provider.calls)
+	if provider.calls != 1 {
+		t.Fatalf("LLM should not be called for handled /new command, calls=%d", provider.calls)
+	}
+}
+
+func TestProcessMessage_CompactCommandCompactsSession(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		Session: config.SessionConfig{
+			DMScope: "per-channel-peer",
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &simpleMockProvider{response: "summary result"}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	helper := testHelper{al: al}
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("No default agent found")
+	}
+	sessionKey := "agent:main:whatsapp:direct:user1"
+	defaultAgent.Sessions.SetHistory(sessionKey, []providers.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: "u2"},
+		{Role: "assistant", Content: "a2"},
+		{Role: "user", Content: "u3"},
+		{Role: "assistant", Content: "a3"},
+		{Role: "user", Content: "u4"},
+		{Role: "assistant", Content: "a4"},
+	})
+
+	resp := helper.executeAndGetResponse(t, context.Background(), bus.InboundMessage{
+		Channel:  "whatsapp",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "/compact",
+		Peer: bus.Peer{
+			Kind: "direct",
+			ID:   "user1",
+		},
+	})
+	if resp != "Conversation compacted!" {
+		t.Fatalf("unexpected /compact reply: %q", resp)
+	}
+
+	history := defaultAgent.Sessions.GetHistory(sessionKey)
+	if len(history) > 4 {
+		t.Fatalf("expected compacted history <= 4 messages, got %d", len(history))
+	}
+	if defaultAgent.Sessions.GetSummary(sessionKey) == "" {
+		t.Fatal("expected non-empty summary after /compact")
 	}
 }
 
@@ -809,6 +882,7 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 	if defaultAgent == nil {
 		t.Fatal("No default agent found")
 	}
+	defaultAgent.ContextWindow = 16384
 	defaultAgent.Sessions.SetHistory(sessionKey, history)
 
 	// Call ProcessDirectWithChannel

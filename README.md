@@ -113,7 +113,15 @@ suprclaw onboard
       "model_name": "claude-sonnet-4.6",
       "max_tokens": 8192,
       "temperature": 0.7,
-      "max_tool_iterations": 20
+      "max_tool_iterations": 20,
+      "context_guard": {
+        "enabled": true,
+        "safety_margin_tokens": 2048,
+        "target_input_ratio": 0.78,
+        "emergency_input_ratio": 0.60,
+        "max_compaction_passes": 3,
+        "preserve_recent_messages": 6
+      }
     }
   },
   "model_list": [
@@ -300,6 +308,7 @@ Config file: `~/.suprclaw/config.json`
 | `SUPRCLAW_BUILTIN_SKILLS`                         | Override builtin skills path             | —                         |
 | `SUPRCLAW_TOOLS_SKILLS_GLOBAL_DIR`                | Override shared global skills directory  | `<SUPRCLAW_HOME>/skills`  |
 | `SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE`  | Restrict agent to workspace              | `true`                    |
+| `SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_ENABLED`  | Enable pre-dispatch context compaction   | `true`                    |
 
 ### Workspace Layout
 

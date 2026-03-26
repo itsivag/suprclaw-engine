@@ -171,6 +171,76 @@ func (h *adminHandler) wakeAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"output": string(out)})
 }
 
+type sessionOpRequest struct {
+	SessionKey string `json:"sessionKey"`
+}
+
+// --- POST /api/admin/agents/{agentId}/sessions/new ---
+func (h *adminHandler) newSession(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	if err := validateAgentID(agentID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if h.agentLoop == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "agent loop not initialized"})
+		return
+	}
+
+	var req sessionOpRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.SessionKey) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sessionKey is required"})
+		return
+	}
+
+	if err := h.agentLoop.ResetSession(agentID, req.SessionKey); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "ok",
+		"agentId":    agentID,
+		"sessionKey": req.SessionKey,
+	})
+}
+
+// --- POST /api/admin/agents/{agentId}/sessions/compact ---
+func (h *adminHandler) compactSession(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	if err := validateAgentID(agentID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if h.agentLoop == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "agent loop not initialized"})
+		return
+	}
+
+	var req sessionOpRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.SessionKey) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sessionKey is required"})
+		return
+	}
+
+	if err := h.agentLoop.CompactSession(agentID, req.SessionKey); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "ok",
+		"agentId":    agentID,
+		"sessionKey": req.SessionKey,
+	})
+}
+
 // --- POST /api/admin/runtime/reload ---
 
 func (h *adminHandler) reloadRuntime(w http.ResponseWriter, r *http.Request) {
@@ -365,7 +435,7 @@ func (h *adminHandler) getWorkspaceFile(w http.ResponseWriter, r *http.Request) 
 
 type marketplaceInstallRequest struct {
 	RepoURL    string   `json:"repoUrl"`
-	Paths      []string `json:"paths"`      // sparse checkout paths
+	Paths      []string `json:"paths"` // sparse checkout paths
 	AgentID    string   `json:"agentId"`
 	DestSubdir string   `json:"destSubdir"` // relative subdir inside workspace (optional)
 }
@@ -499,4 +569,3 @@ func (h *adminHandler) mcpConfigure(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
-

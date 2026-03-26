@@ -11,11 +11,11 @@ import (
 )
 
 type adminHandler struct {
-	configPath     string
-	cronService    *cron.CronService
-	secret         string
-	mu             sync.Mutex // serialises all config mutations
-	agentLoop      *agent.AgentLoop
+	configPath  string
+	cronService *cron.CronService
+	secret      string
+	mu          sync.Mutex // serialises all config mutations
+	agentLoop   *agent.AgentLoop
 }
 
 func newAdminHandler(
@@ -25,10 +25,10 @@ func newAdminHandler(
 	al *agent.AgentLoop,
 ) *adminHandler {
 	return &adminHandler{
-		configPath:    configPath,
-		cronService:   cs,
-		secret:        secret,
-		agentLoop:     al,
+		configPath:  configPath,
+		cronService: cs,
+		secret:      secret,
+		agentLoop:   al,
 	}
 }
 
@@ -48,6 +48,8 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin/agents", h.auth(h.upsertAgent))
 	mux.HandleFunc("DELETE /api/admin/agents/{agentId}", h.auth(h.deleteAgent))
 	mux.HandleFunc("POST /api/admin/agents/{agentId}/wake", h.auth(h.wakeAgent))
+	mux.HandleFunc("POST /api/admin/agents/{agentId}/sessions/new", h.auth(h.newSession))
+	mux.HandleFunc("POST /api/admin/agents/{agentId}/sessions/compact", h.auth(h.compactSession))
 
 	// Runtime
 	mux.HandleFunc("POST /api/admin/runtime/reload", h.auth(h.reloadRuntime))

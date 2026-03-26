@@ -51,6 +51,18 @@ type VisionCapable interface {
 	SupportsVision(model string) bool
 }
 
+// TokenCountCapable is an optional provider interface used by the agent
+// context-budget engine to get a provider-native token count.
+type TokenCountCapable interface {
+	CountTokens(
+		ctx context.Context,
+		messages []Message,
+		tools []ToolDefinition,
+		model string,
+		options map[string]any,
+	) (int, error)
+}
+
 // FailoverReason classifies why an LLM request failed for fallback decisions.
 type FailoverReason string
 

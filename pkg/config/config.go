@@ -264,25 +264,36 @@ type CheckpointConfig struct {
 	Compensations      []CompensationRule `json:"compensations,omitempty"` // inverse-call rules for external tools
 }
 
+type ContextGuardConfig struct {
+	Enabled                bool    `json:"enabled"                  env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_ENABLED"`
+	SafetyMarginTokens     int     `json:"safety_margin_tokens"     env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_SAFETY_MARGIN_TOKENS"`
+	TargetInputRatio       float64 `json:"target_input_ratio"       env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_TARGET_INPUT_RATIO"`
+	EmergencyInputRatio    float64 `json:"emergency_input_ratio"    env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_EMERGENCY_INPUT_RATIO"`
+	MaxCompactionPasses    int     `json:"max_compaction_passes"    env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_MAX_COMPACTION_PASSES"`
+	PreserveRecentMessages int     `json:"preserve_recent_messages" env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_PRESERVE_RECENT_MESSAGES"`
+	DebugDump              bool    `json:"debug_dump,omitempty"      env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_DEBUG_DUMP"`
+}
+
 type AgentDefaults struct {
-	Workspace                 string            `json:"workspace"                       env:"SUPRCLAW_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace       bool              `json:"restrict_to_workspace"           env:"SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	AllowReadOutsideWorkspace bool              `json:"allow_read_outside_workspace"    env:"SUPRCLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
-	Provider                  string            `json:"provider"                        env:"SUPRCLAW_AGENTS_DEFAULTS_PROVIDER"`
-	ModelName                 string            `json:"model_name"                      env:"SUPRCLAW_AGENTS_DEFAULTS_MODEL_NAME"`
-	Model                     string            `json:"model,omitempty"                 env:"SUPRCLAW_AGENTS_DEFAULTS_MODEL"` // Deprecated: use model_name instead
-	ModelFallbacks            []string          `json:"model_fallbacks,omitempty"`
-	ImageModel                string            `json:"image_model,omitempty"           env:"SUPRCLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks       []string          `json:"image_model_fallbacks,omitempty"`
-	MaxTokens                 int               `json:"max_tokens"                      env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_TOKENS"`
-	Temperature               *float64          `json:"temperature,omitempty"           env:"SUPRCLAW_AGENTS_DEFAULTS_TEMPERATURE"`
-	MaxToolIterations         int               `json:"max_tool_iterations"             env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	SummarizeMessageThreshold int               `json:"summarize_message_threshold"     env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
-	SummarizeTokenPercent     int               `json:"summarize_token_percent"         env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
-	MaxMediaSize              int               `json:"max_media_size,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
-	StatusUpdates             bool              `json:"status_updates,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_STATUS_UPDATES"`
-	Routing                   *RoutingConfig    `json:"routing,omitempty"`
-	Checkpoint                *CheckpointConfig `json:"checkpoint,omitempty"`
+	Workspace                 string             `json:"workspace"                       env:"SUPRCLAW_AGENTS_DEFAULTS_WORKSPACE"`
+	RestrictToWorkspace       bool               `json:"restrict_to_workspace"           env:"SUPRCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	AllowReadOutsideWorkspace bool               `json:"allow_read_outside_workspace"    env:"SUPRCLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
+	Provider                  string             `json:"provider"                        env:"SUPRCLAW_AGENTS_DEFAULTS_PROVIDER"`
+	ModelName                 string             `json:"model_name"                      env:"SUPRCLAW_AGENTS_DEFAULTS_MODEL_NAME"`
+	Model                     string             `json:"model,omitempty"                 env:"SUPRCLAW_AGENTS_DEFAULTS_MODEL"` // Deprecated: use model_name instead
+	ModelFallbacks            []string           `json:"model_fallbacks,omitempty"`
+	ImageModel                string             `json:"image_model,omitempty"           env:"SUPRCLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks       []string           `json:"image_model_fallbacks,omitempty"`
+	MaxTokens                 int                `json:"max_tokens"                      env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_TOKENS"`
+	Temperature               *float64           `json:"temperature,omitempty"           env:"SUPRCLAW_AGENTS_DEFAULTS_TEMPERATURE"`
+	MaxToolIterations         int                `json:"max_tool_iterations"             env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	SummarizeMessageThreshold int                `json:"summarize_message_threshold"     env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
+	SummarizeTokenPercent     int                `json:"summarize_token_percent"         env:"SUPRCLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
+	ContextGuard              ContextGuardConfig `json:"context_guard,omitempty"`
+	MaxMediaSize              int                `json:"max_media_size,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
+	StatusUpdates             bool               `json:"status_updates,omitempty"        env:"SUPRCLAW_AGENTS_DEFAULTS_STATUS_UPDATES"`
+	Routing                   *RoutingConfig     `json:"routing,omitempty"`
+	Checkpoint                *CheckpointConfig  `json:"checkpoint,omitempty"`
 }
 
 const DefaultMaxMediaSize = 20 * 1024 * 1024 // 20 MB
@@ -546,6 +557,7 @@ type ModelConfig struct {
 
 	// Optional optimizations
 	RPM            int    `json:"rpm,omitempty"`              // Requests per minute limit
+	ContextWindow  int    `json:"context_window,omitempty"`   // Provider/model context window (input+output tokens)
 	MaxTokensField string `json:"max_tokens_field,omitempty"` // Field name for max tokens (e.g., "max_completion_tokens")
 	RequestTimeout int    `json:"request_timeout,omitempty"`
 	ThinkingLevel  string `json:"thinking_level,omitempty"` // Extended thinking: off|low|medium|high|xhigh|adaptive
