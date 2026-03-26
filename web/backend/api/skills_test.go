@@ -25,6 +25,8 @@ func TestHandleListSkills(t *testing.T) {
 
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	cfg.Agents.Defaults.Workspace = workspace
+	globalSkillsRoot := filepath.Join(t.TempDir(), "shared-skills")
+	cfg.Tools.Skills.GlobalDir = globalSkillsRoot
 	err = config.SaveConfig(configPath, cfg)
 	if err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
@@ -41,7 +43,7 @@ func TestHandleListSkills(t *testing.T) {
 		t.Fatalf("WriteFile(workspace skill) error = %v", err)
 	}
 
-	globalSkillDir := filepath.Join(globalConfigDir(), "skills", "global-skill")
+	globalSkillDir := filepath.Join(globalSkillsRoot, "global-skill")
 	if err := os.MkdirAll(globalSkillDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(global skill) error = %v", err)
 	}
@@ -110,6 +112,81 @@ func TestHandleListSkills(t *testing.T) {
 	}
 	if gotSkills["builtin-skill"] != "builtin" {
 		t.Fatalf("builtin-skill source = %q, want builtin", gotSkills["builtin-skill"])
+	}
+}
+
+func TestHandleListSkills_UsesConfiguredGlobalDirNotLegacyHomeSkills(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	tmpHome := t.TempDir()
+	t.Setenv("SUPRCLAW_HOME", tmpHome)
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	cfg.Agents.Defaults.Workspace = workspace
+	cfg.Tools.Skills.GlobalDir = "custom-global-skills"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	configuredGlobal := filepath.Join(tmpHome, "custom-global-skills", "configured-global")
+	if err := os.MkdirAll(configuredGlobal, 0o755); err != nil {
+		t.Fatalf("MkdirAll(configured global) error = %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(configuredGlobal, "SKILL.md"),
+		[]byte("---\nname: configured-global\ndescription: Configured global\n---\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(configured global) error = %v", err)
+	}
+
+	legacyGlobal := filepath.Join(tmpHome, "skills", "legacy-home-global")
+	if err := os.MkdirAll(legacyGlobal, 0o755); err != nil {
+		t.Fatalf("MkdirAll(legacy global) error = %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(legacyGlobal, "SKILL.md"),
+		[]byte("---\nname: legacy-home-global\ndescription: Legacy home global\n---\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(legacy global) error = %v", err)
+	}
+
+	builtinRoot := filepath.Join(t.TempDir(), "builtin-skills")
+	t.Setenv("SUPRCLAW_BUILTIN_SKILLS", builtinRoot)
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/skills", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp skillSupportResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	got := make(map[string]string, len(resp.Skills))
+	for _, skill := range resp.Skills {
+		got[skill.Name] = skill.Source
+	}
+	if got["configured-global"] != "global" {
+		t.Fatalf("configured-global source = %q, want global", got["configured-global"])
+	}
+	if _, exists := got["legacy-home-global"]; exists {
+		t.Fatalf("legacy-home-global should not be loaded when global_dir is configured")
 	}
 }
 

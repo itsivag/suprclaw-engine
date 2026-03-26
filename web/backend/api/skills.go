@@ -46,7 +46,7 @@ func (h *Handler) handleListSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loader := newSkillsLoader(cfg.WorkspacePath())
+	loader := newSkillsLoader(cfg, cfg.WorkspacePath())
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(skillSupportResponse{
@@ -61,7 +61,7 @@ func (h *Handler) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loader := newSkillsLoader(cfg.WorkspacePath())
+	loader := newSkillsLoader(cfg, cfg.WorkspacePath())
 	name := r.PathValue("name")
 	allSkills := loader.ListSkills()
 
@@ -144,7 +144,7 @@ func (h *Handler) handleImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loader := newSkillsLoader(workspace)
+	loader := newSkillsLoader(cfg, workspace)
 	for _, skill := range loader.ListSkills() {
 		if skill.Path == skillFile || (skill.Name == skillName && skill.Source == "workspace") {
 			w.Header().Set("Content-Type", "application/json")
@@ -167,7 +167,7 @@ func (h *Handler) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loader := newSkillsLoader(cfg.WorkspacePath())
+	loader := newSkillsLoader(cfg, cfg.WorkspacePath())
 	name := r.PathValue("name")
 	for _, skill := range loader.ListSkills() {
 		if skill.Name != name {
@@ -189,10 +189,11 @@ func (h *Handler) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Skill not found", http.StatusNotFound)
 }
 
-func newSkillsLoader(workspace string) *skills.SkillsLoader {
+func newSkillsLoader(cfg *config.Config, workspace string) *skills.SkillsLoader {
+	globalSkillsDir := config.ResolveGlobalSkillsDir(cfg.Tools.Skills.GlobalDir)
 	return skills.NewSkillsLoader(
 		workspace,
-		filepath.Join(globalConfigDir(), "skills"),
+		globalSkillsDir,
 		builtinSkillsDir(),
 	)
 }
@@ -306,17 +307,6 @@ func loadSkillContent(path string) (string, error) {
 		return "", err
 	}
 	return skillFrontmatterStripper.ReplaceAllString(string(content), ""), nil
-}
-
-func globalConfigDir() string {
-	if home := os.Getenv("SUPRCLAW_HOME"); home != "" {
-		return home
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".suprclaw")
 }
 
 func builtinSkillsDir() string {
