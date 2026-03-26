@@ -1,30 +1,47 @@
 import { badgeForState, buildTargets, normalizeRelayURL } from "./relay-core.js";
-import { relayPairingURL, relaySetupURL, relayStatusURL, validateRelayRequest } from "./relay-protocol.js";
+import {
+  relayPairingURL,
+  relaySessionStopURL,
+  relaySetupURL,
+  relayStatusURL,
+  validateRelayRequest
+} from "./relay-protocol.js";
 
 const STORAGE_KEY = "suprclawRelaySettings";
 const RELAY_SUBPROTOCOL = "suprclaw-relay";
 const DEFAULT_SETTINGS = {
   relayUrl: "ws://127.0.0.1:18800/browser-relay/extension",
-  token: ""
+  token: "",
+  desiredConnected: false
 };
 
 let settings = { ...DEFAULT_SETTINGS };
 let socket = null;
 let heartbeatTimer = null;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+let connectInFlight = null;
 let connectionState = "disconnected";
+let hardStoppedByServer = false;
 const attachedTargets = {};
 
 async function loadSettings() {
   const data = await chrome.storage.sync.get(STORAGE_KEY);
   settings = { ...DEFAULT_SETTINGS, ...(data[STORAGE_KEY] || {}) };
   settings.relayUrl = normalizeRelayURL(settings.relayUrl);
+  settings.desiredConnected = Boolean(settings.desiredConnected);
 }
 
 async function saveSettings(nextSettings) {
   settings = {
     ...settings,
     ...nextSettings,
-    relayUrl: normalizeRelayURL(nextSettings.relayUrl || settings.relayUrl)
+    relayUrl: normalizeRelayURL(nextSettings.relayUrl || settings.relayUrl),
+    desiredConnected: Boolean(
+      typeof nextSettings.desiredConnected === "boolean"
+        ? nextSettings.desiredConnected
+        : settings.desiredConnected
+    )
   };
   await chrome.storage.sync.set({ [STORAGE_KEY]: settings });
 }
@@ -36,6 +53,43 @@ function setBadge(state) {
   chrome.action.setBadgeBackgroundColor({ color: badge.color });
 }
 
+function clearHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+function cancelReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function nextReconnectDelayMs() {
+  const base = Math.min(30000, 1000 * Math.pow(2, Math.min(reconnectAttempts, 5)));
+  const jitter = Math.floor(Math.random() * 700);
+  return base + jitter;
+}
+
+function scheduleReconnect() {
+  if (!settings.desiredConnected || hardStoppedByServer) {
+    return;
+  }
+  if (reconnectTimer || (socket && socket.readyState === WebSocket.OPEN)) {
+    return;
+  }
+  const delay = nextReconnectDelayMs();
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    reconnectAttempts += 1;
+    await connectRelay({ persistDesired: false }).catch(() => {
+      // retry scheduling happens in close handler
+    });
+  }, delay);
+}
+
 async function publishTargets(kind = "heartbeat") {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return;
@@ -45,24 +99,21 @@ async function publishTargets(kind = "heartbeat") {
   socket.send(JSON.stringify({ type: kind, targets }));
 }
 
-function clearHeartbeat() {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-  }
-}
-
 function startHeartbeat() {
   clearHeartbeat();
   heartbeatTimer = setInterval(() => {
     publishTargets("heartbeat").catch(() => {
-      // heartbeat failures are reflected by socket close/errors
+      // reflected by websocket close
     });
   }, 10000);
 }
 
-function disconnectRelay() {
+async function disconnectRelay({ persistDesired = true } = {}) {
+  cancelReconnect();
   clearHeartbeat();
+  if (persistDesired) {
+    await saveSettings({ desiredConnected: false });
+  }
   if (socket) {
     try {
       socket.close(1000, "disconnect");
@@ -74,9 +125,20 @@ function disconnectRelay() {
   setBadge("disconnected");
 }
 
-async function connectRelay() {
+function isHardStopClose(event) {
+  const reason = String(event?.reason || "").toLowerCase();
+  if (reason.includes("hard_stop") || reason.includes("hard stop")) {
+    return true;
+  }
+  return false;
+}
+
+async function connectRelay({ persistDesired = true } = {}) {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     return { ok: true, state: connectionState, relayUrl: settings.relayUrl };
+  }
+  if (connectInFlight) {
+    return connectInFlight;
   }
 
   if (!settings.token) {
@@ -89,17 +151,32 @@ async function connectRelay() {
     return { ok: false, error: "relay URL is required" };
   }
 
+  if (persistDesired) {
+    await saveSettings({ desiredConnected: true });
+  }
+
+  hardStoppedByServer = false;
   setBadge("connecting");
 
-  return new Promise((resolve) => {
+  connectInFlight = new Promise((resolve) => {
     const ws = new WebSocket(settings.relayUrl, [RELAY_SUBPROTOCOL, `token.${settings.token}`]);
+    let settled = false;
+
+    const settle = (payload) => {
+      if (settled) return;
+      settled = true;
+      connectInFlight = null;
+      resolve(payload);
+    };
 
     ws.onopen = async () => {
       socket = ws;
+      reconnectAttempts = 0;
+      cancelReconnect();
       setBadge("connected");
       startHeartbeat();
       await publishTargets("hello");
-      resolve({ ok: true, state: "connected", relayUrl: settings.relayUrl });
+      settle({ ok: true, state: "connected", relayUrl: settings.relayUrl });
     };
 
     ws.onmessage = async (event) => {
@@ -107,24 +184,38 @@ async function connectRelay() {
         const message = JSON.parse(event.data);
         await handleRelayMessage(message);
       } catch (err) {
-        // invalid relay payload, ignore
         console.warn("Relay message parse failed", err);
       }
     };
 
     ws.onerror = () => {
       setBadge("disconnected");
-      resolve({ ok: false, error: "websocket error" });
+      settle({ ok: false, error: "websocket error" });
     };
 
-    ws.onclose = () => {
+    ws.onclose = async (event) => {
       if (socket === ws) {
         socket = null;
       }
       clearHeartbeat();
+
+      if (isHardStopClose(event)) {
+        hardStoppedByServer = true;
+        await saveSettings({ desiredConnected: false });
+        setBadge("stopped");
+        settle({ ok: false, error: "relay hard stopped" });
+        return;
+      }
+
       setBadge("disconnected");
+      settle({ ok: false, error: "websocket closed" });
+      if (settings.desiredConnected) {
+        scheduleReconnect();
+      }
     };
   });
+
+  return connectInFlight;
 }
 
 async function relayResponse(requestId, result, error) {
@@ -221,6 +312,36 @@ async function detachCurrentTab() {
   return { ok: true, targetId: String(tab.id) };
 }
 
+async function hardStopRelay() {
+  if (!settings.token) {
+    return { ok: false, error: "token is required" };
+  }
+  const stopUrl = relaySessionStopURL(settings.relayUrl);
+  try {
+    const resp = await fetch(stopUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${settings.token}`
+      }
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      return {
+        ok: false,
+        status: resp.status,
+        error: data.error || "hard stop failed"
+      };
+    }
+    await disconnectRelay({ persistDesired: false });
+    await saveSettings({ desiredConnected: false });
+    hardStoppedByServer = true;
+    setBadge("stopped");
+    return { ok: true, ...data };
+  } catch (err) {
+    return { ok: false, error: err.message || "hard stop request failed" };
+  }
+}
+
 async function diagnostics() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return {
@@ -228,6 +349,8 @@ async function diagnostics() {
     connected: Boolean(socket && socket.readyState === WebSocket.OPEN),
     relayUrl: settings.relayUrl,
     hasToken: Boolean(settings.token),
+    desiredConnected: Boolean(settings.desiredConnected),
+    hardStopped: hardStoppedByServer,
     activeTabId: tab && typeof tab.id === "number" ? String(tab.id) : "",
     attached: tab && typeof tab.id === "number" ? Boolean(attachedTargets[String(tab.id)]) : false
   };
@@ -244,11 +367,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
       case "connect":
-        sendResponse(await connectRelay());
+        sendResponse(await connectRelay({ persistDesired: true }));
         break;
       case "disconnect":
-        disconnectRelay();
+        await disconnectRelay({ persistDesired: true });
         sendResponse({ ok: true });
+        break;
+      case "hardStop":
+        sendResponse(await hardStopRelay());
         break;
       case "attachCurrentTab":
         sendResponse(await attachCurrentTab());
@@ -377,14 +503,21 @@ chrome.debugger.onDetach.addListener((source) => {
   }
 });
 
-chrome.runtime.onInstalled.addListener(async () => {
+async function bootstrap() {
   await loadSettings();
+  if (settings.desiredConnected) {
+    await connectRelay({ persistDesired: false });
+    return;
+  }
   setBadge("disconnected");
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  await bootstrap();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await loadSettings();
-  setBadge("disconnected");
+  await bootstrap();
 });
 
-loadSettings().then(() => setBadge("disconnected"));
+bootstrap();

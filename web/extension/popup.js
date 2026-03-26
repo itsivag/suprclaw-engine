@@ -3,6 +3,7 @@ import { popupActionState } from "./popup-state.js";
 const statusEl = document.getElementById("status");
 const tabMetaEl = document.getElementById("tabMeta");
 const connectBtn = document.getElementById("connectBtn");
+const hardStopBtn = document.getElementById("hardStopBtn");
 const attachBtn = document.getElementById("attachBtn");
 const detachBtn = document.getElementById("detachBtn");
 const optionsBtn = document.getElementById("optionsBtn");
@@ -25,10 +26,16 @@ async function refresh() {
   const ui = popupActionState({ connected: Boolean(state.connected), attached: Boolean(state.attached) });
 
   statusEl.textContent = ui.statusLabel;
+  if (state.hardStopped) {
+    statusEl.textContent = "Hard Stopped";
+  } else if (state.desiredConnected && !state.connected) {
+    statusEl.textContent = "Reconnecting";
+  }
   statusEl.dataset.state = state.connected ? "connected" : "disconnected";
   connectBtn.textContent = ui.connectLabel;
   attachBtn.disabled = ui.attachDisabled;
   detachBtn.disabled = ui.detachDisabled;
+  hardStopBtn.disabled = !state.hasToken;
 
   const tabLabel = state.activeTabId ? `Tab ${state.activeTabId}` : "No active tab";
   tabMetaEl.textContent = `${tabLabel} • ${state.attached ? "Attached" : "Detached"}`;
@@ -42,6 +49,11 @@ connectBtn.addEventListener("click", async () => {
   } else {
     await send({ type: "connect" });
   }
+  await refresh();
+});
+
+hardStopBtn.addEventListener("click", async () => {
+  await send({ type: "hardStop" });
   await refresh();
 });
 

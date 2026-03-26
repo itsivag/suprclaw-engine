@@ -17,7 +17,8 @@ Chrome-first MV3 extension for the `browser-relay` subsystem.
 3. Attach a normal web tab.
 4. Click **Pair Mobile (QR)**.
 5. Scan QR in your mobile app and claim via `POST /api/browser-relay/pairing/claim?code=<CODE>`.
-6. Use returned `token` + `extension_ws_url`/`cdp_ws_url_template` from the claim response.
+6. Mobile client stores `session_token` + `refresh_token` + expiry fields from claim response.
+7. Use **Hard Stop** in popup to explicitly terminate the sticky relay lease and revoke session tokens.
 
 ## Local Smoke
 

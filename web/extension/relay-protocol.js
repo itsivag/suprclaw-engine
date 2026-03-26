@@ -30,6 +30,14 @@ export function relayPairingURL(inputRelayURL) {
   return relayAPIURL(inputRelayURL, "pairing");
 }
 
+export function relaySessionStateURL(inputRelayURL) {
+  return relayAPIURL(inputRelayURL, "session/state");
+}
+
+export function relaySessionStopURL(inputRelayURL) {
+  return relayAPIURL(inputRelayURL, "session/stop");
+}
+
 function relayAPIURL(inputRelayURL, endpoint) {
   const relayUrl = normalizeRelayURL(inputRelayURL);
   return relayUrl

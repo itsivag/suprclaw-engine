@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { relayPairingURL, relaySetupURL, relayStatusURL, validateRelayRequest } from "../relay-protocol.js";
+import {
+  relayPairingURL,
+  relaySessionStateURL,
+  relaySessionStopURL,
+  relaySetupURL,
+  relayStatusURL,
+  validateRelayRequest
+} from "../relay-protocol.js";
 
 test("validateRelayRequest rejects unattached targets", () => {
   const result = validateRelayRequest({
@@ -42,5 +49,13 @@ test("relay setup and pairing urls map from extension URL", () => {
   assert.equal(
     relayPairingURL("wss://api.suprclaw.com/browser-relay/extension"),
     "https://api.suprclaw.com/api/browser-relay/pairing"
+  );
+  assert.equal(
+    relaySessionStateURL("wss://api.suprclaw.com/browser-relay/extension"),
+    "https://api.suprclaw.com/api/browser-relay/session/state"
+  );
+  assert.equal(
+    relaySessionStopURL("wss://api.suprclaw.com/browser-relay/extension"),
+    "https://api.suprclaw.com/api/browser-relay/session/stop"
   );
 });
