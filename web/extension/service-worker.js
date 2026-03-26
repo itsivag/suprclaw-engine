@@ -1,5 +1,6 @@
 import { badgeForState, buildTargets, normalizeRelayURL } from "./relay-core.js";
 import {
+  relayBootstrapTokenURL,
   relayPairingURL,
   relaySessionStopURL,
   relaySetupURL,
@@ -9,8 +10,10 @@ import {
 
 const STORAGE_KEY = "suprclawRelaySettings";
 const RELAY_SUBPROTOCOL = "suprclaw-relay";
+const CLOUD_RELAY_DEFAULT_URL = "wss://api.suprclaw.com/browser-relay/extension";
+const LEGACY_LOCAL_DEFAULT_URL = "ws://127.0.0.1:18800/browser-relay/extension";
 const DEFAULT_SETTINGS = {
-  relayUrl: "ws://127.0.0.1:18800/browser-relay/extension",
+  relayUrl: CLOUD_RELAY_DEFAULT_URL,
   token: "",
   desiredConnected: false
 };
@@ -27,9 +30,17 @@ const attachedTargets = {};
 
 async function loadSettings() {
   const data = await chrome.storage.sync.get(STORAGE_KEY);
-  settings = { ...DEFAULT_SETTINGS, ...(data[STORAGE_KEY] || {}) };
+  const stored = data[STORAGE_KEY] || {};
+  settings = { ...DEFAULT_SETTINGS, ...stored };
   settings.relayUrl = normalizeRelayURL(settings.relayUrl);
   settings.desiredConnected = Boolean(settings.desiredConnected);
+
+  // Upgrade older extension installs that persisted the localhost relay default.
+  const normalizedLegacyDefault = normalizeRelayURL(LEGACY_LOCAL_DEFAULT_URL);
+  if (settings.relayUrl === normalizedLegacyDefault) {
+    settings.relayUrl = normalizeRelayURL(CLOUD_RELAY_DEFAULT_URL);
+    await chrome.storage.sync.set({ [STORAGE_KEY]: settings });
+  }
 }
 
 async function saveSettings(nextSettings) {
@@ -136,8 +147,47 @@ function isHardStopClose(event) {
 async function autoSetupRelay({ relayUrl, tokenHint }) {
   const setupURL = relaySetupURL(relayUrl);
   const headers = {};
-  if (tokenHint) {
-    headers.Authorization = `Bearer ${tokenHint}`;
+  let bootstrapToken = String(tokenHint || "").trim();
+
+  if (!bootstrapToken) {
+    const bootstrapURL = relayBootstrapTokenURL(relayUrl);
+    try {
+      const bootstrapResp = await fetch(bootstrapURL, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ ttl_seconds: 120 })
+      });
+      const bootstrapData = await bootstrapResp.json().catch(() => ({}));
+      if (!bootstrapResp.ok) {
+        return {
+          ok: false,
+          status: bootstrapResp.status,
+          error: bootstrapData.error || "bootstrap token request failed",
+          url: bootstrapURL
+        };
+      }
+      bootstrapToken = String(bootstrapData.bootstrap_token || "").trim();
+      if (!bootstrapToken) {
+        return {
+          ok: false,
+          error: "bootstrap token response missing token",
+          url: bootstrapURL
+        };
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        error: err.message || "bootstrap token request failed",
+        url: bootstrapURL
+      };
+    }
+  }
+
+  if (bootstrapToken) {
+    headers.Authorization = `Bearer ${bootstrapToken}`;
   }
 
   try {

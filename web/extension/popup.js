@@ -1,11 +1,4 @@
-import { popupActionState } from "./popup-state.js";
-
 const statusEl = document.getElementById("status");
-const tabMetaEl = document.getElementById("tabMeta");
-const connectBtn = document.getElementById("connectBtn");
-const hardStopBtn = document.getElementById("hardStopBtn");
-const attachBtn = document.getElementById("attachBtn");
-const detachBtn = document.getElementById("detachBtn");
 const optionsBtn = document.getElementById("optionsBtn");
 const pairBtn = document.getElementById("pairBtn");
 const pairingPanel = document.getElementById("pairingPanel");
@@ -23,49 +16,15 @@ function send(message) {
 
 async function refresh() {
   const state = await send({ type: "getState" });
-  const ui = popupActionState({ connected: Boolean(state.connected), attached: Boolean(state.attached) });
-
-  statusEl.textContent = ui.statusLabel;
+  statusEl.textContent = state.connected ? "Connected" : "Disconnected";
   if (state.hardStopped) {
     statusEl.textContent = "Hard Stopped";
   } else if (state.desiredConnected && !state.connected) {
     statusEl.textContent = "Reconnecting";
   }
   statusEl.dataset.state = state.connected ? "connected" : "disconnected";
-  connectBtn.textContent = ui.connectLabel;
-  attachBtn.disabled = ui.attachDisabled;
-  detachBtn.disabled = ui.detachDisabled;
-  hardStopBtn.disabled = !state.hasToken;
-
-  const tabLabel = state.activeTabId ? `Tab ${state.activeTabId}` : "No active tab";
-  tabMetaEl.textContent = `${tabLabel} • ${state.attached ? "Attached" : "Detached"}`;
-  pairBtn.disabled = !state.connected;
+  pairBtn.disabled = false;
 }
-
-connectBtn.addEventListener("click", async () => {
-  const current = await send({ type: "getState" });
-  if (current.connected) {
-    await send({ type: "disconnect" });
-  } else {
-    await send({ type: "connect" });
-  }
-  await refresh();
-});
-
-hardStopBtn.addEventListener("click", async () => {
-  await send({ type: "hardStop" });
-  await refresh();
-});
-
-attachBtn.addEventListener("click", async () => {
-  await send({ type: "attachCurrentTab" });
-  await refresh();
-});
-
-detachBtn.addEventListener("click", async () => {
-  await send({ type: "detachCurrentTab" });
-  await refresh();
-});
 
 optionsBtn.addEventListener("click", () => {
   chrome.runtime.openOptionsPage();

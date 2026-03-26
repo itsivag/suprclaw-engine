@@ -26,6 +26,10 @@ export function relaySetupURL(inputRelayURL) {
   return relayAPIURL(inputRelayURL, "setup");
 }
 
+export function relayBootstrapTokenURL(inputRelayURL) {
+  return relayAPIURL(inputRelayURL, "bootstrap-token");
+}
+
 export function relayPairingURL(inputRelayURL) {
   return relayAPIURL(inputRelayURL, "pairing");
 }

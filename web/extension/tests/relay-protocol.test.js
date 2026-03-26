@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  relayBootstrapTokenURL,
   relayPairingURL,
   relaySessionStateURL,
   relaySessionStopURL,
@@ -45,6 +46,10 @@ test("relay setup and pairing urls map from extension URL", () => {
   assert.equal(
     relaySetupURL("wss://api.suprclaw.com/browser-relay/extension"),
     "https://api.suprclaw.com/api/browser-relay/setup"
+  );
+  assert.equal(
+    relayBootstrapTokenURL("wss://api.suprclaw.com/browser-relay/extension"),
+    "https://api.suprclaw.com/api/browser-relay/bootstrap-token"
   );
   assert.equal(
     relayPairingURL("wss://api.suprclaw.com/browser-relay/extension"),
