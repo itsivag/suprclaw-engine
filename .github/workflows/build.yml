@@ -37,6 +37,19 @@ jobs:
             esac
           done
 
+      - name: Package browser relay extension
+        run: |
+          set -euo pipefail
+          test -f web/extension/manifest.json
+          mkdir -p build/extension
+          rsync -av --delete \
+            --exclude 'tests' \
+            --exclude '*.test.js' \
+            --exclude 'node_modules' \
+            --exclude '.DS_Store' \
+            web/extension/ build/extension/
+          (cd build/extension && zip -r "../suprclaw-browser-relay-extension-latest.zip" .)
+
       - name: Delete existing latest release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
