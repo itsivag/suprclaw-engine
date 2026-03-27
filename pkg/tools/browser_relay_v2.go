@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,8 +15,7 @@ import (
 )
 
 const (
-	defaultBrowserRelayV2Timeout    = 20 * time.Second
-	defaultBrowserRelayV2ActionsURL = "http://127.0.0.1:18800/api/browser-relay/actions"
+	defaultBrowserRelayV2Timeout = 20 * time.Second
 )
 
 // BrowserRelayV2Options contains request wiring for Browser Relay V2 tools.
@@ -52,22 +52,59 @@ func NewBrowserRelayV2Tools(cfg *config.Config) []Tool {
 }
 
 // ResolveBrowserRelayV2Options resolves connectivity details for Browser Relay V2 actions.
-// This is a hard V2 migration path: no legacy MCP browser_relay endpoint wiring is used.
+// This is a hard V2 migration path: Browser Relay V2 tools are registered only when
+// tools.mcp.servers.browser_relay.url is configured and valid.
 func ResolveBrowserRelayV2Options(cfg *config.Config) (BrowserRelayV2Options, bool) {
 	if cfg == nil || !cfg.Tools.BrowserRelay.Enabled {
+		return BrowserRelayV2Options{}, false
+	}
+	server, ok := cfg.Tools.MCP.Servers["browser_relay"]
+	if !ok || strings.TrimSpace(server.URL) == "" {
+		return BrowserRelayV2Options{}, false
+	}
+	actionsURL := deriveBrowserRelayV2ActionsURL(server.URL)
+	if actionsURL == "" {
 		return BrowserRelayV2Options{}, false
 	}
 	headers := map[string]string{
 		"Content-Type": "application/json",
 	}
-	if token := strings.TrimSpace(cfg.Tools.BrowserRelay.Token); token != "" {
-		headers["Authorization"] = "Bearer " + token
+	for k, v := range server.Headers {
+		key := strings.TrimSpace(k)
+		val := strings.TrimSpace(v)
+		if key == "" || val == "" {
+			continue
+		}
+		headers[key] = val
 	}
 	return BrowserRelayV2Options{
-		ActionsURL: defaultBrowserRelayV2ActionsURL,
+		ActionsURL: actionsURL,
 		Headers:    headers,
 		Timeout:    defaultBrowserRelayV2Timeout,
 	}, true
+}
+
+func deriveBrowserRelayV2ActionsURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	switch strings.TrimRight(u.Path, "/") {
+	case "/api/mcp/browser-relay":
+		u.Path = "/api/browser-relay/actions"
+	case "/api/browser-relay/actions":
+		// already actions endpoint
+	default:
+		// unsupported path for hard migrate mode
+		return ""
+	}
+	return u.String()
 }
 
 type browserRelayV2TargetsListTool struct {

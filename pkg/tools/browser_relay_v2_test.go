@@ -10,15 +10,17 @@ import (
 	"github.com/itsivag/suprclaw/pkg/config"
 )
 
-func TestResolveBrowserRelayV2Options_StrictDefault(t *testing.T) {
+func TestResolveBrowserRelayV2Options_UsesConfiguredMCPServerURL(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Tools.BrowserRelay.Enabled = true
-	cfg.Tools.BrowserRelay.Token = "relay-token"
 	cfg.Tools.MCP.Servers = map[string]config.MCPServerConfig{
 		"browser_relay": {
 			Enabled: true,
 			Type:    "http",
 			URL:     "https://api.suprclaw.com/api/mcp/browser-relay",
+			Headers: map[string]string{
+				"Authorization": "Bearer gateway-token",
+			},
 		},
 	}
 
@@ -26,15 +28,38 @@ func TestResolveBrowserRelayV2Options_StrictDefault(t *testing.T) {
 	if !ok {
 		t.Fatal("ResolveBrowserRelayV2Options() ok = false, want true")
 	}
-	if opts.ActionsURL != defaultBrowserRelayV2ActionsURL {
-		t.Fatalf("ActionsURL = %q, want %q", opts.ActionsURL, defaultBrowserRelayV2ActionsURL)
+	if opts.ActionsURL != "https://api.suprclaw.com/api/browser-relay/actions" {
+		t.Fatalf("ActionsURL = %q", opts.ActionsURL)
 	}
-	if got := opts.Headers["Authorization"]; got != "Bearer relay-token" {
-		t.Fatalf("Authorization header = %q, want Bearer relay-token", got)
+	if got := opts.Headers["Authorization"]; got != "Bearer gateway-token" {
+		t.Fatalf("Authorization header = %q, want Bearer gateway-token", got)
 	}
 }
 
-func TestBrowserRelayV2ActionTool_ExecuteCallsV2(t *testing.T) {
+func TestResolveBrowserRelayV2Options_FailsWhenMCPBrowserRelayURLMissing(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.MCP.Servers = map[string]config.MCPServerConfig{}
+
+	_, ok := ResolveBrowserRelayV2Options(cfg)
+	if ok {
+		t.Fatal("ResolveBrowserRelayV2Options() ok = true, want false")
+	}
+}
+
+func TestDeriveBrowserRelayV2ActionsURL(t *testing.T) {
+	if got := deriveBrowserRelayV2ActionsURL("https://api.suprclaw.com/api/mcp/browser-relay"); got != "https://api.suprclaw.com/api/browser-relay/actions" {
+		t.Fatalf("deriveBrowserRelayV2ActionsURL() = %q", got)
+	}
+	if got := deriveBrowserRelayV2ActionsURL("https://api.suprclaw.com/api/browser-relay/actions"); got != "https://api.suprclaw.com/api/browser-relay/actions" {
+		t.Fatalf("deriveBrowserRelayV2ActionsURL() passthrough = %q", got)
+	}
+	if got := deriveBrowserRelayV2ActionsURL("https://api.suprclaw.com/api/mcp/other"); got != "" {
+		t.Fatalf("deriveBrowserRelayV2ActionsURL() unsupported path = %q, want empty", got)
+	}
+}
+
+func TestBrowserRelayV2ActionTool_ExecuteCallsConfiguredV2Endpoint(t *testing.T) {
 	var gotBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -86,6 +111,13 @@ func TestBrowserRelayV2ActionTool_ExecuteCallsV2(t *testing.T) {
 func TestBrowserRelayV2Tools_NamesAreV2Only(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.MCP.Servers = map[string]config.MCPServerConfig{
+		"browser_relay": {
+			Enabled: true,
+			Type:    "http",
+			URL:     "https://api.suprclaw.com/api/mcp/browser-relay",
+		},
+	}
 	tools := NewBrowserRelayV2Tools(cfg)
 	if len(tools) != 3 {
 		t.Fatalf("len(tools) = %d, want 3", len(tools))
@@ -104,4 +136,3 @@ func TestBrowserRelayV2Tools_NamesAreV2Only(t *testing.T) {
 		}
 	}
 }
-
