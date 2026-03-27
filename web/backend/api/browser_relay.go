@@ -8,7 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +28,8 @@ const (
 	defaultBrowserRelayMaxClients     = 16
 	defaultBrowserRelayIdleTimeoutSec = 60
 	defaultBrowserRelayTimeout        = 15 * time.Second
+	defaultRelayRequestCacheTTL       = 5 * time.Minute
+	defaultRelayRequestCacheMax       = 512
 )
 
 var browserRelayUpgrader = websocket.Upgrader{
@@ -48,14 +50,10 @@ func (h *Handler) registerBrowserRelayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/browser-relay/session/refresh", h.handleBrowserRelaySessionRefresh)
 	mux.HandleFunc("POST /api/browser-relay/session/stop", h.handleBrowserRelaySessionStop)
 	mux.HandleFunc("GET /api/browser-relay/targets", h.handleBrowserRelayTargets)
-	mux.HandleFunc("POST /api/browser-relay/actions/{action}", h.handleBrowserRelayAction)
+	mux.HandleFunc("POST /api/browser-relay/actions", h.handleBrowserRelayActionV2)
 
 	mux.HandleFunc("GET /browser-relay/extension", h.handleBrowserRelayExtensionWS)
 	mux.HandleFunc("GET /browser-relay/cdp/{targetId}", h.handleBrowserRelayCDPWS)
-
-	mux.HandleFunc("GET /json/version", h.handleBrowserRelayJSONVersion)
-	mux.HandleFunc("GET /json/list", h.handleBrowserRelayJSONList)
-	mux.HandleFunc("GET /devtools/page/{targetId}", h.handleBrowserRelayCompatWS)
 }
 
 func (h *Handler) handleBrowserRelayStatus(w http.ResponseWriter, r *http.Request) {
@@ -188,26 +186,70 @@ func (h *Handler) handleBrowserRelayTargets(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-type browserRelayActionRequest struct {
-	TargetID   string `json:"target_id"`
-	SessionID  string `json:"session_id"`
-	URL        string `json:"url"`
-	Selector   string `json:"selector"`
-	Text       string `json:"text"`
-	Key        string `json:"key"`
-	Expression string `json:"expression"`
-	TimeoutMS  int    `json:"timeout_ms"`
-	IntervalMS int    `json:"interval_ms"`
+type relayRetryClass string
+
+const (
+	retryClassNever            relayRetryClass = "never"
+	retryClassSafeImmediate    relayRetryClass = "safe_immediate"
+	retryClassSafeBackoff      relayRetryClass = "safe_backoff"
+	retryClassAfterStateChange relayRetryClass = "after_state_change"
+)
+
+type relayExecutionPolicy struct {
+	StopOnError *bool `json:"stop_on_error,omitempty"`
+	TimeoutMS   int   `json:"timeout_ms,omitempty"`
 }
 
-func (h *Handler) handleBrowserRelayAction(w http.ResponseWriter, r *http.Request) {
-	cfg, _, _, ok := h.requireBrowserRelayEnabled(w, r, true, true)
+type relayActionV2Step struct {
+	Action string         `json:"action"`
+	Args   map[string]any `json:"args,omitempty"`
+}
+
+type relayActionV2Request struct {
+	RequestID       string               `json:"request_id"`
+	Target          string               `json:"target"`
+	Action          string               `json:"action,omitempty"`
+	Args            map[string]any       `json:"args,omitempty"`
+	Steps           []relayActionV2Step  `json:"steps,omitempty"`
+	ExecutionPolicy relayExecutionPolicy `json:"execution_policy,omitempty"`
+}
+
+type relayActionTiming struct {
+	LatencyMS  int64 `json:"latency_ms"`
+	QueueDepth int   `json:"queue_depth"`
+	Cached     bool  `json:"cached"`
+}
+
+type relayActionV2Response struct {
+	RequestID    string            `json:"request_id"`
+	OK           bool              `json:"ok"`
+	Result       any               `json:"result,omitempty"`
+	ErrorCode    string            `json:"error_code,omitempty"`
+	ErrorMessage string            `json:"error_message,omitempty"`
+	RetryClass   relayRetryClass   `json:"retry_class,omitempty"`
+	TraceID      string            `json:"trace_id"`
+	Timing       relayActionTiming `json:"timing"`
+}
+
+type relayRequestCacheMeta struct {
+	CreatedAt   time.Time
+	Fingerprint string
+	HTTPStatus  int
+}
+
+type relayErrorInfo struct {
+	HTTPStatus int
+	Code       string
+	RetryClass relayRetryClass
+}
+
+func (h *Handler) handleBrowserRelayActionV2(w http.ResponseWriter, r *http.Request) {
+	cfg, _, manager, ok := h.requireBrowserRelayEnabled(w, r, true, true)
 	if !ok {
 		return
 	}
 	router := h.browserRelayRouter(cfg)
 
-	action := strings.TrimSpace(r.PathValue("action"))
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
@@ -215,107 +257,408 @@ func (h *Handler) handleBrowserRelayAction(w http.ResponseWriter, r *http.Reques
 	}
 	defer r.Body.Close()
 
-	var req browserRelayActionRequest
-	if len(body) > 0 {
-		if err = json.Unmarshal(body, &req); err != nil {
-			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
-			return
-		}
+	var req relayActionV2Request
+	if len(body) == 0 {
+		h.writeRelayV2Error(w, relayActionV2Response{
+			RequestID:    "",
+			OK:           false,
+			ErrorCode:    "invalid_request",
+			ErrorMessage: "empty request body",
+			RetryClass:   retryClassNever,
+			TraceID:      uuid.NewString(),
+			Timing:       relayActionTiming{},
+		}, http.StatusBadRequest)
+		return
 	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), defaultBrowserRelayTimeout)
-	defer cancel()
-
-	result, statusCode, err := h.executeBrowserRelayAction(ctx, router, action, req)
-	if err != nil {
-		http.Error(w, err.Error(), statusCode)
+	if err = json.Unmarshal(body, &req); err != nil {
+		h.writeRelayV2Error(w, relayActionV2Response{
+			RequestID:    "",
+			OK:           false,
+			ErrorCode:    "invalid_json",
+			ErrorMessage: fmt.Sprintf("Invalid JSON: %v", err),
+			RetryClass:   retryClassNever,
+			TraceID:      uuid.NewString(),
+			Timing:       relayActionTiming{},
+		}, http.StatusBadRequest)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"action": action,
-		"result": result,
+	traceID := uuid.NewString()
+	if strings.TrimSpace(req.RequestID) == "" {
+		req.RequestID = uuid.NewString()
+	}
+	req.RequestID = strings.TrimSpace(req.RequestID)
+
+	if cached, status, ok := h.relayCachedResponse(req); ok {
+		cached.TraceID = traceID
+		cached.Timing.Cached = true
+		h.writeRelayV2(w, cached, status)
+		return
+	}
+
+	action, payload, validationErr := h.validateAndConvertRelayActionV2(req)
+	if validationErr != nil {
+		resp := relayActionV2Response{
+			RequestID:    req.RequestID,
+			OK:           false,
+			ErrorCode:    "validation_error",
+			ErrorMessage: validationErr.Error(),
+			RetryClass:   retryClassNever,
+			TraceID:      traceID,
+		}
+		h.cacheRelayResponse(req, resp, http.StatusBadRequest)
+		h.writeRelayV2Error(w, resp, http.StatusBadRequest)
+		return
+	}
+
+	timeout := defaultBrowserRelayTimeout
+	if req.ExecutionPolicy.TimeoutMS > 0 {
+		timeout = time.Duration(req.ExecutionPolicy.TimeoutMS) * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	start := time.Now()
+	source := relayEngineFromAction(action, payload.TargetID)
+	queueDepth := manager.QueueDepth(browserrelayExtensionRawTarget(payload.TargetID))
+	if isBrowserRelayDebugTrace() {
+		logger.DebugCF("browser-relay", "relay v2 request", map[string]any{
+			"trace_id":    traceID,
+			"request_id":  req.RequestID,
+			"target":      req.Target,
+			"action":      action,
+			"engine":      source,
+			"queue_depth": queueDepth,
+		})
+	}
+
+	result, execErr := router.ExecuteAction(ctx, action, payload)
+	latency := time.Since(start).Milliseconds()
+
+	if execErr != nil {
+		info := classifyRelayError(execErr)
+		resp := relayActionV2Response{
+			RequestID:    req.RequestID,
+			OK:           false,
+			ErrorCode:    info.Code,
+			ErrorMessage: execErr.Error(),
+			RetryClass:   info.RetryClass,
+			TraceID:      traceID,
+			Timing: relayActionTiming{
+				LatencyMS:  latency,
+				QueueDepth: queueDepth,
+			},
+		}
+		h.cacheRelayResponse(req, resp, info.HTTPStatus)
+		logger.WarnCF("browser-relay", "browser relay v2 action failed", map[string]any{
+			"trace_id":    traceID,
+			"request_id":  req.RequestID,
+			"target":      req.Target,
+			"action":      action,
+			"engine":      source,
+			"queue_depth": queueDepth,
+			"latency_ms":  latency,
+			"error_code":  resp.ErrorCode,
+			"retry_class": resp.RetryClass,
+			"error":       execErr.Error(),
+		})
+		h.writeRelayV2Error(w, resp, info.HTTPStatus)
+		return
+	}
+
+	resp := relayActionV2Response{
+		RequestID: req.RequestID,
+		OK:        true,
+		Result:    result,
+		TraceID:   traceID,
+		Timing: relayActionTiming{
+			LatencyMS:  latency,
+			QueueDepth: queueDepth,
+		},
+	}
+	h.cacheRelayResponse(req, resp, http.StatusOK)
+	logger.DebugCF("browser-relay", "browser relay v2 action completed", map[string]any{
+		"trace_id":    traceID,
+		"request_id":  req.RequestID,
+		"target":      req.Target,
+		"action":      action,
+		"engine":      source,
+		"queue_depth": queueDepth,
+		"latency_ms":  latency,
+		"result":      "ok",
 	})
+	h.writeRelayV2(w, resp, http.StatusOK)
 }
 
-func (h *Handler) executeBrowserRelayAction(
-	ctx context.Context,
-	router *browserrelay.EngineRouter,
-	action string,
-	req browserRelayActionRequest,
-) (any, int, error) {
-	start := time.Now()
-	source := "extension"
-	if strings.HasPrefix(strings.TrimSpace(req.TargetID), "ab:") || strings.HasPrefix(action, "session.") {
-		source = "agent_browser"
-	}
-	result, err := router.ExecuteAction(ctx, action, browserrelay.ActionRequest{
-		TargetID:   req.TargetID,
-		SessionID:  req.SessionID,
-		URL:        req.URL,
-		Selector:   req.Selector,
-		Text:       req.Text,
-		Key:        req.Key,
-		Expression: req.Expression,
-		TimeoutMS:  req.TimeoutMS,
-		IntervalMS: req.IntervalMS,
-	})
-	if err != nil {
-		status := mapBrowserRelayError(err)
-		if errors.Is(err, browserrelay.ErrUnsupportedAction) {
-			status = http.StatusNotFound
+func (h *Handler) validateAndConvertRelayActionV2(req relayActionV2Request) (string, browserrelay.ActionRequest, error) {
+	target := strings.TrimSpace(req.Target)
+	action := strings.TrimSpace(req.Action)
+	if len(req.Steps) > 0 {
+		if action == "" {
+			action = "batch"
 		}
-		if strings.Contains(err.Error(), "is required") {
-			status = http.StatusBadRequest
+		if action != "batch" {
+			return "", browserrelay.ActionRequest{}, fmt.Errorf("steps can only be used with action=batch")
 		}
-		logger.WarnCF("browser-relay", "browser relay action failed", map[string]any{
-			"action":      action,
-			"target_id":   req.TargetID,
-			"source":      source,
-			"latency_ms":  time.Since(start).Milliseconds(),
-			"status_code": status,
-			"error":       err.Error(),
-		})
-		return nil, status, err
 	}
-	logger.DebugCF("browser-relay", "browser relay action completed", map[string]any{
-		"action":     action,
-		"target_id":  req.TargetID,
-		"source":     source,
-		"latency_ms": time.Since(start).Milliseconds(),
-	})
-	return result, http.StatusOK, nil
+	if action == "" {
+		return "", browserrelay.ActionRequest{}, fmt.Errorf("action is required")
+	}
+	payload := browserrelay.ActionRequest{
+		TargetID:       target,
+		StopOnError:    true,
+		StopOnErrorSet: false,
+	}
+	if req.ExecutionPolicy.StopOnError != nil {
+		payload.StopOnErrorSet = true
+		payload.StopOnError = *req.ExecutionPolicy.StopOnError
+	}
+
+	if action == "batch" {
+		if target == "" {
+			return "", browserrelay.ActionRequest{}, fmt.Errorf("target is required for batch")
+		}
+		if len(req.Steps) == 0 {
+			return "", browserrelay.ActionRequest{}, fmt.Errorf("steps are required for batch")
+		}
+		payload.Steps = make([]browserrelay.BatchStep, 0, len(req.Steps))
+		for i, step := range req.Steps {
+			a := strings.TrimSpace(step.Action)
+			if a == "" {
+				return "", browserrelay.ActionRequest{}, fmt.Errorf("steps[%d].action is required", i)
+			}
+			bs := browserrelay.BatchStep{
+				Action:        a,
+				TargetID:      target,
+				URL:           argString(step.Args, "url"),
+				Selector:      argString(step.Args, "selector"),
+				Text:          argString(step.Args, "text"),
+				Key:           argString(step.Args, "key"),
+				Expression:    argString(step.Args, "expression"),
+				WaitMode:      argString(step.Args, "wait_mode"),
+				RefGeneration: argString(step.Args, "ref_generation"),
+				TimeoutMS:     argInt(step.Args, "timeout_ms"),
+				IntervalMS:    argInt(step.Args, "interval_ms"),
+			}
+			payload.Steps = append(payload.Steps, bs)
+		}
+		return action, payload, nil
+	}
+
+	payload.SessionID = argString(req.Args, "session_id")
+	payload.URL = argString(req.Args, "url")
+	payload.Selector = argString(req.Args, "selector")
+	payload.Text = argString(req.Args, "text")
+	payload.Key = argString(req.Args, "key")
+	payload.Expression = argString(req.Args, "expression")
+	payload.WaitMode = argString(req.Args, "wait_mode")
+	payload.RefGeneration = argString(req.Args, "ref_generation")
+	payload.TimeoutMS = argInt(req.Args, "timeout_ms")
+	payload.IntervalMS = argInt(req.Args, "interval_ms")
+	return action, payload, nil
+}
+
+func argString(args map[string]any, key string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", v))
+}
+
+func argInt(args map[string]any, key string) int {
+	if len(args) == 0 {
+		return 0
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case float32:
+		return int(t)
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case json.Number:
+		i, err := t.Int64()
+		if err == nil {
+			return int(i)
+		}
+	}
+	return 0
+}
+
+func classifyRelayError(err error) relayErrorInfo {
+	if strings.Contains(err.Error(), "is required") || strings.Contains(err.Error(), "are required") {
+		return relayErrorInfo{HTTPStatus: http.StatusBadRequest, Code: "validation_error", RetryClass: retryClassNever}
+	}
+	switch {
+	case errors.Is(err, browserrelay.ErrUnsupportedAction):
+		return relayErrorInfo{HTTPStatus: http.StatusNotFound, Code: "unsupported_action", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrTargetNotAttached):
+		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "target_not_attached", RetryClass: retryClassAfterStateChange}
+	case errors.Is(err, browserrelay.ErrTargetOwned):
+		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "target_owned", RetryClass: retryClassAfterStateChange}
+	case errors.Is(err, browserrelay.ErrMaxClientsReached):
+		return relayErrorInfo{HTTPStatus: http.StatusTooManyRequests, Code: "max_clients_reached", RetryClass: retryClassSafeBackoff}
+	case errors.Is(err, browserrelay.ErrRelayQueueFull):
+		return relayErrorInfo{HTTPStatus: http.StatusTooManyRequests, Code: "queue_full", RetryClass: retryClassSafeBackoff}
+	case errors.Is(err, browserrelay.ErrRelayLoopGuardTriggered):
+		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "relay_loop_guard_triggered", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrSnapshotRefNotFound):
+		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "snapshot_ref_not_found", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrRelayQueueCanceled):
+		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "queue_canceled", RetryClass: retryClassAfterStateChange}
+	case errors.Is(err, browserrelay.ErrAgentBrowserUnavailable):
+		return relayErrorInfo{HTTPStatus: http.StatusServiceUnavailable, Code: "agent_browser_unavailable", RetryClass: retryClassSafeBackoff}
+	case errors.Is(err, browserrelay.ErrNoExtensionForTarget):
+		return relayErrorInfo{HTTPStatus: http.StatusNotFound, Code: "extension_not_found", RetryClass: retryClassAfterStateChange}
+	case errors.Is(err, browserrelay.ErrTargetNotFound):
+		return relayErrorInfo{HTTPStatus: http.StatusNotFound, Code: "target_not_found", RetryClass: retryClassAfterStateChange}
+	case errors.Is(err, browserrelay.ErrSessionNotFound):
+		return relayErrorInfo{HTTPStatus: http.StatusNotFound, Code: "session_not_found", RetryClass: retryClassAfterStateChange}
+	case errors.Is(err, browserrelay.ErrInvalidTargetID):
+		return relayErrorInfo{HTTPStatus: http.StatusBadRequest, Code: "invalid_target_id", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrRequestTimeout):
+		return relayErrorInfo{HTTPStatus: http.StatusRequestTimeout, Code: "request_timeout", RetryClass: retryClassSafeBackoff}
+	case errors.Is(err, browserrelay.ErrRequestCanceled):
+		return relayErrorInfo{HTTPStatus: http.StatusRequestTimeout, Code: "request_canceled", RetryClass: retryClassSafeImmediate}
+	default:
+		return relayErrorInfo{HTTPStatus: http.StatusBadGateway, Code: "relay_internal_error", RetryClass: retryClassSafeBackoff}
+	}
 }
 
 func mapBrowserRelayError(err error) int {
-	switch {
-	case errors.Is(err, browserrelay.ErrTargetNotAttached), errors.Is(err, browserrelay.ErrTargetOwned):
-		return http.StatusConflict
-	case errors.Is(err, browserrelay.ErrMaxClientsReached):
-		return http.StatusTooManyRequests
-	case errors.Is(err, browserrelay.ErrAgentBrowserUnavailable):
-		return http.StatusServiceUnavailable
-	case errors.Is(err, browserrelay.ErrNoExtensionForTarget), errors.Is(err, browserrelay.ErrTargetNotFound), errors.Is(err, browserrelay.ErrSessionNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, browserrelay.ErrInvalidTargetID):
-		return http.StatusBadRequest
-	case errors.Is(err, browserrelay.ErrRequestTimeout), errors.Is(err, browserrelay.ErrRequestCanceled):
-		return http.StatusRequestTimeout
-	default:
-		return http.StatusBadGateway
+	return classifyRelayError(err).HTTPStatus
+}
+
+func relayEngineFromAction(action, target string) string {
+	if strings.HasPrefix(strings.TrimSpace(target), "ab:") || strings.HasPrefix(strings.TrimSpace(action), "session.") {
+		return "agent_browser"
+	}
+	return "extension"
+}
+
+func browserrelayExtensionRawTarget(target string) string {
+	id := strings.TrimSpace(target)
+	if strings.HasPrefix(id, "ext:") {
+		return strings.TrimSpace(strings.TrimPrefix(id, "ext:"))
+	}
+	return id
+}
+
+func (h *Handler) relayCachedResponse(req relayActionV2Request) (relayActionV2Response, int, bool) {
+	fingerprint := relayRequestFingerprint(req)
+	h.browserRelayReqMu.Lock()
+	defer h.browserRelayReqMu.Unlock()
+	h.cleanupRelayRequestCacheLocked()
+	meta, ok := h.browserRelayReqMeta[req.RequestID]
+	if !ok {
+		return relayActionV2Response{}, 0, false
+	}
+	if meta.Fingerprint != fingerprint {
+		return relayActionV2Response{
+			RequestID:    req.RequestID,
+			OK:           false,
+			ErrorCode:    "request_id_reuse_conflict",
+			ErrorMessage: "request_id already used with a different payload",
+			RetryClass:   retryClassNever,
+		}, http.StatusConflict, true
+	}
+	resp, ok := h.browserRelayReqCache[req.RequestID]
+	if !ok {
+		return relayActionV2Response{}, 0, false
+	}
+	status := meta.HTTPStatus
+	if status <= 0 {
+		status = http.StatusOK
+	}
+	return resp, status, true
+}
+
+func (h *Handler) cacheRelayResponse(req relayActionV2Request, resp relayActionV2Response, status int) {
+	h.browserRelayReqMu.Lock()
+	defer h.browserRelayReqMu.Unlock()
+	h.cleanupRelayRequestCacheLocked()
+	if len(h.browserRelayReqCache) >= defaultRelayRequestCacheMax {
+		h.evictOldestRelayRequestLocked()
+	}
+	h.browserRelayReqCache[req.RequestID] = resp
+	h.browserRelayReqMeta[req.RequestID] = relayRequestCacheMeta{
+		CreatedAt:   time.Now(),
+		Fingerprint: relayRequestFingerprint(req),
+		HTTPStatus:  status,
 	}
 }
 
-func decodeRawResult(raw json.RawMessage) any {
-	if len(raw) == 0 {
-		return map[string]any{}
+func (h *Handler) cleanupRelayRequestCacheLocked() {
+	cutoff := time.Now().Add(-defaultRelayRequestCacheTTL)
+	for id, meta := range h.browserRelayReqMeta {
+		if meta.CreatedAt.Before(cutoff) {
+			delete(h.browserRelayReqMeta, id)
+			delete(h.browserRelayReqCache, id)
+		}
 	}
-	var decoded any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return map[string]any{"raw": string(raw)}
+}
+
+func (h *Handler) evictOldestRelayRequestLocked() {
+	var (
+		oldestID string
+		oldestAt time.Time
+	)
+	for id, meta := range h.browserRelayReqMeta {
+		if oldestID == "" || meta.CreatedAt.Before(oldestAt) {
+			oldestID = id
+			oldestAt = meta.CreatedAt
+		}
 	}
-	return decoded
+	if oldestID != "" {
+		delete(h.browserRelayReqMeta, oldestID)
+		delete(h.browserRelayReqCache, oldestID)
+	}
+}
+
+func relayRequestFingerprint(req relayActionV2Request) string {
+	type requestShape struct {
+		Target          string
+		Action          string
+		Args            map[string]any
+		Steps           []relayActionV2Step
+		ExecutionPolicy relayExecutionPolicy
+	}
+	data, _ := json.Marshal(requestShape{
+		Target:          req.Target,
+		Action:          req.Action,
+		Args:            req.Args,
+		Steps:           req.Steps,
+		ExecutionPolicy: req.ExecutionPolicy,
+	})
+	return string(data)
+}
+
+func (h *Handler) writeRelayV2(w http.ResponseWriter, resp relayActionV2Response, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) writeRelayV2Error(w http.ResponseWriter, resp relayActionV2Response, status int) {
+	if status <= 0 {
+		status = http.StatusBadRequest
+	}
+	h.writeRelayV2(w, resp, status)
+}
+
+func isBrowserRelayDebugTrace() bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("SUPRCLAW_BROWSER_RELAY_DEBUG_TRACE")))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func (h *Handler) handleBrowserRelayExtensionWS(w http.ResponseWriter, r *http.Request) {
@@ -357,20 +700,8 @@ func (h *Handler) handleBrowserRelayExtensionWS(w http.ResponseWriter, r *http.R
 }
 
 func (h *Handler) handleBrowserRelayCDPWS(w http.ResponseWriter, r *http.Request) {
-	h.handleBrowserRelayCDPWSWithCompat(w, r, false)
-}
-
-func (h *Handler) handleBrowserRelayCompatWS(w http.ResponseWriter, r *http.Request) {
-	h.handleBrowserRelayCDPWSWithCompat(w, r, true)
-}
-
-func (h *Handler) handleBrowserRelayCDPWSWithCompat(w http.ResponseWriter, r *http.Request, compatOnly bool) {
 	_, relayCfg, manager, ok := h.requireBrowserRelayEnabled(w, r, false, false)
 	if !ok {
-		return
-	}
-	if compatOnly && !relayCfg.CompatOpenClaw {
-		http.NotFound(w, r)
 		return
 	}
 	if authorized, subprotocol := h.browserRelayWSAuthorization(r, relayCfg); !authorized {
@@ -450,72 +781,6 @@ func (h *Handler) handleBrowserRelayCDPWSWithCompat(w http.ResponseWriter, r *ht
 			_ = wsConn.WriteJSON(response)
 		}
 	}
-}
-
-func (h *Handler) handleBrowserRelayJSONVersion(w http.ResponseWriter, r *http.Request) {
-	_, relayCfg, _, ok := h.requireBrowserRelayEnabled(w, r, true, true)
-	if !ok {
-		return
-	}
-	if !relayCfg.CompatOpenClaw {
-		http.NotFound(w, r)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"Browser":              "SuprClawBrowserRelay/1.0",
-		"Protocol-Version":     "1.3",
-		"User-Agent":           "suprclaw-browser-relay",
-		"webSocketDebuggerUrl": h.browserRelayCDPTemplateURL(r, relayCfg),
-	})
-}
-
-func (h *Handler) handleBrowserRelayJSONList(w http.ResponseWriter, r *http.Request) {
-	cfg, relayCfg, _, ok := h.requireBrowserRelayEnabled(w, r, true, true)
-	if !ok {
-		return
-	}
-	if !relayCfg.CompatOpenClaw {
-		http.NotFound(w, r)
-		return
-	}
-
-	base := h.browserRelayDevtoolsBaseURL(r)
-	router := h.browserRelayRouter(cfg)
-	raw, err := router.ExecuteAction(r.Context(), "tabs.list", browserrelay.ActionRequest{})
-	if err != nil {
-		http.Error(w, err.Error(), mapBrowserRelayError(err))
-		return
-	}
-	payload, _ := raw.(map[string]any)
-	targets, _ := payload["targets"].([]browserrelay.Target)
-	items := make([]map[string]any, 0, len(targets))
-	for _, target := range targets {
-		if target.Source == browserrelay.TargetSourceAgentBrowser {
-			continue
-		}
-		targetID := target.ID
-		if strings.HasPrefix(targetID, "ext:") {
-			targetID = strings.TrimSpace(strings.TrimPrefix(targetID, "ext:"))
-		}
-		if target.Type == "" {
-			target.Type = "page"
-		}
-		wsURL := base + "/devtools/page/" + url.PathEscape(targetID)
-		items = append(items, map[string]any{
-			"description":          "SuprClaw browser relay target",
-			"id":                   targetID,
-			"title":                target.Title,
-			"type":                 target.Type,
-			"url":                  target.URL,
-			"webSocketDebuggerUrl": wsURL,
-			"devtoolsFrontendUrl":  "/devtools/inspector.html?ws=" + url.QueryEscape(strings.TrimPrefix(wsURL, "ws://")),
-		})
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(items)
 }
 
 func (h *Handler) requireBrowserRelayEnabled(
@@ -604,6 +869,17 @@ func normalizeBrowserRelayConfig(cfg config.BrowserRelayConfig) config.BrowserRe
 		cfg.RefreshTokenTTLSec = 7 * 24 * 60 * 60
 	}
 	return cfg
+}
+
+func decodeRawResult(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return map[string]any{"raw": string(raw)}
+	}
+	return decoded
 }
 
 func browserRelayConfigFromConfig(cfg *config.Config) browserrelay.Config {
@@ -747,10 +1023,6 @@ func (h *Handler) browserRelayExtensionURL(r *http.Request, relayCfg config.Brow
 func (h *Handler) browserRelayCDPTemplateURL(r *http.Request, relayCfg config.BrowserRelayConfig) string {
 	host, port := h.browserRelayHostPort(r, relayCfg)
 	return requestWSScheme(r) + "://" + net.JoinHostPort(host, strconv.Itoa(port)) + "/browser-relay/cdp/{targetId}"
-}
-
-func (h *Handler) browserRelayDevtoolsBaseURL(r *http.Request) string {
-	return requestWSScheme(r) + "://" + r.Host
 }
 
 type relayWSConn struct {

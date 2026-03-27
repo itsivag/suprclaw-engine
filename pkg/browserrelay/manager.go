@@ -2,13 +2,17 @@ package browserrelay
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/itsivag/suprclaw/pkg/logger"
 )
 
 var (
@@ -30,6 +34,9 @@ const (
 	defaultAgentBrowserBinary      = "agent-browser"
 	defaultAgentBrowserMaxSessions = 8
 	defaultAgentBrowserIdleTimeout = 300
+	defaultTargetQueueDepth        = 32
+	loopGuardFailureThreshold      = 3
+	loopGuardWindow                = 45 * time.Second
 )
 
 type extensionSession struct {
@@ -54,6 +61,47 @@ type pendingRequest struct {
 type commandResponse struct {
 	result json.RawMessage
 	err    error
+}
+
+type commandTask struct {
+	ctx             context.Context
+	targetID        string
+	method          string
+	params          any
+	requireAttached bool
+	fingerprint     string
+	responseCh      chan commandResponse
+}
+
+type targetCommandQueue struct {
+	targetID  string
+	ownerID   string
+	tasks     chan *commandTask
+	closed    chan struct{}
+	closeOnce sync.Once
+	cancelErr error
+}
+
+func (q *targetCommandQueue) stop(err error) {
+	q.closeOnce.Do(func() {
+		if err == nil {
+			err = ErrRelayQueueCanceled
+		}
+		q.cancelErr = err
+		close(q.closed)
+	})
+}
+
+type loopGuardRecord struct {
+	count       int
+	lastFailure time.Time
+}
+
+type targetEvent struct {
+	TargetID string
+	Method   string
+	Params   json.RawMessage
+	At       time.Time
 }
 
 type safeConn struct {
@@ -128,8 +176,13 @@ type Manager struct {
 	targetOwners map[string]string // targetID -> extension session ID
 	cdpClients   map[string]*cdpClient
 	pending      map[string]*pendingRequest
+	queues       map[string]*targetCommandQueue
+	queueDepth   int
+	loopGuard    map[string]loopGuardRecord
+	eventSubs    map[string]map[string]chan targetEvent
 
 	requestCounter uint64
+	eventCounter   uint64
 	stopCh         chan struct{}
 	closeOnce      sync.Once
 }
@@ -143,6 +196,10 @@ func NewManager(cfg Config) *Manager {
 		targetOwners: make(map[string]string),
 		cdpClients:   make(map[string]*cdpClient),
 		pending:      make(map[string]*pendingRequest),
+		queues:       make(map[string]*targetCommandQueue),
+		queueDepth:   defaultTargetQueueDepth,
+		loopGuard:    make(map[string]loopGuardRecord),
+		eventSubs:    make(map[string]map[string]chan targetEvent),
 		stopCh:       make(chan struct{}),
 	}
 	go m.cleanupLoop()
@@ -190,6 +247,20 @@ func (m *Manager) Config() Config {
 	return m.cfg
 }
 
+func (m *Manager) QueueDepth(targetID string) int {
+	targetID = strings.TrimSpace(targetID)
+	if targetID == "" {
+		return 0
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	queue, ok := m.queues[targetID]
+	if !ok {
+		return 0
+	}
+	return len(queue.tasks)
+}
+
 func (m *Manager) Close() {
 	m.closeOnce.Do(func() {
 		close(m.stopCh)
@@ -201,9 +272,20 @@ func (m *Manager) Close() {
 		for _, client := range m.cdpClients {
 			_ = client.conn.Close()
 		}
+		for targetID, queue := range m.queues {
+			delete(m.queues, targetID)
+			queue.stop(ErrRelayQueueCanceled)
+		}
 		for id, pending := range m.pending {
 			delete(m.pending, id)
 			pending.responseCh <- commandResponse{err: ErrRequestCanceled}
+		}
+		for targetID, subs := range m.eventSubs {
+			for subID, ch := range subs {
+				close(ch)
+				delete(subs, subID)
+			}
+			delete(m.eventSubs, targetID)
 		}
 	})
 }
@@ -347,6 +429,75 @@ func (m *Manager) HandleExtensionMessage(sessionID string, payload []byte) error
 }
 
 func (m *Manager) SendCommand(ctx context.Context, targetID, method string, params any, requireAttached bool) (json.RawMessage, error) {
+	targetID = strings.TrimSpace(targetID)
+	fingerprint := commandFingerprint(method, params)
+
+	// Attached-target commands are serialized through a per-target queue to avoid
+	// interleaving and to provide deterministic cancelation on detach.
+	if requireAttached {
+		m.mu.Lock()
+		ext, err := m.findExtensionForTargetLocked(targetID, true)
+		if err != nil {
+			m.mu.Unlock()
+			return nil, err
+		}
+		if loopErr := m.loopGuardPrecheckLocked(targetID, fingerprint); loopErr != nil {
+			m.mu.Unlock()
+			return nil, loopErr
+		}
+
+		queue := m.ensureQueueLocked(targetID, ext.id)
+		task := &commandTask{
+			ctx:             ctx,
+			targetID:        targetID,
+			method:          method,
+			params:          params,
+			requireAttached: true,
+			fingerprint:     fingerprint,
+			responseCh:      make(chan commandResponse, 1),
+		}
+
+		select {
+		case queue.tasks <- task:
+			m.mu.Unlock()
+		default:
+			m.mu.Unlock()
+			return nil, ErrRelayQueueFull
+		}
+
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return nil, ErrRequestTimeout
+			}
+			return nil, ErrRequestCanceled
+		case resp := <-task.responseCh:
+			return resp.result, resp.err
+		}
+	}
+
+	m.mu.Lock()
+	if loopErr := m.loopGuardPrecheckLocked(targetID, fingerprint); loopErr != nil {
+		m.mu.Unlock()
+		return nil, loopErr
+	}
+	m.mu.Unlock()
+
+	result, err := m.sendCommandDirect(ctx, targetID, method, params, requireAttached)
+	if err != nil {
+		m.recordLoopGuardFailure(targetID, fingerprint)
+		return nil, err
+	}
+	m.clearLoopGuard(targetID, fingerprint)
+	return result, nil
+}
+
+func (m *Manager) sendCommandDirect(
+	ctx context.Context,
+	targetID, method string,
+	params any,
+	requireAttached bool,
+) (json.RawMessage, error) {
 	m.mu.Lock()
 	ext, err := m.findExtensionForTargetLocked(targetID, requireAttached)
 	if err != nil {
@@ -392,6 +543,164 @@ func (m *Manager) SendCommand(ctx context.Context, targetID, method string, para
 		}
 		return resp.result, nil
 	}
+}
+
+func (m *Manager) ensureQueueLocked(targetID, ownerID string) *targetCommandQueue {
+	if queue, ok := m.queues[targetID]; ok {
+		if queue.ownerID == ownerID {
+			return queue
+		}
+		m.stopQueueLocked(targetID, ErrRelayQueueCanceled)
+	}
+
+	queue := &targetCommandQueue{
+		targetID: targetID,
+		ownerID:  ownerID,
+		tasks:    make(chan *commandTask, m.queueDepth),
+		closed:   make(chan struct{}),
+	}
+	m.queues[targetID] = queue
+	go m.runTargetQueue(queue)
+	return queue
+}
+
+func (m *Manager) stopQueueLocked(targetID string, err error) {
+	queue, ok := m.queues[targetID]
+	if !ok {
+		return
+	}
+	delete(m.queues, targetID)
+	queue.stop(err)
+}
+
+func (m *Manager) runTargetQueue(queue *targetCommandQueue) {
+	for {
+		select {
+		case <-queue.closed:
+			m.drainQueue(queue, queue.cancelErr)
+			return
+		case task := <-queue.tasks:
+			if task == nil {
+				continue
+			}
+			select {
+			case <-queue.closed:
+				task.responseCh <- commandResponse{err: queue.cancelErr}
+				continue
+			default:
+			}
+			result, err := m.sendCommandDirect(task.ctx, task.targetID, task.method, task.params, task.requireAttached)
+			if err != nil {
+				m.recordLoopGuardFailure(task.targetID, task.fingerprint)
+				task.responseCh <- commandResponse{err: err}
+				continue
+			}
+			m.clearLoopGuard(task.targetID, task.fingerprint)
+			task.responseCh <- commandResponse{result: result}
+		}
+	}
+}
+
+func (m *Manager) drainQueue(queue *targetCommandQueue, err error) {
+	if err == nil {
+		err = ErrRelayQueueCanceled
+	}
+	for {
+		select {
+		case task := <-queue.tasks:
+			if task != nil {
+				task.responseCh <- commandResponse{err: err}
+			}
+		default:
+			return
+		}
+	}
+}
+
+func commandFingerprint(method string, params any) string {
+	method = strings.TrimSpace(method)
+	paramsJSON := stableJSON(params)
+	sum := sha1.Sum([]byte(method + "|" + paramsJSON))
+	return fmt.Sprintf("%x", sum[:8])
+}
+
+func stableJSON(v any) string {
+	if v == nil {
+		return "null"
+	}
+	normalized := normalizeJSONValue(v)
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(data)
+}
+
+func normalizeJSONValue(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(val))
+		for k := range val {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make(map[string]any, len(val))
+		for _, k := range keys {
+			out[k] = normalizeJSONValue(val[k])
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(val))
+		for _, item := range val {
+			out = append(out, normalizeJSONValue(item))
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func (m *Manager) loopGuardPrecheckLocked(targetID, fingerprint string) error {
+	key := targetID + "|" + fingerprint
+	record, ok := m.loopGuard[key]
+	if !ok {
+		return nil
+	}
+	if m.now().Sub(record.lastFailure) > loopGuardWindow {
+		delete(m.loopGuard, key)
+		return nil
+	}
+	if record.count >= loopGuardFailureThreshold {
+		logger.WarnCF("browser-relay", "loop guard triggered", map[string]any{
+			"target_id":   targetID,
+			"fingerprint": fingerprint,
+			"fail_count":  record.count,
+			"window_secs": int(loopGuardWindow.Seconds()),
+		})
+		return fmt.Errorf("%w: target=%s fingerprint=%s", ErrRelayLoopGuardTriggered, targetID, fingerprint)
+	}
+	return nil
+}
+
+func (m *Manager) recordLoopGuardFailure(targetID, fingerprint string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := targetID + "|" + fingerprint
+	record := m.loopGuard[key]
+	now := m.now()
+	if now.Sub(record.lastFailure) > loopGuardWindow {
+		record.count = 1
+	} else {
+		record.count++
+	}
+	record.lastFailure = now
+	m.loopGuard[key] = record
+}
+
+func (m *Manager) clearLoopGuard(targetID, fingerprint string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.loopGuard, targetID+"|"+fingerprint)
 }
 
 func (m *Manager) cleanupLoop() {
@@ -470,6 +779,7 @@ func (m *Manager) handleAttach(sessionID, targetID string) error {
 
 	m.targetOwners[targetID] = sessionID
 	sess.attached[targetID] = struct{}{}
+	m.ensureQueueLocked(targetID, sessionID)
 	_ = sess.conn.WriteJSON(attachResultEnvelope{Type: "attach_result", TargetID: targetID, OK: true})
 	return nil
 }
@@ -489,6 +799,7 @@ func (m *Manager) handleDetach(sessionID, targetID string) {
 	if ownerID, owned := m.targetOwners[targetID]; owned && ownerID == sessionID {
 		delete(m.targetOwners, targetID)
 		delete(sess.attached, targetID)
+		m.stopQueueLocked(targetID, ErrRelayQueueCanceled)
 	}
 }
 
@@ -543,6 +854,14 @@ func (m *Manager) handleEvent(msg extensionMessage) {
 	for _, client := range clients {
 		_ = client.conn.WriteJSON(broadcast)
 	}
+
+	event := targetEvent{
+		TargetID: msg.TargetID,
+		Method:   msg.Method,
+		Params:   msg.Params,
+		At:       m.now(),
+	}
+	m.publishTargetEvent(event)
 }
 
 func (m *Manager) clientsForTarget(targetID string) []*cdpClient {
@@ -555,6 +874,56 @@ func (m *Manager) clientsForTarget(targetID string) []*cdpClient {
 		}
 	}
 	return out
+}
+
+func (m *Manager) SubscribeTargetEvents(targetID string) (string, <-chan targetEvent, func()) {
+	targetID = strings.TrimSpace(targetID)
+	ch := make(chan targetEvent, 32)
+	if targetID == "" {
+		close(ch)
+		return "", ch, func() {}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	subID := fmt.Sprintf("sub-%d", atomic.AddUint64(&m.eventCounter, 1))
+	if _, ok := m.eventSubs[targetID]; !ok {
+		m.eventSubs[targetID] = make(map[string]chan targetEvent)
+	}
+	m.eventSubs[targetID][subID] = ch
+	cancel := func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		subs, ok := m.eventSubs[targetID]
+		if !ok {
+			return
+		}
+		if subCh, exists := subs[subID]; exists {
+			delete(subs, subID)
+			close(subCh)
+		}
+		if len(subs) == 0 {
+			delete(m.eventSubs, targetID)
+		}
+	}
+	return subID, ch, cancel
+}
+
+func (m *Manager) publishTargetEvent(event targetEvent) {
+	m.mu.RLock()
+	subs := m.eventSubs[event.TargetID]
+	local := make([]chan targetEvent, 0, len(subs))
+	for _, ch := range subs {
+		local = append(local, ch)
+	}
+	m.mu.RUnlock()
+
+	for _, ch := range local {
+		select {
+		case ch <- event:
+		default:
+		}
+	}
 }
 
 func (m *Manager) findExtensionForTargetLocked(targetID string, requireAttached bool) (*extensionSession, error) {
@@ -596,6 +965,7 @@ func (m *Manager) detachExtensionLocked(sess *extensionSession) {
 	for targetID, ownerID := range m.targetOwners {
 		if ownerID == sess.id {
 			delete(m.targetOwners, targetID)
+			m.stopQueueLocked(targetID, ErrRelayQueueCanceled)
 		}
 	}
 	for requestID, pending := range m.pending {

@@ -343,6 +343,20 @@ Browser relay supports hybrid execution:
 - `extension` path for active user tab control (paired extension debugger attach).
 - `agent-browser` path for dedicated automation sessions.
 
+### Runtime Action Notes
+
+- Relay actions are served on `POST /api/browser-relay/actions` with V2 envelope:
+  - Request: `{request_id,target,action,args,execution_policy}`
+  - Response: `{request_id,ok,result,error_code,error_message,retry_class,trace_id,timing}`
+- `batch` executes multiple steps against one `target`:
+  - Request: `{request_id,target,steps:[{action,args}],execution_policy}`
+- `snapshot` may include `refs` + `ref_generation`; selector actions can use `@eN` with optional `ref_generation`.
+- `wait` supports `wait_mode`:
+  - `expression` (default; uses `expression`)
+  - `selector` (uses `selector`)
+  - `navigation`
+  - `network_idle`
+
 ### General
 
 | Config | Type | Default | Description |

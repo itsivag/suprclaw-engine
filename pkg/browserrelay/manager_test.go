@@ -122,3 +122,64 @@ func TestEvictStaleExtensionSession(t *testing.T) {
 		t.Fatalf("attached targets = %d, want 0", status.AttachedTargets)
 	}
 }
+
+func TestSendCommandQueueCanceledOnDetach(t *testing.T) {
+	m := NewManager(Config{Enabled: true, IdleTimeoutSec: 60})
+	t.Cleanup(m.Close)
+
+	blockFirst := make(chan struct{})
+	extConn := &fakeConn{}
+	extConn.onWrite = func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			if req.Method == "Page.navigate" {
+				<-blockFirst
+			}
+			_ = m.HandleExtensionMessage("ext-1", []byte(`{"type":"response","requestId":"`+req.RequestID+`","result":{"ok":true}}`))
+		}()
+	}
+	m.AttachExtension("ext-1", extConn)
+	if err := m.HandleExtensionMessage("ext-1", []byte(`{"type":"targets","targets":[{"id":"tab-1"}]}`)); err != nil {
+		t.Fatalf("targets error: %v", err)
+	}
+	if err := m.HandleExtensionMessage("ext-1", []byte(`{"type":"attach","targetId":"tab-1"}`)); err != nil {
+		t.Fatalf("attach error: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := m.SendCommand(ctx, "tab-1", "Page.navigate", map[string]any{"url": "https://example.com"}, true)
+		firstDone <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	go func() {
+		_, err := m.SendCommand(ctx, "tab-1", "Page.captureScreenshot", map[string]any{"format": "png"}, true)
+		secondDone <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+
+	m.DetachExtension("ext-1")
+	close(blockFirst)
+
+	select {
+	case err := <-secondDone:
+		if !errors.Is(err, ErrRelayQueueCanceled) {
+			t.Fatalf("queued command error = %v, want ErrRelayQueueCanceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued command")
+	}
+
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for in-flight command")
+	}
+}

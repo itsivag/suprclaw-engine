@@ -87,7 +87,7 @@ func TestBrowserRelayTargetsRequiresAuth(t *testing.T) {
 	}
 }
 
-func TestBrowserRelayCompatRoutesShape(t *testing.T) {
+func TestBrowserRelayCompatRoutesRemoved(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()
 
@@ -107,33 +107,14 @@ func TestBrowserRelayCompatRoutesShape(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	versionReq := httptest.NewRequest(http.MethodGet, "/json/version", nil)
-	versionReq.Header.Set("Authorization", "Bearer relay-token")
-	versionRec := httptest.NewRecorder()
-	mux.ServeHTTP(versionRec, versionReq)
-	if versionRec.Code != http.StatusOK {
-		t.Fatalf("/json/version status = %d, want %d", versionRec.Code, http.StatusOK)
-	}
-
-	var versionPayload map[string]any
-	if err = json.Unmarshal(versionRec.Body.Bytes(), &versionPayload); err != nil {
-		t.Fatalf("version payload decode error: %v", err)
-	}
-	if versionPayload["Browser"] == "" {
-		t.Fatalf("expected Browser in /json/version response: %v", versionPayload)
-	}
-
-	listReq := httptest.NewRequest(http.MethodGet, "/json/list", nil)
-	listReq.Header.Set("Authorization", "Bearer relay-token")
-	listRec := httptest.NewRecorder()
-	mux.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("/json/list status = %d, want %d", listRec.Code, http.StatusOK)
-	}
-
-	var listPayload []map[string]any
-	if err = json.Unmarshal(listRec.Body.Bytes(), &listPayload); err != nil {
-		t.Fatalf("list payload decode error: %v", err)
+	for _, path := range []string{"/json/version", "/json/list", "/devtools/page/ext:1"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer relay-token")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d", path, rec.Code, http.StatusNotFound)
+		}
 	}
 }
 
@@ -311,12 +292,122 @@ func TestBrowserRelaySessionActionsReturnServiceUnavailableWhenAgentBrowserDisab
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/browser-relay/actions/session.list", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/browser-relay/actions", strings.NewReader(`{"request_id":"req-1","action":"session.list","args":{}}`))
 	req.Header.Set("Authorization", "Bearer relay-token")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err = json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if payload["error_code"] != "agent_browser_unavailable" {
+		t.Fatalf("error_code = %v, want agent_browser_unavailable", payload["error_code"])
+	}
+	if payload["retry_class"] != "safe_backoff" {
+		t.Fatalf("retry_class = %v, want safe_backoff", payload["retry_class"])
+	}
+}
+
+func TestBrowserRelayBatchActionValidation(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.BrowserRelay.Token = "relay-token"
+	cfg.Tools.BrowserRelay.Host = "127.0.0.1"
+	if err = config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/browser-relay/actions",
+		strings.NewReader(`{"request_id":"req-batch","target":"ext:100","action":"batch","steps":[]}`),
+	)
+	req.Header.Set("Authorization", "Bearer relay-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err = json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if payload["error_code"] != "validation_error" {
+		t.Fatalf("error_code = %v, want validation_error", payload["error_code"])
+	}
+	if payload["retry_class"] != "never" {
+		t.Fatalf("retry_class = %v, want never", payload["retry_class"])
+	}
+}
+
+func TestBrowserRelayActionV2RequestIDIdempotencyConflict(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.BrowserRelay.Token = "relay-token"
+	cfg.Tools.BrowserRelay.Host = "127.0.0.1"
+	if err = config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	firstReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/browser-relay/actions",
+		strings.NewReader(`{"request_id":"same-id","action":"tabs.list","target":"ext:100","args":{}}`),
+	)
+	firstReq.Header.Set("Authorization", "Bearer relay-token")
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	mux.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first status = %d, want %d, body=%s", firstRec.Code, http.StatusOK, firstRec.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/browser-relay/actions",
+		strings.NewReader(`{"request_id":"same-id","action":"tabs.list","target":"ext:200","args":{}}`),
+	)
+	secondReq.Header.Set("Authorization", "Bearer relay-token")
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	mux.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusConflict {
+		t.Fatalf("second status = %d, want %d, body=%s", secondRec.Code, http.StatusConflict, secondRec.Body.String())
+	}
+
+	var payload map[string]any
+	if err = json.Unmarshal(secondRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if payload["error_code"] != "request_id_reuse_conflict" {
+		t.Fatalf("error_code = %v, want request_id_reuse_conflict", payload["error_code"])
 	}
 }

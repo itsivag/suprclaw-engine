@@ -23,15 +23,20 @@ type Handler struct {
 	browserRelayActionRouter *browserrelay.EngineRouter
 	browserRelayAgent        *browserrelay.AgentBrowserEngine
 	browserRelayStateMu      sync.Mutex
+	browserRelayReqMu        sync.Mutex
+	browserRelayReqCache     map[string]relayActionV2Response
+	browserRelayReqMeta      map[string]relayRequestCacheMeta
 }
 
 // NewHandler creates an instance of the API handler.
 func NewHandler(configPath string) *Handler {
 	return &Handler{
-		configPath: configPath,
-		serverPort: launcherconfig.DefaultPort,
-		oauthFlows: make(map[string]*oauthFlow),
-		oauthState: make(map[string]string),
+		configPath:           configPath,
+		serverPort:           launcherconfig.DefaultPort,
+		oauthFlows:           make(map[string]*oauthFlow),
+		oauthState:           make(map[string]string),
+		browserRelayReqCache: make(map[string]relayActionV2Response),
+		browserRelayReqMeta:  make(map[string]relayRequestCacheMeta),
 	}
 }
 
