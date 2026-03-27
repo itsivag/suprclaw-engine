@@ -41,6 +41,30 @@ func (p *budgetRecordingProvider) GetDefaultModel() string {
 	return "mock-budget-model"
 }
 
+type requiresNonSystemProvider struct {
+	calls int
+}
+
+func (p *requiresNonSystemProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	p.calls++
+	for _, m := range messages {
+		if m.Role != "system" {
+			return &providers.LLMResponse{Content: "ok"}, nil
+		}
+	}
+	return nil, fmt.Errorf("provider requires at least one non-system message")
+}
+
+func (p *requiresNonSystemProvider) GetDefaultModel() string {
+	return "mock-nonsystem-model"
+}
+
 func estimateMessageTokens(messages []providers.Message) int {
 	total := 0
 	for _, m := range messages {
@@ -190,5 +214,32 @@ func TestAgentLoop_ContextErrorRetryRecompacts(t *testing.T) {
 	}
 	if provider.tokenPerCall[1] > provider.tokenPerCall[0] {
 		t.Fatalf("retry payload should not grow after compaction: first=%d second=%d", provider.tokenPerCall[0], provider.tokenPerCall[1])
+	}
+}
+
+func TestAgentLoop_InjectsNonSystemMessageWhenCompactionProducesSystemOnly(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	provider := &requiresNonSystemProvider{}
+	al := NewAgentLoop(newBudgetTestConfig(tmpDir), bus.NewMessageBus(), provider)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+
+	sessionKey := "budget-system-only"
+	defaultAgent.Sessions.SetSummary(sessionKey, "summary only context")
+	defaultAgent.Sessions.SetHistory(sessionKey, nil)
+
+	_, err = al.ProcessDirectWithChannel(context.Background(), "", sessionKey, "cli", "direct")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", provider.calls)
 	}
 }

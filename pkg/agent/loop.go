@@ -1338,6 +1338,17 @@ func (al *AgentLoop) runLLMIteration(
 				messages = compacted
 			}
 
+			messages = sanitizeDispatchMessages(messages)
+			var injected bool
+			messages, injected = ensureNonSystemDispatchMessage(messages, opts.UserMessage)
+			if injected {
+				logger.WarnCF("agent", "Injected fallback non-system message for provider compatibility", map[string]any{
+					"agent_id":    agent.ID,
+					"session_key": opts.SessionKey,
+					"iteration":   iteration,
+				})
+			}
+
 			response, err = callLLM()
 			if err == nil {
 				break
@@ -1353,15 +1364,7 @@ func (al *AgentLoop) runLLMIteration(
 				strings.Contains(errMsg, "timeout exceeded")
 
 			// Detect real context window / token limit errors, excluding network timeouts.
-			isContextError := !isTimeoutError && (strings.Contains(errMsg, "context_length_exceeded") ||
-				strings.Contains(errMsg, "context window") ||
-				strings.Contains(errMsg, "maximum context length") ||
-				strings.Contains(errMsg, "token limit") ||
-				strings.Contains(errMsg, "too many tokens") ||
-				strings.Contains(errMsg, "max_tokens") ||
-				strings.Contains(errMsg, "invalidparameter") ||
-				strings.Contains(errMsg, "prompt is too long") ||
-				strings.Contains(errMsg, "request too large"))
+			isContextError := !isTimeoutError && isContextOverflowError(err)
 
 			if isTimeoutError && retry < maxRetries {
 				backoff := time.Duration(retry+1) * 5 * time.Second
@@ -1815,6 +1818,44 @@ func formatMessagesForLog(messages []providers.Message) string {
 	}
 	sb.WriteString("]")
 	return sb.String()
+}
+
+func sanitizeDispatchMessages(messages []providers.Message) []providers.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	out := make([]providers.Message, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Role == "assistant" &&
+			len(msg.ToolCalls) == 0 &&
+			len(msg.Media) == 0 &&
+			strings.TrimSpace(msg.Content) == "" &&
+			strings.TrimSpace(msg.ReasoningContent) == "" {
+			continue
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+func ensureNonSystemDispatchMessage(messages []providers.Message, fallback string) ([]providers.Message, bool) {
+	for _, msg := range messages {
+		if msg.Role != "system" {
+			return messages, false
+		}
+	}
+
+	fallback = strings.TrimSpace(fallback)
+	if fallback == "" {
+		fallback = "Continue with the previous request."
+	}
+
+	out := cloneMessages(messages)
+	out = append(out, providers.Message{
+		Role:    "user",
+		Content: fallback,
+	})
+	return out, true
 }
 
 // formatToolsForLog formats tool definitions for logging
