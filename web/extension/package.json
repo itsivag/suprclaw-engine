@@ -1,5 +1,5 @@
 {
-  "name": "suprclaw-browser-relay-extension",
+  "name": "suprclaw-agent-browser-extension",
   "private": true,
   "type": "module",
   "scripts": {

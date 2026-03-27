@@ -15,7 +15,6 @@ import (
 	"github.com/itsivag/suprclaw/cmd/suprclaw/internal"
 	"github.com/itsivag/suprclaw/cmd/suprclaw/internal/agent"
 	"github.com/itsivag/suprclaw/cmd/suprclaw/internal/auth"
-	"github.com/itsivag/suprclaw/cmd/suprclaw/internal/browserrelay"
 	"github.com/itsivag/suprclaw/cmd/suprclaw/internal/cron"
 	"github.com/itsivag/suprclaw/cmd/suprclaw/internal/gateway"
 	"github.com/itsivag/suprclaw/cmd/suprclaw/internal/migrate"
@@ -40,7 +39,6 @@ func NewSuprclawCommand() *cobra.Command {
 		onboard.NewOnboardCommand(),
 		agent.NewAgentCommand(),
 		auth.NewAuthCommand(),
-		browserrelay.NewBrowserRelayCommand(),
 		gateway.NewGatewayCommand(),
 		status.NewStatusCommand(),
 		cron.NewCronCommand(),

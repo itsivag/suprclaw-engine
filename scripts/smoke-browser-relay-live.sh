@@ -37,7 +37,7 @@ Browser relay smoke test.
 
 Hard requirements:
 1. Use browser relay capabilities only (not generic browser automation).
-   - Use only Browser Relay V2 tools (`browser_relay_v2_targets_list`, `browser_relay_v2_action`, `browser_relay_v2_batch`).
+   - Use only Agent Browser tools (`agent_browser_targets_list`, `agent_browser_action`, `agent_browser_batch`).
 2. List relay targets and identify source tags.
 3. Before any snapshot/action, establish an attached target deterministically:
    - if a target has `attached=true`, select that target

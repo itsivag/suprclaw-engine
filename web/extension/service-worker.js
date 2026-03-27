@@ -13,8 +13,8 @@ const STORAGE_KEY = "suprclawRelaySettings";
 const ATTACHED_TARGETS_STORAGE_KEY = "suprclawAttachedTargets";
 const ATTACHED_TARGET_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RELAY_SUBPROTOCOL = "suprclaw-relay";
-const CLOUD_RELAY_DEFAULT_URL = "wss://api.suprclaw.com/browser-relay/extension";
-const LEGACY_LOCAL_DEFAULT_URL = "ws://127.0.0.1:18800/browser-relay/extension";
+const CLOUD_RELAY_DEFAULT_URL = "wss://api.suprclaw.com/agent-browser/extension";
+const LEGACY_LOCAL_DEFAULT_URL = "ws://127.0.0.1:18800/agent-browser/extension";
 const DEFAULT_SETTINGS = {
   relayUrl: CLOUD_RELAY_DEFAULT_URL,
   token: "",

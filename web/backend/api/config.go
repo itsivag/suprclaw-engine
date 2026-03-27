@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"regexp"
-	"strings"
 
 	"github.com/itsivag/suprclaw/pkg/config"
 )
@@ -202,85 +200,7 @@ func validateConfig(cfg *config.Config) []string {
 			validateRegexPatterns("tools.exec.custom_allow_patterns", cfg.Tools.Exec.CustomAllowPatterns)...)
 	}
 
-	if cfg.Tools.BrowserRelay.Enabled {
-		host := strings.TrimSpace(cfg.Tools.BrowserRelay.Host)
-		if host == "" {
-			errs = append(errs, "tools.browser_relay.host is required when browser relay is enabled")
-		} else if !isLoopbackHost(host) {
-			errs = append(errs, "tools.browser_relay.host must be a loopback address in this milestone")
-		}
-		if cfg.Tools.BrowserRelay.Port < 1 || cfg.Tools.BrowserRelay.Port > 65535 {
-			errs = append(errs, fmt.Sprintf(
-				"tools.browser_relay.port %d is out of valid range (1-65535)",
-				cfg.Tools.BrowserRelay.Port))
-		}
-		switch strings.ToLower(strings.TrimSpace(cfg.Tools.BrowserRelay.EngineMode)) {
-		case "", "hybrid", "extension_only", "agent_browser_only":
-		default:
-			errs = append(errs, fmt.Sprintf(
-				"tools.browser_relay.engine_mode %q is invalid (allowed: hybrid, extension_only, agent_browser_only)",
-				cfg.Tools.BrowserRelay.EngineMode))
-		}
-		if cfg.Tools.BrowserRelay.AgentBrowserMaxSessions < 0 {
-			errs = append(errs, "tools.browser_relay.agent_browser_max_sessions must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.AgentBrowserIdleTimeoutSec < 0 {
-			errs = append(errs, "tools.browser_relay.agent_browser_idle_timeout_sec must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.AgentBrowserBatchWindowMS < 0 {
-			errs = append(errs, "tools.browser_relay.agent_browser_batch_window_ms must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.AgentBrowserBatchMaxSteps < 0 {
-			errs = append(errs, "tools.browser_relay.agent_browser_batch_max_steps must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.AgentBrowserStreamPort < 0 {
-			errs = append(errs, "tools.browser_relay.agent_browser_stream_port must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.AgentBrowserRuntimeCommandTimeoutMS < 0 {
-			errs = append(errs, "tools.browser_relay.agent_browser_runtime_command_timeout_ms must be >= 0")
-		}
-		switch strings.ToLower(strings.TrimSpace(cfg.Tools.BrowserRelay.SnapshotDefaultMode)) {
-		case "", "compact", "full":
-		default:
-			errs = append(errs, fmt.Sprintf(
-				"tools.browser_relay.snapshot_default_mode %q is invalid (allowed: compact, full)",
-				cfg.Tools.BrowserRelay.SnapshotDefaultMode))
-		}
-		if cfg.Tools.BrowserRelay.SnapshotMaxPayloadBytes < 0 {
-			errs = append(errs, "tools.browser_relay.snapshot_max_payload_bytes must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.SnapshotMaxNodes < 0 {
-			errs = append(errs, "tools.browser_relay.snapshot_max_nodes must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.SnapshotMaxTextChars < 0 {
-			errs = append(errs, "tools.browser_relay.snapshot_max_text_chars must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.SnapshotMaxDepth < 0 {
-			errs = append(errs, "tools.browser_relay.snapshot_max_depth must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.SnapshotRefTTLSec < 0 {
-			errs = append(errs, "tools.browser_relay.snapshot_ref_ttl_sec must be >= 0")
-		}
-		if cfg.Tools.BrowserRelay.SnapshotMaxGenerations < 0 {
-			errs = append(errs, "tools.browser_relay.snapshot_max_generations must be >= 0")
-		}
-	}
-
 	return errs
-}
-
-func isLoopbackHost(host string) bool {
-	normalized := strings.TrimSpace(strings.Trim(host, "[]"))
-	if normalized == "" {
-		return false
-	}
-	if strings.EqualFold(normalized, "localhost") {
-		return true
-	}
-	if ip := net.ParseIP(normalized); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
 }
 
 func validateRegexPatterns(field string, patterns []string) []string {

@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	defaultBrowserRelayV2Timeout = 20 * time.Second
+	defaultAgentBrowserMCPTimeout = 20 * time.Second
 )
 
-var browserRelayV2SupportedActions = map[string]struct{}{
+var agentBrowserSupportedActions = map[string]struct{}{
 	"tabs.select": {},
 	"navigate":    {},
 	"click":       {},
@@ -31,7 +31,7 @@ var browserRelayV2SupportedActions = map[string]struct{}{
 	"wait":        {},
 }
 
-var browserRelayV2ActionEnum = []any{
+var agentBrowserActionEnum = []any{
 	"tabs.select",
 	"navigate",
 	"click",
@@ -42,32 +42,32 @@ var browserRelayV2ActionEnum = []any{
 	"wait",
 }
 
-// BrowserRelayV2Options contains request wiring for Browser Relay V2 tools.
-type BrowserRelayV2Options struct {
+// AgentBrowserMCPOptions contains request wiring for Agent Browser tools.
+type AgentBrowserMCPOptions struct {
 	EndpointURL string
 	Headers     map[string]string
 	Timeout     time.Duration
 }
 
-// NewBrowserRelayV2Tools registers strict Browser Relay V2 tools only.
-func NewBrowserRelayV2Tools(cfg *config.Config) []Tool {
-	opts, ok := ResolveBrowserRelayV2Options(cfg)
+// NewAgentBrowserMCPTools registers strict Agent Browser tools only.
+func NewAgentBrowserMCPTools(cfg *config.Config) []Tool {
+	opts, ok := ResolveAgentBrowserMCPOptions(cfg)
 	if !ok {
 		return nil
 	}
 	client := &http.Client{Timeout: opts.Timeout}
 	return []Tool{
-		&browserRelayV2TargetsListTool{
+		&agentBrowserTargetsListTool{
 			endpointURL: opts.EndpointURL,
 			headers:     cloneStringMap(opts.Headers),
 			client:      client,
 		},
-		&browserRelayV2ActionTool{
+		&agentBrowserActionTool{
 			endpointURL: opts.EndpointURL,
 			headers:     cloneStringMap(opts.Headers),
 			client:      client,
 		},
-		&browserRelayV2BatchTool{
+		&agentBrowserBatchTool{
 			endpointURL: opts.EndpointURL,
 			headers:     cloneStringMap(opts.Headers),
 			client:      client,
@@ -75,20 +75,20 @@ func NewBrowserRelayV2Tools(cfg *config.Config) []Tool {
 	}
 }
 
-// ResolveBrowserRelayV2Options resolves connectivity details for Browser Relay V2 actions.
-// This is a hard V2 migration path: Browser Relay V2 tools are registered only when
-// tools.mcp.servers.browser_relay.url is configured and valid.
-func ResolveBrowserRelayV2Options(cfg *config.Config) (BrowserRelayV2Options, bool) {
-	if cfg == nil || !cfg.Tools.BrowserRelay.Enabled {
-		return BrowserRelayV2Options{}, false
+// ResolveAgentBrowserMCPOptions resolves connectivity details for Agent Browser actions.
+// This is a hard V2 migration path: Agent Browser tools are registered only when
+// tools.mcp.servers.agent_browser.url is configured and valid.
+func ResolveAgentBrowserMCPOptions(cfg *config.Config) (AgentBrowserMCPOptions, bool) {
+	if cfg == nil || !cfg.Tools.AgentBrowser.Enabled {
+		return AgentBrowserMCPOptions{}, false
 	}
-	server, ok := cfg.Tools.MCP.Servers["browser_relay"]
+	server, ok := cfg.Tools.MCP.Servers["agent_browser"]
 	if !ok || strings.TrimSpace(server.URL) == "" {
-		return BrowserRelayV2Options{}, false
+		return AgentBrowserMCPOptions{}, false
 	}
-	endpointURL := normalizeBrowserRelayV2EndpointURL(server.URL)
+	endpointURL := normalizeAgentBrowserMCPEndpointURL(server.URL)
 	if endpointURL == "" {
-		return BrowserRelayV2Options{}, false
+		return AgentBrowserMCPOptions{}, false
 	}
 	headers := map[string]string{
 		"Content-Type": "application/json",
@@ -101,14 +101,14 @@ func ResolveBrowserRelayV2Options(cfg *config.Config) (BrowserRelayV2Options, bo
 		}
 		headers[key] = val
 	}
-	return BrowserRelayV2Options{
+	return AgentBrowserMCPOptions{
 		EndpointURL: endpointURL,
 		Headers:     headers,
-		Timeout:     defaultBrowserRelayV2Timeout,
+		Timeout:     defaultAgentBrowserMCPTimeout,
 	}, true
 }
 
-func normalizeBrowserRelayV2EndpointURL(raw string) string {
+func normalizeAgentBrowserMCPEndpointURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
@@ -120,33 +120,28 @@ func normalizeBrowserRelayV2EndpointURL(raw string) string {
 	u.RawQuery = ""
 	u.Fragment = ""
 	path := strings.TrimRight(u.Path, "/")
-	switch path {
-	case "/api/mcp/browser-relay":
-		u.Path = path
-	case "/api/browser-relay/actions":
-		u.Path = path
-	default:
-		// unsupported path for hard migrate mode
+	if path != "/api/mcp/agent-browser" {
 		return ""
 	}
+	u.Path = path
 	return u.String()
 }
 
-type browserRelayV2TargetsListTool struct {
+type agentBrowserTargetsListTool struct {
 	endpointURL string
 	headers     map[string]string
 	client      *http.Client
 }
 
-func (t *browserRelayV2TargetsListTool) Name() string {
-	return "browser_relay_v2_targets_list"
+func (t *agentBrowserTargetsListTool) Name() string {
+	return "agent_browser_targets_list"
 }
 
-func (t *browserRelayV2TargetsListTool) Description() string {
-	return "List Browser Relay V2 targets. Call this first, then pass the selected target id into browser_relay_v2_action/batch."
+func (t *agentBrowserTargetsListTool) Description() string {
+	return "List Agent Browser targets. Call this first, then pass the selected target id into agent_browser_action/batch."
 }
 
-func (t *browserRelayV2TargetsListTool) Parameters() map[string]any {
+func (t *agentBrowserTargetsListTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -155,47 +150,47 @@ func (t *browserRelayV2TargetsListTool) Parameters() map[string]any {
 	}
 }
 
-func (t *browserRelayV2TargetsListTool) SideEffectType() string { return "external" }
+func (t *agentBrowserTargetsListTool) SideEffectType() string { return "external" }
 
-func (t *browserRelayV2TargetsListTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
+func (t *agentBrowserTargetsListTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
 	payload := map[string]any{
 		"request_id": requestIDFromArgs(args),
 		"action":     "tabs.list",
 		"args":       map[string]any{},
 	}
-	res, err := callBrowserRelayV2(ctx, t.client, t.endpointURL, t.headers, "browser_relay_v2_targets_list", payload)
+	res, err := callAgentBrowserMCP(ctx, t.client, t.endpointURL, t.headers, "agent_browser_targets_list", payload)
 	if err != nil {
 		return ErrorResult(err.Error()).WithError(err)
 	}
 	return NewToolResult(res)
 }
 
-type browserRelayV2ActionTool struct {
+type agentBrowserActionTool struct {
 	endpointURL string
 	headers     map[string]string
 	client      *http.Client
 }
 
-func (t *browserRelayV2ActionTool) Name() string {
-	return "browser_relay_v2_action"
+func (t *agentBrowserActionTool) Name() string {
+	return "agent_browser_action"
 }
 
-func (t *browserRelayV2ActionTool) Description() string {
-	return "Execute one Browser Relay V2 action. Allowed actions: tabs.select, navigate, click, type, press, screenshot, snapshot, wait. For click/type, args.selector MUST be a snapshot ref like @e12."
+func (t *agentBrowserActionTool) Description() string {
+	return "Execute one Agent Browser action. Allowed actions: tabs.select, navigate, click, type, press, screenshot, snapshot, wait. For click/type, args.selector MUST be a snapshot ref like @e12."
 }
 
-func (t *browserRelayV2ActionTool) Parameters() map[string]any {
+func (t *agentBrowserActionTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"request_id": map[string]any{"type": "string"},
 			"target": map[string]any{
 				"type":        "string",
-				"description": "Target id from browser_relay_v2_targets_list (required for every action).",
+				"description": "Target id from agent_browser_targets_list (required for every action).",
 			},
 			"action": map[string]any{
 				"type": "string",
-				"enum": browserRelayV2ActionEnum,
+				"enum": agentBrowserActionEnum,
 			},
 			"args": map[string]any{
 				"type":        "object",
@@ -209,9 +204,9 @@ func (t *browserRelayV2ActionTool) Parameters() map[string]any {
 	}
 }
 
-func (t *browserRelayV2ActionTool) SideEffectType() string { return "external" }
+func (t *agentBrowserActionTool) SideEffectType() string { return "external" }
 
-func (t *browserRelayV2ActionTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
+func (t *agentBrowserActionTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
 	action := strings.TrimSpace(asString(args["action"]))
 	if action == "" {
 		return ErrorResult("action is required")
@@ -220,8 +215,8 @@ func (t *browserRelayV2ActionTool) Execute(ctx context.Context, args map[string]
 	if target == "" {
 		return ErrorResult("target is required")
 	}
-	if _, ok := browserRelayV2SupportedActions[action]; !ok {
-		return ErrorResult(fmt.Sprintf("unsupported action %q; allowed actions: %s", action, strings.Join(sortedBrowserRelayV2Actions(), ", ")))
+	if _, ok := agentBrowserSupportedActions[action]; !ok {
+		return ErrorResult(fmt.Sprintf("unsupported action %q; allowed actions: %s", action, strings.Join(sortedAgentBrowserActions(), ", ")))
 	}
 	payload := map[string]any{
 		"request_id": requestIDFromArgs(args),
@@ -232,7 +227,7 @@ func (t *browserRelayV2ActionTool) Execute(ctx context.Context, args map[string]
 	if b, ok := asObject(args["args"]); ok {
 		body = b
 	}
-	if err := validateBrowserRelayV2ActionPayload(action, body); err != nil {
+	if err := validateAgentBrowserActionPayload(action, body); err != nil {
 		return ErrorResult(err.Error())
 	}
 	if len(body) > 0 {
@@ -241,28 +236,28 @@ func (t *browserRelayV2ActionTool) Execute(ctx context.Context, args map[string]
 	if policy, ok := asObject(args["execution_policy"]); ok {
 		payload["execution_policy"] = policy
 	}
-	res, err := callBrowserRelayV2(ctx, t.client, t.endpointURL, t.headers, "browser_relay_v2_action", payload)
+	res, err := callAgentBrowserMCP(ctx, t.client, t.endpointURL, t.headers, "agent_browser_action", payload)
 	if err != nil {
 		return ErrorResult(err.Error()).WithError(err)
 	}
 	return NewToolResult(res)
 }
 
-type browserRelayV2BatchTool struct {
+type agentBrowserBatchTool struct {
 	endpointURL string
 	headers     map[string]string
 	client      *http.Client
 }
 
-func (t *browserRelayV2BatchTool) Name() string {
-	return "browser_relay_v2_batch"
+func (t *agentBrowserBatchTool) Name() string {
+	return "agent_browser_batch"
 }
 
-func (t *browserRelayV2BatchTool) Description() string {
-	return "Execute a Browser Relay V2 batch on one target. Each step action must be one of: tabs.select, navigate, click, type, press, screenshot, snapshot, wait. click/type require ref selectors (@eN)."
+func (t *agentBrowserBatchTool) Description() string {
+	return "Execute a Agent Browser batch on one target. Each step action must be one of: tabs.select, navigate, click, type, press, screenshot, snapshot, wait. click/type require ref selectors (@eN)."
 }
 
-func (t *browserRelayV2BatchTool) Parameters() map[string]any {
+func (t *agentBrowserBatchTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -275,7 +270,7 @@ func (t *browserRelayV2BatchTool) Parameters() map[string]any {
 					"properties": map[string]any{
 						"action": map[string]any{
 							"type": "string",
-							"enum": browserRelayV2ActionEnum,
+							"enum": agentBrowserActionEnum,
 						},
 						"args": map[string]any{"type": "object"},
 					},
@@ -290,9 +285,9 @@ func (t *browserRelayV2BatchTool) Parameters() map[string]any {
 	}
 }
 
-func (t *browserRelayV2BatchTool) SideEffectType() string { return "external" }
+func (t *agentBrowserBatchTool) SideEffectType() string { return "external" }
 
-func (t *browserRelayV2BatchTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
+func (t *agentBrowserBatchTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
 	target := strings.TrimSpace(asString(args["target"]))
 	if target == "" {
 		return ErrorResult("target is required")
@@ -311,14 +306,14 @@ func (t *browserRelayV2BatchTool) Execute(ctx context.Context, args map[string]a
 		if action == "" {
 			return ErrorResult(fmt.Sprintf("steps[%d].action is required", i))
 		}
-		if _, ok := browserRelayV2SupportedActions[action]; !ok {
-			return ErrorResult(fmt.Sprintf("steps[%d].action %q is unsupported; allowed actions: %s", i, action, strings.Join(sortedBrowserRelayV2Actions(), ", ")))
+		if _, ok := agentBrowserSupportedActions[action]; !ok {
+			return ErrorResult(fmt.Sprintf("steps[%d].action %q is unsupported; allowed actions: %s", i, action, strings.Join(sortedAgentBrowserActions(), ", ")))
 		}
 		body := map[string]any{}
 		if b, ok := asObject(step["args"]); ok {
 			body = b
 		}
-		if err := validateBrowserRelayV2ActionPayload(action, body); err != nil {
+		if err := validateAgentBrowserActionPayload(action, body); err != nil {
 			return ErrorResult(fmt.Sprintf("steps[%d]: %s", i, err.Error()))
 		}
 		normalized := map[string]any{"action": action}
@@ -335,7 +330,7 @@ func (t *browserRelayV2BatchTool) Execute(ctx context.Context, args map[string]a
 	if policy, ok := asObject(args["execution_policy"]); ok {
 		payload["execution_policy"] = policy
 	}
-	res, err := callBrowserRelayV2(ctx, t.client, t.endpointURL, t.headers, "browser_relay_v2_batch", payload)
+	res, err := callAgentBrowserMCP(ctx, t.client, t.endpointURL, t.headers, "agent_browser_batch", payload)
 	if err != nil {
 		return ErrorResult(err.Error()).WithError(err)
 	}
@@ -352,7 +347,7 @@ func requestIDFromArgs(args map[string]any) string {
 	return fmt.Sprintf("v2-%d", time.Now().UnixNano())
 }
 
-func callBrowserRelayV2(
+func callAgentBrowserMCP(
 	ctx context.Context,
 	client *http.Client,
 	endpointURL string,
@@ -361,87 +356,22 @@ func callBrowserRelayV2(
 	payload map[string]any,
 ) (string, error) {
 	if strings.TrimSpace(endpointURL) == "" {
-		return "", fmt.Errorf("browser relay v2 is not configured")
+		return "", fmt.Errorf("agent browser is not configured")
 	}
 	parsedURL, err := url.Parse(endpointURL)
 	if err != nil {
-		return "", fmt.Errorf("invalid browser relay v2 endpoint: %w", err)
+		return "", fmt.Errorf("invalid agent browser endpoint: %w", err)
 	}
 	path := strings.TrimRight(parsedURL.Path, "/")
 	switch path {
-	case "/api/mcp/browser-relay":
-		return callBrowserRelayV2ViaMCP(ctx, client, endpointURL, headers, toolName, payload)
-	case "/api/browser-relay/actions":
-		return callBrowserRelayV2ViaActions(ctx, client, endpointURL, headers, payload)
+	case "/api/mcp/agent-browser":
+		return callAgentBrowserMCPViaMCP(ctx, client, endpointURL, headers, toolName, payload)
 	default:
-		return "", fmt.Errorf("unsupported browser relay v2 endpoint path: %s", parsedURL.Path)
+		return "", fmt.Errorf("unsupported agent browser endpoint path: %s", parsedURL.Path)
 	}
 }
 
-func callBrowserRelayV2ViaActions(
-	ctx context.Context,
-	client *http.Client,
-	actionsURL string,
-	headers map[string]string,
-	payload map[string]any,
-) (string, error) {
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, actionsURL, bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	if req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("browser relay v2 action request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		return "", fmt.Errorf("browser relay v2 action HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-
-	var envelope struct {
-		OK           bool            `json:"ok"`
-		Result       json.RawMessage `json:"result"`
-		ErrorCode    string          `json:"error_code"`
-		ErrorMessage string          `json:"error_message"`
-		RetryClass   string          `json:"retry_class"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return "", fmt.Errorf("invalid browser relay v2 response: %w", err)
-	}
-	if !envelope.OK {
-		return "", fmt.Errorf(
-			"browser relay v2 action failed (%s/%s): %s",
-			strings.TrimSpace(envelope.ErrorCode),
-			strings.TrimSpace(envelope.RetryClass),
-			strings.TrimSpace(envelope.ErrorMessage),
-		)
-	}
-	if len(envelope.Result) == 0 || string(envelope.Result) == "null" {
-		return string(data), nil
-	}
-	return string(envelope.Result), nil
-}
-
-func callBrowserRelayV2ViaMCP(
+func callAgentBrowserMCPViaMCP(
 	ctx context.Context,
 	client *http.Client,
 	mcpURL string,
@@ -478,7 +408,7 @@ func callBrowserRelayV2ViaMCP(
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("browser relay v2 mcp request failed: %w", err)
+		return "", fmt.Errorf("agent browser mcp request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
@@ -486,7 +416,7 @@ func callBrowserRelayV2ViaMCP(
 		return "", err
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return "", fmt.Errorf("browser relay v2 mcp HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		return "", fmt.Errorf("agent browser mcp HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 
 	var envelope struct {
@@ -504,23 +434,23 @@ func callBrowserRelayV2ViaMCP(
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
-		return "", fmt.Errorf("invalid browser relay v2 mcp response: %w", err)
+		return "", fmt.Errorf("invalid agent browser mcp response: %w", err)
 	}
 	if envelope.Error != nil {
 		return "", fmt.Errorf(
-			"browser relay v2 mcp error (%d): %s",
+			"agent browser mcp error (%d): %s",
 			envelope.Error.Code,
 			strings.TrimSpace(envelope.Error.Message),
 		)
 	}
 	if envelope.Result.IsError {
 		if len(envelope.Result.StructuredContent) > 0 && string(envelope.Result.StructuredContent) != "null" {
-			return "", fmt.Errorf("browser relay v2 mcp tool error: %s", strings.TrimSpace(string(envelope.Result.StructuredContent)))
+			return "", fmt.Errorf("agent browser mcp tool error: %s", strings.TrimSpace(string(envelope.Result.StructuredContent)))
 		}
 		if len(envelope.Result.Content) > 0 {
-			return "", fmt.Errorf("browser relay v2 mcp tool error: %s", strings.TrimSpace(envelope.Result.Content[0].Text))
+			return "", fmt.Errorf("agent browser mcp tool error: %s", strings.TrimSpace(envelope.Result.Content[0].Text))
 		}
-		return "", fmt.Errorf("browser relay v2 mcp tool error")
+		return "", fmt.Errorf("agent browser mcp tool error")
 	}
 	if len(envelope.Result.StructuredContent) > 0 && string(envelope.Result.StructuredContent) != "null" {
 		return string(envelope.Result.StructuredContent), nil
@@ -565,16 +495,16 @@ func cloneStringMap(src map[string]string) map[string]string {
 	return out
 }
 
-func sortedBrowserRelayV2Actions() []string {
-	out := make([]string, 0, len(browserRelayV2SupportedActions))
-	for action := range browserRelayV2SupportedActions {
+func sortedAgentBrowserActions() []string {
+	out := make([]string, 0, len(agentBrowserSupportedActions))
+	for action := range agentBrowserSupportedActions {
 		out = append(out, action)
 	}
 	sort.Strings(out)
 	return out
 }
 
-func validateBrowserRelayV2ActionPayload(action string, args map[string]any) error {
+func validateAgentBrowserActionPayload(action string, args map[string]any) error {
 	switch action {
 	case "navigate":
 		if strings.TrimSpace(asString(args["url"])) == "" {
@@ -585,7 +515,7 @@ func validateBrowserRelayV2ActionPayload(action string, args map[string]any) err
 		if selector == "" {
 			return fmt.Errorf("click requires args.selector as snapshot ref (@eN)")
 		}
-		if !isBrowserRelaySnapshotRef(selector) {
+		if !isAgentBrowserSnapshotRef(selector) {
 			return fmt.Errorf("click args.selector must be snapshot ref @eN")
 		}
 	case "type":
@@ -593,7 +523,7 @@ func validateBrowserRelayV2ActionPayload(action string, args map[string]any) err
 		if selector == "" {
 			return fmt.Errorf("type requires args.selector as snapshot ref (@eN)")
 		}
-		if !isBrowserRelaySnapshotRef(selector) {
+		if !isAgentBrowserSnapshotRef(selector) {
 			return fmt.Errorf("type args.selector must be snapshot ref @eN")
 		}
 		if strings.TrimSpace(asString(args["text"])) == "" {
@@ -607,7 +537,7 @@ func validateBrowserRelayV2ActionPayload(action string, args map[string]any) err
 	return nil
 }
 
-func isBrowserRelaySnapshotRef(selector string) bool {
+func isAgentBrowserSnapshotRef(selector string) bool {
 	selector = strings.TrimSpace(selector)
 	if !strings.HasPrefix(selector, "@e") {
 		return false

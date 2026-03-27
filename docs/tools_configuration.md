@@ -22,7 +22,7 @@ SuprClaw's tools configuration is located in the `tools` field of `config.json`.
     "skills": {
       ...
     },
-    "browser_relay": {
+    "agent_browser": {
       ...
     }
   }
@@ -337,88 +337,37 @@ The skills tool configures skill discovery and installation via registries like 
 }
 ```
 
-## Browser Relay Tool
+## Agent Browser Tool
 
-Browser relay supports hybrid execution:
-- `extension` path for active user tab control (paired extension debugger attach).
-- `agent-browser` path for dedicated automation sessions.
-
-### Runtime Action Notes
-
-- Relay actions are served on `POST /api/browser-relay/actions` with V2 envelope:
-  - Request: `{request_id,target,action,args,execution_policy}`
-  - Response: `{request_id,ok,result,error_code,error_message,retry_class,trace_id,timing}`
-- `batch` executes multiple steps against one `target`:
-  - Request: `{request_id,target,steps:[{action,args}],execution_policy}`
-- `snapshot` is compact-first by default (`mode=compact`) and returns:
-  - `refs`, `ref_generation`, `elements`, `page`, `truncated`, `stats`
-  - `mode=full` is explicit opt-in and can return `full_tree_omitted=true` when payload guards apply
-- Selector actions can use `@eN` refs (resolved server-side) with optional `ref_generation`.
-- `wait` supports `wait_mode`:
-  - `expression` (default; uses `expression`)
-  - `selector` (uses `selector`)
-  - `navigation`
-  - `network_idle`
-
-### General
+Engine browser automation is MCP-only after the hard migration.
 
 | Config | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | false | Enable browser relay APIs and WS routes |
-| `host` | string | `127.0.0.1` | Relay host (must be loopback for this milestone) |
-| `port` | int | `18792` | Relay port |
-| `token` | string | `""` | Relay auth token |
-| `engine_mode` | string | `hybrid` | `hybrid`, `extension_only`, or `agent_browser_only` |
-| `agent_browser_enabled` | bool | true | Enable dedicated session execution via `agent-browser` |
-| `agent_browser_binary` | string | `agent-browser` | Binary name or absolute path |
-| `agent_browser_default_headless` | bool | true | Default headless mode for dedicated sessions |
-| `agent_browser_max_sessions` | int | 8 | Maximum dedicated sessions |
-| `agent_browser_idle_timeout_sec` | int | 300 | Idle eviction for dedicated sessions |
-| `agent_browser_batch_window_ms` | int | 25 | Queue coalescing window before batch flush |
-| `agent_browser_batch_max_steps` | int | 24 | Maximum commands per batch flush |
-| `agent_browser_stream_enabled` | bool | true | Enable runtime stream lifecycle on session create |
-| `agent_browser_stream_port` | int | 0 | Preferred stream port (`0` uses auto-assigned port) |
-| `agent_browser_runtime_command_timeout_ms` | int | 30000 | Command timeout for daemon calls |
-| `snapshot_default_mode` | string | `compact` | Default snapshot mode (`compact` or `full`) |
-| `snapshot_max_payload_bytes` | int | 98304 | Max snapshot payload returned to callers |
-| `snapshot_max_nodes` | int | 120 | Max nodes captured in compact snapshots |
-| `snapshot_max_text_chars` | int | 120 | Max per-element text chars in compact snapshots |
-| `snapshot_max_depth` | int | 6 | Max traversal depth for compact snapshots |
-| `snapshot_interactive_only_default` | bool | true | Capture interactive elements by default |
-| `snapshot_ref_ttl_sec` | int | 600 | Snapshot ref cache TTL (seconds) |
-| `snapshot_max_generations` | int | 4 | Max per-target snapshot generations cached |
-| `snapshot_allow_full_tree` | bool | true | Allow explicit `mode=full` snapshots |
+| `tools.agent_browser.enabled` | bool | false | Enables registration of Agent Browser MCP tool wrappers in the agent runtime |
+| `tools.mcp.servers.agent_browser.type` | string | - | Must be `http` |
+| `tools.mcp.servers.agent_browser.url` | string | - | Required URL to middleware MCP endpoint (`/api/mcp/agent-browser`) |
+| `tools.mcp.servers.agent_browser.http_headers.Authorization` | string | - | Bearer auth header injected by provisioning |
 
 ### Configuration Example
 
 ```json
 {
   "tools": {
-    "browser_relay": {
+    "agent_browser": {
+      "enabled": true
+    },
+    "mcp": {
       "enabled": true,
-      "host": "127.0.0.1",
-      "port": 18792,
-      "token": "replace-me",
-      "engine_mode": "hybrid",
-      "agent_browser_enabled": true,
-      "agent_browser_binary": "agent-browser",
-      "agent_browser_default_headless": true,
-      "agent_browser_max_sessions": 8,
-      "agent_browser_idle_timeout_sec": 300,
-      "agent_browser_batch_window_ms": 25,
-      "agent_browser_batch_max_steps": 24,
-      "agent_browser_stream_enabled": true,
-      "agent_browser_stream_port": 0,
-      "agent_browser_runtime_command_timeout_ms": 30000,
-      "snapshot_default_mode": "compact",
-      "snapshot_max_payload_bytes": 98304,
-      "snapshot_max_nodes": 120,
-      "snapshot_max_text_chars": 120,
-      "snapshot_max_depth": 6,
-      "snapshot_interactive_only_default": true,
-      "snapshot_ref_ttl_sec": 600,
-      "snapshot_max_generations": 4,
-      "snapshot_allow_full_tree": true
+      "servers": {
+        "agent_browser": {
+          "enabled": true,
+          "type": "http",
+          "url": "https://api.suprclaw.com/api/mcp/agent-browser",
+          "http_headers": {
+            "Authorization": "Bearer ${GATEWAY_TOKEN}"
+          }
+        }
+      }
     }
   }
 }
@@ -435,12 +384,7 @@ For example:
 - `SUPRCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES=10`
 - `SUPRCLAW_TOOLS_MCP_ENABLED=true`
 - `SUPRCLAW_TOOLS_SKILLS_GLOBAL_DIR=~/.suprclaw/skills`
-- `SUPRCLAW_TOOLS_BROWSER_RELAY_ENGINE_MODE=hybrid`
-- `SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BINARY=agent-browser`
-- `SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BATCH_WINDOW_MS=25`
-- `SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_STREAM_ENABLED=true`
-- `SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_DEFAULT_MODE=compact`
-- `SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_PAYLOAD_BYTES=98304`
+- `SUPRCLAW_TOOLS_AGENT_BROWSER_ENABLED=true`
 
 Note: Nested map-style config (for example `tools.mcp.servers.<name>.*`) is configured in `config.json` rather than
 environment variables.

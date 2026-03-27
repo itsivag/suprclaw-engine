@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { badgeForState, buildTargets, normalizeRelayURL, parseTargetID } from "../relay-core.js";
 
 test("normalizeRelayURL fills protocol and extension path", () => {
-  assert.equal(normalizeRelayURL("127.0.0.1:18800"), "ws://127.0.0.1:18800/browser-relay/extension");
+  assert.equal(normalizeRelayURL("127.0.0.1:18800"), "ws://127.0.0.1:18800/agent-browser/extension");
   assert.equal(
     normalizeRelayURL("https://relay.example.com/path"),
     "wss://relay.example.com/path"

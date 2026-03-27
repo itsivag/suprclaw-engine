@@ -54,7 +54,7 @@ function relayAPIURL(inputRelayURL, endpoint) {
   return relayUrl
     .replace(/^ws:/i, "http:")
     .replace(/^wss:/i, "https:")
-    .replace(/\/browser-relay\/extension.*$/, `/api/browser-relay/${endpoint}`);
+    .replace(/\/agent-browser\/extension.*$/, `/api/agent-browser/${endpoint}`);
 }
 
 function relayAuthBaseURL(inputRelayURL) {

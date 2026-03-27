@@ -36,7 +36,6 @@ func TestNewSuprclawCommand(t *testing.T) {
 	allowedCommands := []string{
 		"agent",
 		"auth",
-		"browser-relay",
 		"cron",
 		"gateway",
 		"migrate",

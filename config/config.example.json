@@ -398,30 +398,8 @@
         "ttl_seconds": 300
       }
     },
-    "browser_relay": {
-      "enabled": false,
-      "host": "127.0.0.1",
-      "port": 18792,
-      "token": "",
-      "compat_openclaw": true,
-      "max_clients": 16,
-      "idle_timeout_sec": 60,
-      "allow_token_query": false,
-      "engine_mode": "hybrid",
-      "agent_browser_enabled": true,
-      "agent_browser_binary": "agent-browser",
-      "agent_browser_default_headless": true,
-      "agent_browser_max_sessions": 8,
-      "agent_browser_idle_timeout_sec": 300,
-      "snapshot_default_mode": "compact",
-      "snapshot_max_payload_bytes": 98304,
-      "snapshot_max_nodes": 120,
-      "snapshot_max_text_chars": 120,
-      "snapshot_max_depth": 6,
-      "snapshot_interactive_only_default": true,
-      "snapshot_ref_ttl_sec": 600,
-      "snapshot_max_generations": 4,
-      "snapshot_allow_full_tree": true
+    "agent_browser": {
+      "enabled": true
     },
     "media_cleanup": {
       "enabled": true,

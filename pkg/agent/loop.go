@@ -184,9 +184,9 @@ func registerSharedTools(
 			}
 		}
 
-		if cfg.Tools.IsToolEnabled("browser_relay") {
-			for _, relayTool := range tools.NewBrowserRelayV2Tools(cfg) {
-				agent.Tools.Register(relayTool)
+		if cfg.Tools.IsToolEnabled("agent_browser") {
+			for _, agentBrowserTool := range tools.NewAgentBrowserMCPTools(cfg) {
+				agent.Tools.Register(agentBrowserTool)
 			}
 		}
 

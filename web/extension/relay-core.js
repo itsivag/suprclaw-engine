@@ -14,7 +14,7 @@ export function normalizeRelayURL(input) {
 
   const parsed = new URL(url);
   if (!parsed.pathname || parsed.pathname === "/") {
-    parsed.pathname = "/browser-relay/extension";
+    parsed.pathname = "/agent-browser/extension";
   }
   return parsed.toString();
 }

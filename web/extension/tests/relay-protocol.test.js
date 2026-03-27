@@ -38,42 +38,42 @@ test("validateRelayRequest accepts attached targets", () => {
 
 test("relayStatusURL maps extension WS URL to status endpoint", () => {
   assert.equal(
-    relayStatusURL("ws://127.0.0.1:18800/browser-relay/extension"),
-    "http://127.0.0.1:18800/api/browser-relay/status"
+    relayStatusURL("ws://127.0.0.1:18800/agent-browser/extension"),
+    "http://127.0.0.1:18800/api/agent-browser/status"
   );
 });
 
 test("relay setup and pairing urls map from extension URL", () => {
   assert.equal(
-    relaySetupURL("wss://api.suprclaw.com/browser-relay/extension"),
-    "https://api.suprclaw.com/api/browser-relay/setup"
+    relaySetupURL("wss://api.suprclaw.com/agent-browser/extension"),
+    "https://api.suprclaw.com/api/agent-browser/setup"
   );
   assert.equal(
-    relayBootstrapTokenURL("wss://api.suprclaw.com/browser-relay/extension"),
-    "https://api.suprclaw.com/api/browser-relay/bootstrap-token"
+    relayBootstrapTokenURL("wss://api.suprclaw.com/agent-browser/extension"),
+    "https://api.suprclaw.com/api/agent-browser/bootstrap-token"
   );
   assert.equal(
     relayAuthGoogleExtensionURL(
-      "wss://api.suprclaw.com/browser-relay/extension",
+      "wss://api.suprclaw.com/agent-browser/extension",
       "https://example.chromiumapp.org/callback"
     ),
     "https://auth.suprclaw.com/auth/firebase/google/extension?redirect_uri=https%3A%2F%2Fexample.chromiumapp.org%2Fcallback"
   );
   assert.equal(
-    relayPairingURL("wss://api.suprclaw.com/browser-relay/extension"),
-    "https://api.suprclaw.com/api/browser-relay/pairing"
+    relayPairingURL("wss://api.suprclaw.com/agent-browser/extension"),
+    "https://api.suprclaw.com/api/agent-browser/pairing"
   );
   assert.equal(
-    relaySessionStateURL("wss://api.suprclaw.com/browser-relay/extension"),
-    "https://api.suprclaw.com/api/browser-relay/session/state"
+    relaySessionStateURL("wss://api.suprclaw.com/agent-browser/extension"),
+    "https://api.suprclaw.com/api/agent-browser/session/state"
   );
   assert.equal(
-    relaySessionStopURL("wss://api.suprclaw.com/browser-relay/extension"),
-    "https://api.suprclaw.com/api/browser-relay/session/stop"
+    relaySessionStopURL("wss://api.suprclaw.com/agent-browser/extension"),
+    "https://api.suprclaw.com/api/agent-browser/session/stop"
   );
   assert.equal(
     relayAuthGoogleExtensionURL(
-      "ws://127.0.0.1:18800/browser-relay/extension",
+      "ws://127.0.0.1:18800/agent-browser/extension",
       "https://example.chromiumapp.org/local"
     ),
     "http://127.0.0.1:18800/auth/firebase/google/extension?redirect_uri=https%3A%2F%2Fexample.chromiumapp.org%2Flocal"

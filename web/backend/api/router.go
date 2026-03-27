@@ -4,39 +4,28 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/itsivag/suprclaw/pkg/browserrelay"
 	"github.com/itsivag/suprclaw/web/backend/launcherconfig"
 )
 
 // Handler serves HTTP API requests.
 type Handler struct {
-	configPath               string
-	serverPort               int
-	serverPublic             bool
-	serverPublicExplicit     bool
-	serverCIDRs              []string
-	oauthMu                  sync.Mutex
-	oauthFlows               map[string]*oauthFlow
-	oauthState               map[string]string
-	browserRelayMu           sync.Mutex
-	browserRelay             *browserrelay.Manager
-	browserRelayActionRouter *browserrelay.EngineRouter
-	browserRelayAgent        *browserrelay.AgentBrowserEngine
-	browserRelayStateMu      sync.Mutex
-	browserRelayReqMu        sync.Mutex
-	browserRelayReqCache     map[string]relayActionV2Response
-	browserRelayReqMeta      map[string]relayRequestCacheMeta
+	configPath           string
+	serverPort           int
+	serverPublic         bool
+	serverPublicExplicit bool
+	serverCIDRs          []string
+	oauthMu              sync.Mutex
+	oauthFlows           map[string]*oauthFlow
+	oauthState           map[string]string
 }
 
 // NewHandler creates an instance of the API handler.
 func NewHandler(configPath string) *Handler {
 	return &Handler{
-		configPath:           configPath,
-		serverPort:           launcherconfig.DefaultPort,
-		oauthFlows:           make(map[string]*oauthFlow),
-		oauthState:           make(map[string]string),
-		browserRelayReqCache: make(map[string]relayActionV2Response),
-		browserRelayReqMeta:  make(map[string]relayRequestCacheMeta),
+		configPath: configPath,
+		serverPort: launcherconfig.DefaultPort,
+		oauthFlows: make(map[string]*oauthFlow),
+		oauthState: make(map[string]string),
 	}
 }
 
@@ -55,7 +44,6 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Supr Channel (WebSocket chat)
 	h.registerSuprRoutes(mux)
-	h.registerBrowserRelayRoutes(mux)
 
 	// Gateway process lifecycle
 	h.registerGatewayRoutes(mux)
@@ -84,15 +72,5 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *Handler) Shutdown() {
-	h.browserRelayMu.Lock()
-	defer h.browserRelayMu.Unlock()
-	if h.browserRelay != nil {
-		h.browserRelay.Close()
-		h.browserRelay = nil
-	}
-	if h.browserRelayAgent != nil {
-		h.browserRelayAgent.Close()
-		h.browserRelayAgent = nil
-	}
-	h.browserRelayActionRouter = nil
+	return
 }
