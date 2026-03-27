@@ -241,6 +241,33 @@ func TestSetSummary_GetSummary(t *testing.T) {
 	}
 }
 
+func TestReadMeta_CorruptMetaRecovers(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	sessionKey := "corrupt-meta"
+
+	err := store.AddMessage(ctx, sessionKey, "user", "hello")
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	metaPath := store.metaPath(sessionKey)
+	if err := os.WriteFile(metaPath, []byte("{"), 0o644); err != nil {
+		t.Fatalf("WriteFile(meta): %v", err)
+	}
+
+	history, err := store.GetHistory(ctx, sessionKey)
+	if err != nil {
+		t.Fatalf("GetHistory with corrupt meta: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected 1 message after corrupt meta recovery, got %d", len(history))
+	}
+	if history[0].Content != "hello" {
+		t.Fatalf("unexpected content after recovery: %q", history[0].Content)
+	}
+}
+
 func TestTruncateHistory_KeepLast(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

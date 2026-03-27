@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +19,28 @@ import (
 const (
 	defaultBrowserRelayV2Timeout = 20 * time.Second
 )
+
+var browserRelayV2SupportedActions = map[string]struct{}{
+	"tabs.select": {},
+	"navigate":    {},
+	"click":       {},
+	"type":        {},
+	"press":       {},
+	"screenshot":  {},
+	"snapshot":    {},
+	"wait":        {},
+}
+
+var browserRelayV2ActionEnum = []any{
+	"tabs.select",
+	"navigate",
+	"click",
+	"type",
+	"press",
+	"screenshot",
+	"snapshot",
+	"wait",
+}
 
 // BrowserRelayV2Options contains request wiring for Browser Relay V2 tools.
 type BrowserRelayV2Options struct {
@@ -35,18 +59,18 @@ func NewBrowserRelayV2Tools(cfg *config.Config) []Tool {
 	return []Tool{
 		&browserRelayV2TargetsListTool{
 			endpointURL: opts.EndpointURL,
-			headers:    cloneStringMap(opts.Headers),
-			client:     client,
+			headers:     cloneStringMap(opts.Headers),
+			client:      client,
 		},
 		&browserRelayV2ActionTool{
 			endpointURL: opts.EndpointURL,
-			headers:    cloneStringMap(opts.Headers),
-			client:     client,
+			headers:     cloneStringMap(opts.Headers),
+			client:      client,
 		},
 		&browserRelayV2BatchTool{
 			endpointURL: opts.EndpointURL,
-			headers:    cloneStringMap(opts.Headers),
-			client:     client,
+			headers:     cloneStringMap(opts.Headers),
+			client:      client,
 		},
 	}
 }
@@ -119,7 +143,7 @@ func (t *browserRelayV2TargetsListTool) Name() string {
 }
 
 func (t *browserRelayV2TargetsListTool) Description() string {
-	return "List browser relay targets using V2 actions envelope."
+	return "List Browser Relay V2 targets. Call this first, then pass the selected target id into browser_relay_v2_action/batch."
 }
 
 func (t *browserRelayV2TargetsListTool) Parameters() map[string]any {
@@ -157,7 +181,7 @@ func (t *browserRelayV2ActionTool) Name() string {
 }
 
 func (t *browserRelayV2ActionTool) Description() string {
-	return "Execute one Browser Relay V2 action with strict V2 request envelope."
+	return "Execute one Browser Relay V2 action. Allowed actions: tabs.select, navigate, click, type, press, screenshot, snapshot, wait. For click/type, args.selector MUST be a snapshot ref like @e12."
 }
 
 func (t *browserRelayV2ActionTool) Parameters() map[string]any {
@@ -165,31 +189,53 @@ func (t *browserRelayV2ActionTool) Parameters() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"request_id": map[string]any{"type": "string"},
-			"target":     map[string]any{"type": "string"},
-			"action":     map[string]any{"type": "string"},
-			"args":       map[string]any{"type": "object"},
+			"target": map[string]any{
+				"type":        "string",
+				"description": "Target id from browser_relay_v2_targets_list (required for every action).",
+			},
+			"action": map[string]any{
+				"type": "string",
+				"enum": browserRelayV2ActionEnum,
+			},
+			"args": map[string]any{
+				"type":        "object",
+				"description": "Action arguments. click/type require args.selector as @eN; type also requires args.text; navigate requires args.url; press requires args.key.",
+			},
 			"execution_policy": map[string]any{
 				"type": "object",
 			},
 		},
-		"required": []string{"action"},
+		"required": []string{"target", "action"},
 	}
 }
 
 func (t *browserRelayV2ActionTool) SideEffectType() string { return "external" }
 
 func (t *browserRelayV2ActionTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
-	if strings.TrimSpace(asString(args["action"])) == "" {
+	action := strings.TrimSpace(asString(args["action"]))
+	if action == "" {
 		return ErrorResult("action is required")
+	}
+	target := strings.TrimSpace(asString(args["target"]))
+	if target == "" {
+		return ErrorResult("target is required")
+	}
+	if _, ok := browserRelayV2SupportedActions[action]; !ok {
+		return ErrorResult(fmt.Sprintf("unsupported action %q; allowed actions: %s", action, strings.Join(sortedBrowserRelayV2Actions(), ", ")))
 	}
 	payload := map[string]any{
 		"request_id": requestIDFromArgs(args),
-		"action":     asString(args["action"]),
+		"action":     action,
+		"target":     target,
 	}
-	if target := strings.TrimSpace(asString(args["target"])); target != "" {
-		payload["target"] = target
+	body := map[string]any{}
+	if b, ok := asObject(args["args"]); ok {
+		body = b
 	}
-	if body, ok := asObject(args["args"]); ok {
+	if err := validateBrowserRelayV2ActionPayload(action, body); err != nil {
+		return ErrorResult(err.Error())
+	}
+	if len(body) > 0 {
 		payload["args"] = body
 	}
 	if policy, ok := asObject(args["execution_policy"]); ok {
@@ -213,7 +259,7 @@ func (t *browserRelayV2BatchTool) Name() string {
 }
 
 func (t *browserRelayV2BatchTool) Description() string {
-	return "Execute Browser Relay V2 batch action with strict V2 request envelope."
+	return "Execute a Browser Relay V2 batch on one target. Each step action must be one of: tabs.select, navigate, click, type, press, screenshot, snapshot, wait. click/type require ref selectors (@eN)."
 }
 
 func (t *browserRelayV2BatchTool) Parameters() map[string]any {
@@ -227,8 +273,11 @@ func (t *browserRelayV2BatchTool) Parameters() map[string]any {
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"action": map[string]any{"type": "string"},
-						"args":   map[string]any{"type": "object"},
+						"action": map[string]any{
+							"type": "string",
+							"enum": browserRelayV2ActionEnum,
+						},
+						"args": map[string]any{"type": "object"},
 					},
 					"required": []string{"action"},
 				},
@@ -252,10 +301,36 @@ func (t *browserRelayV2BatchTool) Execute(ctx context.Context, args map[string]a
 	if !ok || len(steps) == 0 {
 		return ErrorResult("steps is required")
 	}
+	normalizedSteps := make([]any, 0, len(steps))
+	for i, stepRaw := range steps {
+		step, ok := asObject(stepRaw)
+		if !ok {
+			return ErrorResult(fmt.Sprintf("steps[%d] must be an object", i))
+		}
+		action := strings.TrimSpace(asString(step["action"]))
+		if action == "" {
+			return ErrorResult(fmt.Sprintf("steps[%d].action is required", i))
+		}
+		if _, ok := browserRelayV2SupportedActions[action]; !ok {
+			return ErrorResult(fmt.Sprintf("steps[%d].action %q is unsupported; allowed actions: %s", i, action, strings.Join(sortedBrowserRelayV2Actions(), ", ")))
+		}
+		body := map[string]any{}
+		if b, ok := asObject(step["args"]); ok {
+			body = b
+		}
+		if err := validateBrowserRelayV2ActionPayload(action, body); err != nil {
+			return ErrorResult(fmt.Sprintf("steps[%d]: %s", i, err.Error()))
+		}
+		normalized := map[string]any{"action": action}
+		if len(body) > 0 {
+			normalized["args"] = body
+		}
+		normalizedSteps = append(normalizedSteps, normalized)
+	}
 	payload := map[string]any{
 		"request_id": requestIDFromArgs(args),
 		"target":     target,
-		"steps":      steps,
+		"steps":      normalizedSteps,
 	}
 	if policy, ok := asObject(args["execution_policy"]); ok {
 		payload["execution_policy"] = policy
@@ -420,7 +495,7 @@ func callBrowserRelayV2ViaMCP(
 			Message string `json:"message"`
 		} `json:"error"`
 		Result struct {
-			IsError bool            `json:"isError"`
+			IsError bool `json:"isError"`
 			Content []struct {
 				Type string `json:"type"`
 				Text string `json:"text"`
@@ -488,4 +563,59 @@ func cloneStringMap(src map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func sortedBrowserRelayV2Actions() []string {
+	out := make([]string, 0, len(browserRelayV2SupportedActions))
+	for action := range browserRelayV2SupportedActions {
+		out = append(out, action)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func validateBrowserRelayV2ActionPayload(action string, args map[string]any) error {
+	switch action {
+	case "navigate":
+		if strings.TrimSpace(asString(args["url"])) == "" {
+			return fmt.Errorf("navigate requires args.url")
+		}
+	case "click":
+		selector := strings.TrimSpace(asString(args["selector"]))
+		if selector == "" {
+			return fmt.Errorf("click requires args.selector as snapshot ref (@eN)")
+		}
+		if !isBrowserRelaySnapshotRef(selector) {
+			return fmt.Errorf("click args.selector must be snapshot ref @eN")
+		}
+	case "type":
+		selector := strings.TrimSpace(asString(args["selector"]))
+		if selector == "" {
+			return fmt.Errorf("type requires args.selector as snapshot ref (@eN)")
+		}
+		if !isBrowserRelaySnapshotRef(selector) {
+			return fmt.Errorf("type args.selector must be snapshot ref @eN")
+		}
+		if strings.TrimSpace(asString(args["text"])) == "" {
+			return fmt.Errorf("type requires args.text")
+		}
+	case "press":
+		if strings.TrimSpace(asString(args["key"])) == "" {
+			return fmt.Errorf("press requires args.key")
+		}
+	}
+	return nil
+}
+
+func isBrowserRelaySnapshotRef(selector string) bool {
+	selector = strings.TrimSpace(selector)
+	if !strings.HasPrefix(selector, "@e") {
+		return false
+	}
+	num := strings.TrimPrefix(selector, "@e")
+	if num == "" {
+		return false
+	}
+	n, err := strconv.Atoi(num)
+	return err == nil && n > 0
 }

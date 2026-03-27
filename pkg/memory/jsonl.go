@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -106,10 +108,24 @@ func (s *JSONLStore) readMeta(key string) (sessionMeta, error) {
 	if err != nil {
 		return sessionMeta{}, fmt.Errorf("memory: read meta: %w", err)
 	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return sessionMeta{Key: key}, nil
+	}
 	var meta sessionMeta
 	err = json.Unmarshal(data, &meta)
 	if err != nil {
+		// Recover from truncated/corrupt metadata so sessions remain usable.
+		// This is common after abrupt process termination while rewriting meta.
+		var syntaxErr *json.SyntaxError
+		var typeErr *json.UnmarshalTypeError
+		if errors.Is(err, io.EOF) || errors.As(err, &syntaxErr) || errors.As(err, &typeErr) {
+			log.Printf("memory: resetting corrupt meta for %s: %v", filepath.Base(s.metaPath(key)), err)
+			return sessionMeta{Key: key}, nil
+		}
 		return sessionMeta{}, fmt.Errorf("memory: decode meta: %w", err)
+	}
+	if strings.TrimSpace(meta.Key) == "" {
+		meta.Key = key
 	}
 	return meta, nil
 }

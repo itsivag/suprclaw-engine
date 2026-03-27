@@ -190,3 +190,56 @@ func TestBrowserRelayV2Tools_NamesAreV2Only(t *testing.T) {
 		}
 	}
 }
+
+func TestBrowserRelayV2ActionTool_RejectsUnsupportedAction(t *testing.T) {
+	tool := &browserRelayV2ActionTool{}
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"target": "ext:1",
+		"action": "goto",
+		"args": map[string]any{
+			"url": "https://example.com",
+		},
+	})
+	if result == nil || !result.IsError {
+		t.Fatalf("expected error result, got %#v", result)
+	}
+	if result.ForLLM == "" {
+		t.Fatalf("expected non-empty validation error")
+	}
+}
+
+func TestBrowserRelayV2ActionTool_RejectsNonRefClickSelector(t *testing.T) {
+	tool := &browserRelayV2ActionTool{}
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"target": "ext:1",
+		"action": "click",
+		"args": map[string]any{
+			"selector": "#submit",
+		},
+	})
+	if result == nil || !result.IsError {
+		t.Fatalf("expected error result, got %#v", result)
+	}
+	if result.ForLLM == "" {
+		t.Fatalf("expected non-empty validation error")
+	}
+}
+
+func TestBrowserRelayV2ActionTool_ParametersExposeActionEnum(t *testing.T) {
+	tool := &browserRelayV2ActionTool{}
+	params := tool.Parameters()
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties not found in schema")
+	}
+	action, ok := props["action"].(map[string]any)
+	if !ok {
+		t.Fatalf("action schema not found")
+	}
+	enumVals, ok := action["enum"].([]any)
+	if !ok || len(enumVals) == 0 {
+		t.Fatalf("action enum is missing or empty")
+	}
+}
