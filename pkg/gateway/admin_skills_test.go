@@ -6,6 +6,24 @@ import (
 	"testing"
 )
 
+func TestResolveSkillsWorkspace_NormalizesSkillsDirOverrideToWorkspaceRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	workspaceRoot := filepath.Join(tmpDir, ".suprclaw")
+	skillsDir := filepath.Join(workspaceRoot, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(skillsDir) error = %v", err)
+	}
+
+	h := &adminHandler{}
+	got, err := h.resolveSkillsWorkspace("", skillsDir)
+	if err != nil {
+		t.Fatalf("resolveSkillsWorkspace() error = %v", err)
+	}
+	if got != workspaceRoot {
+		t.Fatalf("workspacePath normalization mismatch: got %q, want %q", got, workspaceRoot)
+	}
+}
+
 func TestAdminSkillsLoader_UsesSharedGlobalDirNotLegacyConfigDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	homeDir := filepath.Join(tmpDir, "home")

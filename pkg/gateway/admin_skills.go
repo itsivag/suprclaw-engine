@@ -29,7 +29,17 @@ func (h *adminHandler) resolveSkillsWorkspace(agentID, workspacePath string) (ws
 		if strings.Contains(workspacePath, "..") {
 			return "", fmt.Errorf("workspacePath must not contain '..'")
 		}
-		return workspacePath, nil
+		expanded := filepath.Clean(expandHomePath(workspacePath))
+		// Backward-compatible normalization: some callers historically passed
+		// "<workspace>/skills" instead of the workspace root. Normalize this to
+		// avoid creating nested ".../skills/skills/<slug>" installs.
+		if filepath.Base(expanded) == "skills" {
+			parent := filepath.Dir(expanded)
+			if parent != "." && parent != string(filepath.Separator) {
+				return parent, nil
+			}
+		}
+		return expanded, nil
 	}
 	if agentID == "" {
 		return "", fmt.Errorf("agentId or workspacePath is required")
