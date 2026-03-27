@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/logger"
 	"github.com/itsivag/suprclaw/pkg/mcp"
 	"github.com/itsivag/suprclaw/pkg/tools"
@@ -63,13 +64,27 @@ func (al *AgentLoop) ensureMCPInitialized(ctx context.Context) error {
 		return nil
 	}
 
-	if al.cfg.Tools.MCP.Servers == nil || len(al.cfg.Tools.MCP.Servers) == 0 {
+	mcpCfg := al.cfg.Tools.MCP
+	if mcpCfg.Servers == nil || len(mcpCfg.Servers) == 0 {
 		logger.WarnCF("agent", "MCP is enabled but no servers are configured, skipping MCP initialization", nil)
 		return nil
 	}
+	if al.cfg.Tools.IsToolEnabled("browser_relay") {
+		if _, hasLegacyBrowserRelay := mcpCfg.Servers["browser_relay"]; hasLegacyBrowserRelay {
+			filtered := make(map[string]config.MCPServerConfig, len(mcpCfg.Servers))
+			for name, serverCfg := range mcpCfg.Servers {
+				if name == "browser_relay" {
+					continue
+				}
+				filtered[name] = serverCfg
+			}
+			mcpCfg.Servers = filtered
+			logger.InfoCF("agent", "Skipping legacy MCP browser_relay server; using local Browser Relay V2 compat tools", nil)
+		}
+	}
 
 	findValidServer := false
-	for _, serverCfg := range al.cfg.Tools.MCP.Servers {
+	for _, serverCfg := range mcpCfg.Servers {
 		if serverCfg.Enabled {
 			findValidServer = true
 		}
@@ -88,7 +103,7 @@ func (al *AgentLoop) ensureMCPInitialized(ctx context.Context) error {
 			workspacePath = defaultAgent.Workspace
 		}
 
-		if err := mcpManager.LoadFromMCPConfig(ctx, al.cfg.Tools.MCP, workspacePath); err != nil {
+		if err := mcpManager.LoadFromMCPConfig(ctx, mcpCfg, workspacePath); err != nil {
 			logger.WarnCF("agent", "Failed to load MCP servers, MCP tools will not be available",
 				map[string]any{
 					"error": err.Error(),

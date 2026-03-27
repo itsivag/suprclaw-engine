@@ -184,6 +184,12 @@ func registerSharedTools(
 			}
 		}
 
+		if cfg.Tools.IsToolEnabled("browser_relay") {
+			for _, relayTool := range tools.NewBrowserRelayCompatTools(cfg) {
+				agent.Tools.Register(relayTool)
+			}
+		}
+
 		// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
 		if cfg.Tools.IsToolEnabled("i2c") {
 			agent.Tools.Register(tools.NewI2CTool())
