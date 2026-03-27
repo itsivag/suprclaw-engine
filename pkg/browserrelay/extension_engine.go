@@ -851,6 +851,9 @@ func prioritizeSnapshotElements(elements []snapshotElement, maxNodes int) []snap
 	if maxNodes <= 0 {
 		maxNodes = defaultSnapshotRefMax
 	}
+	if len(elements) <= maxNodes {
+		return elements
+	}
 	scored := make([]scoredSnapshotElement, 0, len(elements))
 	for _, el := range elements {
 		scored = append(scored, scoredSnapshotElement{
@@ -861,14 +864,35 @@ func prioritizeSnapshotElements(elements []snapshotElement, maxNodes int) []snap
 	sort.SliceStable(scored, func(i, j int) bool {
 		return scored[i].Score > scored[j].Score
 	})
-	if len(scored) > maxNodes {
-		scored = scored[:maxNodes]
+
+	highSignalCount := maxNodes / 2
+	if highSignalCount < 1 {
+		highSignalCount = 1
 	}
-	prioritized := make([]snapshotElement, 0, len(scored))
-	for _, entry := range scored {
-		prioritized = append(prioritized, entry.Element)
+	if highSignalCount > len(scored) {
+		highSignalCount = len(scored)
 	}
-	return prioritized
+	selected := make([]snapshotElement, 0, maxNodes)
+	selectedSelectors := make(map[string]struct{}, maxNodes)
+	for i := 0; i < highSignalCount; i++ {
+		entry := scored[i].Element
+		selected = append(selected, entry)
+		selectedSelectors[entry.Selector] = struct{}{}
+	}
+	for _, entry := range elements {
+		if len(selected) >= maxNodes {
+			break
+		}
+		if _, exists := selectedSelectors[entry.Selector]; exists {
+			continue
+		}
+		selected = append(selected, entry)
+		selectedSelectors[entry.Selector] = struct{}{}
+	}
+	if len(selected) > maxNodes {
+		selected = selected[:maxNodes]
+	}
+	return selected
 }
 
 func snapshotElementPriorityScore(el snapshotElement) int {
@@ -909,12 +933,21 @@ func snapshotElementPriorityScore(el snapshotElement) int {
 		{term: "checkout", weight: 220},
 		{term: "search", weight: 180},
 		{term: "submit", weight: 160},
+		{term: "iphone", weight: 220},
+		{term: "apple", weight: 120},
+		{term: "buy", weight: 90},
 		{term: "continue", weight: 80},
 	}
 	for _, rule := range positive {
 		if strings.Contains(text, rule.term) {
 			score += rule.weight
 		}
+	}
+	if tag == "a" && len(text) >= 24 {
+		score += 180
+	}
+	if strings.Contains(text, "₹") || strings.Contains(text, "$") {
+		score += 90
 	}
 
 	negative := []struct {
