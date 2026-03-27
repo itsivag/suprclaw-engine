@@ -281,3 +281,41 @@ func TestSanitizeHistoryForProvider_PartialToolResultsInMiddle(t *testing.T) {
 	}
 	assertRoles(t, result, "user", "assistant", "tool", "assistant", "user", "user", "assistant", "tool", "assistant")
 }
+
+func TestSanitizeHistoryForProvider_DropsUnexpectedExtraToolResult(t *testing.T) {
+	history := []providers.Message{
+		msg("user", "run one tool"),
+		assistantWithTools("A"),
+		toolResult("A"),
+		toolResult("B"), // unexpected extra result: no matching tool_call
+		msg("assistant", "done"),
+	}
+
+	result := sanitizeHistoryForProvider(history)
+	if len(result) != 4 {
+		t.Fatalf("expected 4 messages, got %d: %+v", len(result), roles(result))
+	}
+	assertRoles(t, result, "user", "assistant", "tool", "assistant")
+	if got := result[2].ToolCallID; got != "A" {
+		t.Fatalf("expected only tool result A to remain, got %q", got)
+	}
+}
+
+func TestSanitizeHistoryForProvider_DropsDuplicateToolResult(t *testing.T) {
+	history := []providers.Message{
+		msg("user", "run one tool"),
+		assistantWithTools("A"),
+		toolResult("A"),
+		toolResult("A"), // duplicate result for same tool_call
+		msg("assistant", "done"),
+	}
+
+	result := sanitizeHistoryForProvider(history)
+	if len(result) != 4 {
+		t.Fatalf("expected 4 messages, got %d: %+v", len(result), roles(result))
+	}
+	assertRoles(t, result, "user", "assistant", "tool", "assistant")
+	if got := result[2].ToolCallID; got != "A" {
+		t.Fatalf("expected only one tool result A to remain, got %q", got)
+	}
+}

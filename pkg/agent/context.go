@@ -658,36 +658,57 @@ func sanitizeHistoryForProvider(history []providers.Message) []providers.Message
 		}
 	}
 
-	// Second pass: ensure every assistant message with tool_calls has matching
-	// tool result messages following it. This is required by strict providers
-	// like DeepSeek that enforce: "An assistant message with 'tool_calls' must
-	// be followed by tool messages responding to each 'tool_call_id'."
+	// Second pass: enforce strict tool-call/result coherence for providers like
+	// Bedrock/Anthropic. For each assistant tool-call turn we keep exactly one
+	// matching tool result per tool_call_id, drop unexpected/duplicate tool
+	// results, and drop the whole turn if any expected result is missing.
 	final := make([]providers.Message, 0, len(sanitized))
 	for i := 0; i < len(sanitized); i++ {
 		msg := sanitized[i]
 		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
-			// Collect expected tool_call IDs
-			expected := make(map[string]bool, len(msg.ToolCalls))
+			expected := make(map[string]struct{}, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
-				expected[tc.ID] = false
+				expected[tc.ID] = struct{}{}
 			}
 
-			// Check following messages for matching tool results
 			toolMsgCount := 0
+			matched := make(map[string]bool, len(msg.ToolCalls))
+			filteredTools := make([]providers.Message, 0, len(msg.ToolCalls))
 			for j := i + 1; j < len(sanitized); j++ {
 				if sanitized[j].Role != "tool" {
 					break
 				}
 				toolMsgCount++
-				if _, exists := expected[sanitized[j].ToolCallID]; exists {
-					expected[sanitized[j].ToolCallID] = true
+
+				toolID := strings.TrimSpace(sanitized[j].ToolCallID)
+				if _, exists := expected[toolID]; !exists {
+					logger.DebugCF(
+						"agent",
+						"Dropping unexpected tool result for assistant tool-call turn",
+						map[string]any{
+							"tool_call_id": toolID,
+						},
+					)
+					continue
 				}
+				if matched[toolID] {
+					logger.DebugCF(
+						"agent",
+						"Dropping duplicate tool result for assistant tool-call turn",
+						map[string]any{
+							"tool_call_id": toolID,
+						},
+					)
+					continue
+				}
+
+				matched[toolID] = true
+				filteredTools = append(filteredTools, sanitized[j])
 			}
 
-			// If any tool_call_id is missing, drop this assistant message and its partial tool messages
 			allFound := true
-			for toolCallID, found := range expected {
-				if !found {
+			for toolCallID := range expected {
+				if !matched[toolCallID] {
 					allFound = false
 					logger.DebugCF(
 						"agent",
@@ -695,7 +716,7 @@ func sanitizeHistoryForProvider(history []providers.Message) []providers.Message
 						map[string]any{
 							"missing_tool_call_id": toolCallID,
 							"expected_count":       len(expected),
-							"found_count":          toolMsgCount,
+							"found_count":          len(filteredTools),
 						},
 					)
 					break
@@ -703,10 +724,21 @@ func sanitizeHistoryForProvider(history []providers.Message) []providers.Message
 			}
 
 			if !allFound {
-				// Skip this assistant message and its tool messages
 				i += toolMsgCount
 				continue
 			}
+
+			final = append(final, msg)
+			final = append(final, filteredTools...)
+			i += toolMsgCount
+			continue
+		}
+
+		if msg.Role == "tool" {
+			// Defensive drop: tool messages should only appear immediately after
+			// their assistant tool-call turn (handled above).
+			logger.DebugCF("agent", "Dropping standalone tool message after sanitation", map[string]any{})
+			continue
 		}
 		final = append(final, msg)
 	}
