@@ -69,27 +69,32 @@ func (h *Handler) handleBrowserRelayStatus(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":                            status,
-		"enabled":                           relayCfg.Enabled,
-		"host":                              relayCfg.Host,
-		"port":                              relayCfg.Port,
-		"compat_openclaw":                   relayCfg.CompatOpenClaw,
-		"allow_token_query":                 relayCfg.AllowTokenQuery,
-		"engine_mode":                       relayCfg.EngineMode,
-		"agent_browser_enabled":             relayCfg.AgentBrowserEnabled,
-		"agent_browser_binary":              relayCfg.AgentBrowserBinary,
-		"snapshot_default_mode":             relayCfg.SnapshotDefaultMode,
-		"snapshot_max_payload_bytes":        relayCfg.SnapshotMaxPayloadBytes,
-		"snapshot_max_nodes":                relayCfg.SnapshotMaxNodes,
-		"snapshot_max_text_chars":           relayCfg.SnapshotMaxTextChars,
-		"snapshot_max_depth":                relayCfg.SnapshotMaxDepth,
-		"snapshot_interactive_only_default": relayCfg.SnapshotInteractiveOnly,
-		"snapshot_ref_ttl_sec":              relayCfg.SnapshotRefTTLSec,
-		"snapshot_max_generations":          relayCfg.SnapshotMaxGenerations,
-		"snapshot_allow_full_tree":          relayCfg.SnapshotAllowFullTree,
-		"extension_ws_url":                  h.browserRelayExtensionURL(r, relayCfg),
-		"cdp_ws_url_template":               h.browserRelayCDPTemplateURL(r, relayCfg),
-		"configured_relay_port":             relayCfg.Port,
+		"status":                        status,
+		"enabled":                       relayCfg.Enabled,
+		"host":                          relayCfg.Host,
+		"port":                          relayCfg.Port,
+		"compat_openclaw":               relayCfg.CompatOpenClaw,
+		"allow_token_query":             relayCfg.AllowTokenQuery,
+		"engine_mode":                   relayCfg.EngineMode,
+		"agent_browser_enabled":         relayCfg.AgentBrowserEnabled,
+		"agent_browser_binary":          relayCfg.AgentBrowserBinary,
+		"agent_browser_batch_window_ms": relayCfg.AgentBrowserBatchWindowMS,
+		"agent_browser_batch_max_steps": relayCfg.AgentBrowserBatchMaxSteps,
+		"agent_browser_stream_enabled":  relayCfg.AgentBrowserStreamEnabled,
+		"agent_browser_stream_port":     relayCfg.AgentBrowserStreamPort,
+		"agent_browser_runtime_command_timeout_ms": relayCfg.AgentBrowserRuntimeCommandTimeoutMS,
+		"snapshot_default_mode":                    relayCfg.SnapshotDefaultMode,
+		"snapshot_max_payload_bytes":               relayCfg.SnapshotMaxPayloadBytes,
+		"snapshot_max_nodes":                       relayCfg.SnapshotMaxNodes,
+		"snapshot_max_text_chars":                  relayCfg.SnapshotMaxTextChars,
+		"snapshot_max_depth":                       relayCfg.SnapshotMaxDepth,
+		"snapshot_interactive_only_default":        relayCfg.SnapshotInteractiveOnly,
+		"snapshot_ref_ttl_sec":                     relayCfg.SnapshotRefTTLSec,
+		"snapshot_max_generations":                 relayCfg.SnapshotMaxGenerations,
+		"snapshot_allow_full_tree":                 relayCfg.SnapshotAllowFullTree,
+		"extension_ws_url":                         h.browserRelayExtensionURL(r, relayCfg),
+		"cdp_ws_url_template":                      h.browserRelayCDPTemplateURL(r, relayCfg),
+		"configured_relay_port":                    relayCfg.Port,
 	})
 }
 
@@ -307,16 +312,24 @@ func (h *Handler) handleBrowserRelayActionV2(w http.ResponseWriter, r *http.Requ
 
 	action, payload, validationErr := h.validateAndConvertRelayActionV2(req)
 	if validationErr != nil {
+		info := classifyRelayError(validationErr)
+		errorCode := "validation_error"
+		retryClass := retryClassNever
+		httpStatus := http.StatusBadRequest
+		if errors.Is(validationErr, browserrelay.ErrSnapshotRefRequired) {
+			errorCode = info.Code
+			retryClass = info.RetryClass
+		}
 		resp := relayActionV2Response{
 			RequestID:    req.RequestID,
 			OK:           false,
-			ErrorCode:    "validation_error",
+			ErrorCode:    errorCode,
 			ErrorMessage: validationErr.Error(),
-			RetryClass:   retryClassNever,
+			RetryClass:   retryClass,
 			TraceID:      traceID,
 		}
-		h.cacheRelayResponse(req, resp, http.StatusBadRequest)
-		h.writeRelayV2Error(w, resp, http.StatusBadRequest)
+		h.cacheRelayResponse(req, resp, httpStatus)
+		h.writeRelayV2Error(w, resp, httpStatus)
 		return
 	}
 
@@ -455,6 +468,14 @@ func (h *Handler) validateAndConvertRelayActionV2(req relayActionV2Request) (str
 				TimeoutMS:       argInt(step.Args, "timeout_ms"),
 				IntervalMS:      argInt(step.Args, "interval_ms"),
 			}
+			if (a == "click" || a == "type") && !isRelayRefSelector(bs.Selector) {
+				return "", browserrelay.ActionRequest{}, fmt.Errorf(
+					"%w: steps[%d].selector must be @eN for action=%s",
+					browserrelay.ErrSnapshotRefRequired,
+					i,
+					a,
+				)
+			}
 			payload.Steps = append(payload.Steps, bs)
 		}
 		return action, payload, nil
@@ -476,7 +497,19 @@ func (h *Handler) validateAndConvertRelayActionV2(req relayActionV2Request) (str
 	payload.MaxTextChars = argInt(req.Args, "max_text_chars")
 	payload.TimeoutMS = argInt(req.Args, "timeout_ms")
 	payload.IntervalMS = argInt(req.Args, "interval_ms")
+	if (action == "click" || action == "type") && !isRelayRefSelector(payload.Selector) {
+		return "", browserrelay.ActionRequest{}, fmt.Errorf(
+			"%w: selector must be @eN for action=%s",
+			browserrelay.ErrSnapshotRefRequired,
+			action,
+		)
+	}
 	return action, payload, nil
+}
+
+func isRelayRefSelector(selector string) bool {
+	selector = strings.TrimSpace(selector)
+	return strings.HasPrefix(selector, "@e") && len(selector) > 2
 }
 
 func argString(args map[string]any, key string) string {
@@ -561,16 +594,44 @@ func classifyRelayError(err error) relayErrorInfo {
 		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "relay_loop_guard_triggered", RetryClass: retryClassNever}
 	case errors.Is(err, browserrelay.ErrSnapshotRefNotFound):
 		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "snapshot_ref_not_found", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrSnapshotRefRequired):
+		return relayErrorInfo{HTTPStatus: http.StatusBadRequest, Code: "snapshot_ref_required", RetryClass: retryClassNever}
 	case errors.Is(err, browserrelay.ErrSnapshotPayloadTooLarge):
 		return relayErrorInfo{HTTPStatus: http.StatusRequestEntityTooLarge, Code: "snapshot_payload_too_large", RetryClass: retryClassNever}
 	case errors.Is(err, browserrelay.ErrSnapshotScopeNotFound):
 		return relayErrorInfo{HTTPStatus: http.StatusNotFound, Code: "snapshot_scope_not_found", RetryClass: retryClassNever}
 	case errors.Is(err, browserrelay.ErrSnapshotModeUnsupported):
 		return relayErrorInfo{HTTPStatus: http.StatusBadRequest, Code: "snapshot_mode_unsupported", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrSnapshotProgressBlocked):
+		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "snapshot_progress_blocked", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrActionabilityNotEnabled):
+		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "actionability_not_enabled", RetryClass: retryClassAfterStateChange}
+	case errors.Is(err, browserrelay.ErrActionabilityNotEvents):
+		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "actionability_not_receiving_events", RetryClass: retryClassAfterStateChange}
+	case errors.Is(err, browserrelay.ErrActionabilityTimeout):
+		return relayErrorInfo{HTTPStatus: http.StatusRequestTimeout, Code: "actionability_timeout", RetryClass: retryClassAfterStateChange}
 	case errors.Is(err, browserrelay.ErrRelayQueueCanceled):
 		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "queue_canceled", RetryClass: retryClassAfterStateChange}
 	case errors.Is(err, browserrelay.ErrAgentBrowserUnavailable):
 		return relayErrorInfo{HTTPStatus: http.StatusServiceUnavailable, Code: "agent_browser_unavailable", RetryClass: retryClassSafeBackoff}
+	case errors.Is(err, browserrelay.ErrAgentBrowserRuntimeDisconnected):
+		return relayErrorInfo{
+			HTTPStatus: http.StatusConflict,
+			Code:       "agent_browser_runtime_disconnected",
+			RetryClass: retryClassAfterStateChange,
+		}
+	case errors.Is(err, browserrelay.ErrAgentBrowserQueueCanceled):
+		return relayErrorInfo{
+			HTTPStatus: http.StatusConflict,
+			Code:       "agent_browser_queue_canceled",
+			RetryClass: retryClassAfterStateChange,
+		}
+	case errors.Is(err, browserrelay.ErrAgentBrowserBatchFailed):
+		return relayErrorInfo{
+			HTTPStatus: http.StatusBadGateway,
+			Code:       "agent_browser_batch_failed",
+			RetryClass: retryClassAfterStateChange,
+		}
 	case errors.Is(err, browserrelay.ErrNoExtensionForTarget):
 		return relayErrorInfo{HTTPStatus: http.StatusNotFound, Code: "extension_not_found", RetryClass: retryClassAfterStateChange}
 	case errors.Is(err, browserrelay.ErrTargetNotFound):
@@ -888,6 +949,11 @@ func normalizeBrowserRelayConfig(cfg config.BrowserRelayConfig) config.BrowserRe
 		cfg.SnapshotMaxDepth == 0 &&
 		cfg.SnapshotRefTTLSec == 0 &&
 		cfg.SnapshotMaxGenerations == 0
+	rawAgentBrowserRuntimeDefaultsUnset := cfg.AgentBrowserBatchWindowMS == 0 &&
+		cfg.AgentBrowserBatchMaxSteps == 0 &&
+		cfg.AgentBrowserRuntimeCommandTimeoutMS == 0 &&
+		cfg.AgentBrowserStreamPort == 0 &&
+		!cfg.AgentBrowserStreamEnabled
 
 	if strings.TrimSpace(cfg.Host) == "" {
 		cfg.Host = defaultBrowserRelayHost
@@ -919,6 +985,21 @@ func normalizeBrowserRelayConfig(cfg config.BrowserRelayConfig) config.BrowserRe
 	}
 	if cfg.AgentBrowserIdleTimeoutSec <= 0 {
 		cfg.AgentBrowserIdleTimeoutSec = 300
+	}
+	if cfg.AgentBrowserBatchWindowMS <= 0 {
+		cfg.AgentBrowserBatchWindowMS = 25
+	}
+	if cfg.AgentBrowserBatchMaxSteps <= 0 {
+		cfg.AgentBrowserBatchMaxSteps = 24
+	}
+	if cfg.AgentBrowserRuntimeCommandTimeoutMS <= 0 {
+		cfg.AgentBrowserRuntimeCommandTimeoutMS = 30000
+	}
+	if cfg.AgentBrowserStreamPort < 0 {
+		cfg.AgentBrowserStreamPort = 0
+	}
+	if rawAgentBrowserRuntimeDefaultsUnset && !cfg.AgentBrowserStreamEnabled {
+		cfg.AgentBrowserStreamEnabled = true
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.SnapshotDefaultMode)) {
 	case "", "compact":
@@ -978,29 +1059,34 @@ func decodeRawResult(raw json.RawMessage) any {
 func browserRelayConfigFromConfig(cfg *config.Config) browserrelay.Config {
 	relayCfg := normalizeBrowserRelayConfig(cfg.Tools.BrowserRelay)
 	return browserrelay.Config{
-		Enabled:                     relayCfg.Enabled,
-		Host:                        relayCfg.Host,
-		Port:                        relayCfg.Port,
-		Token:                       relayCfg.Token,
-		CompatOpenClaw:              relayCfg.CompatOpenClaw,
-		MaxClients:                  relayCfg.MaxClients,
-		IdleTimeoutSec:              relayCfg.IdleTimeoutSec,
-		AllowTokenQuery:             relayCfg.AllowTokenQuery,
-		EngineMode:                  relayCfg.EngineMode,
-		AgentBrowserEnabled:         relayCfg.AgentBrowserEnabled,
-		AgentBrowserBinary:          relayCfg.AgentBrowserBinary,
-		AgentBrowserDefaultHeadless: relayCfg.AgentBrowserDefaultHeadless,
-		AgentBrowserMaxSessions:     relayCfg.AgentBrowserMaxSessions,
-		AgentBrowserIdleTimeoutSec:  relayCfg.AgentBrowserIdleTimeoutSec,
-		SnapshotDefaultMode:         relayCfg.SnapshotDefaultMode,
-		SnapshotMaxPayloadBytes:     relayCfg.SnapshotMaxPayloadBytes,
-		SnapshotMaxNodes:            relayCfg.SnapshotMaxNodes,
-		SnapshotMaxTextChars:        relayCfg.SnapshotMaxTextChars,
-		SnapshotMaxDepth:            relayCfg.SnapshotMaxDepth,
-		SnapshotInteractiveOnly:     relayCfg.SnapshotInteractiveOnly,
-		SnapshotRefTTLSec:           relayCfg.SnapshotRefTTLSec,
-		SnapshotMaxGenerations:      relayCfg.SnapshotMaxGenerations,
-		SnapshotAllowFullTree:       relayCfg.SnapshotAllowFullTree,
+		Enabled:                             relayCfg.Enabled,
+		Host:                                relayCfg.Host,
+		Port:                                relayCfg.Port,
+		Token:                               relayCfg.Token,
+		CompatOpenClaw:                      relayCfg.CompatOpenClaw,
+		MaxClients:                          relayCfg.MaxClients,
+		IdleTimeoutSec:                      relayCfg.IdleTimeoutSec,
+		AllowTokenQuery:                     relayCfg.AllowTokenQuery,
+		EngineMode:                          relayCfg.EngineMode,
+		AgentBrowserEnabled:                 relayCfg.AgentBrowserEnabled,
+		AgentBrowserBinary:                  relayCfg.AgentBrowserBinary,
+		AgentBrowserDefaultHeadless:         relayCfg.AgentBrowserDefaultHeadless,
+		AgentBrowserMaxSessions:             relayCfg.AgentBrowserMaxSessions,
+		AgentBrowserIdleTimeoutSec:          relayCfg.AgentBrowserIdleTimeoutSec,
+		AgentBrowserBatchWindowMS:           relayCfg.AgentBrowserBatchWindowMS,
+		AgentBrowserBatchMaxSteps:           relayCfg.AgentBrowserBatchMaxSteps,
+		AgentBrowserStreamEnabled:           relayCfg.AgentBrowserStreamEnabled,
+		AgentBrowserStreamPort:              relayCfg.AgentBrowserStreamPort,
+		AgentBrowserRuntimeCommandTimeoutMS: relayCfg.AgentBrowserRuntimeCommandTimeoutMS,
+		SnapshotDefaultMode:                 relayCfg.SnapshotDefaultMode,
+		SnapshotMaxPayloadBytes:             relayCfg.SnapshotMaxPayloadBytes,
+		SnapshotMaxNodes:                    relayCfg.SnapshotMaxNodes,
+		SnapshotMaxTextChars:                relayCfg.SnapshotMaxTextChars,
+		SnapshotMaxDepth:                    relayCfg.SnapshotMaxDepth,
+		SnapshotInteractiveOnly:             relayCfg.SnapshotInteractiveOnly,
+		SnapshotRefTTLSec:                   relayCfg.SnapshotRefTTLSec,
+		SnapshotMaxGenerations:              relayCfg.SnapshotMaxGenerations,
+		SnapshotAllowFullTree:               relayCfg.SnapshotAllowFullTree,
 	}
 }
 

@@ -79,7 +79,7 @@ Every response uses a shared envelope:
 
 `snapshot` is compact-first by default and returns `refs`, `ref_generation`, `elements`, `page`, `truncated`, and `stats`.
 Use one compact snapshot, then drive follow-up actions via refs. Re-snapshot only after major DOM change.
-Follow-up selector actions can use ref IDs such as `@e1`:
+`click` and `type` are strict ref-first in V2: selectors must be ref IDs such as `@e1`:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:18800/api/browser-relay/actions \
@@ -108,6 +108,12 @@ curl -sS -X POST http://127.0.0.1:18800/api/browser-relay/actions \
 ```
 
 If a ref is stale/missing, the relay returns `snapshot_ref_not_found`.
+If `click` or `type` is called without a ref selector, relay returns `snapshot_ref_required`.
+If snapshot is called repeatedly without state progress, relay returns `snapshot_progress_blocked`.
+If actionability checks fail before interaction, relay may return:
+- `actionability_timeout`
+- `actionability_not_receiving_events`
+- `actionability_not_enabled`
 If a scope selector is invalid, relay returns `snapshot_scope_not_found`.
 If payload guard is exceeded and cannot be compacted safely, relay returns `snapshot_payload_too_large`.
 
@@ -143,6 +149,11 @@ curl -sS -X POST http://127.0.0.1:18800/api/browser-relay/actions \
 - Do not blindly retry on:
   - `relay_loop_guard_triggered`
   - `snapshot_ref_not_found`
+  - `snapshot_ref_required`
+  - `snapshot_progress_blocked`
+  - `actionability_timeout`
+  - `actionability_not_receiving_events`
+  - `actionability_not_enabled`
   - `snapshot_payload_too_large`
   - `snapshot_scope_not_found`
   - ownership/attach conflicts (`target not attached`, `target already controlled`)

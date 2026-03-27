@@ -227,6 +227,18 @@ func validateConfig(cfg *config.Config) []string {
 		if cfg.Tools.BrowserRelay.AgentBrowserIdleTimeoutSec < 0 {
 			errs = append(errs, "tools.browser_relay.agent_browser_idle_timeout_sec must be >= 0")
 		}
+		if cfg.Tools.BrowserRelay.AgentBrowserBatchWindowMS < 0 {
+			errs = append(errs, "tools.browser_relay.agent_browser_batch_window_ms must be >= 0")
+		}
+		if cfg.Tools.BrowserRelay.AgentBrowserBatchMaxSteps < 0 {
+			errs = append(errs, "tools.browser_relay.agent_browser_batch_max_steps must be >= 0")
+		}
+		if cfg.Tools.BrowserRelay.AgentBrowserStreamPort < 0 {
+			errs = append(errs, "tools.browser_relay.agent_browser_stream_port must be >= 0")
+		}
+		if cfg.Tools.BrowserRelay.AgentBrowserRuntimeCommandTimeoutMS < 0 {
+			errs = append(errs, "tools.browser_relay.agent_browser_runtime_command_timeout_ms must be >= 0")
+		}
 		switch strings.ToLower(strings.TrimSpace(cfg.Tools.BrowserRelay.SnapshotDefaultMode)) {
 		case "", "compact", "full":
 		default:

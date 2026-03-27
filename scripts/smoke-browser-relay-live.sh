@@ -42,14 +42,20 @@ Hard requirements:
    - take one compact snapshot first (`mode=compact`, interactive elements only)
    - use snapshot refs for click/type operations where possible
    - use `batch` for multi-step interactions when safe
+   - do not loop snapshots: before the first interaction, snapshot at most once
+   - after that, only snapshot again if navigation/state changed
 4. Execute deterministic commerce steps:
    - navigate to https://www.amazon.in (or https://www.amazon.com if redirected)
    - search for: iphone 17
    - open a relevant iPhone 17 product page
    - click Add to Cart
-5. Verify Add to Cart succeeded (cart count increment, cart confirmation, or explicit cart state check).
-6. If no target exists, report paired=false and include a clear error.
-7. Output exactly one final line:
+5. Strict ref policy:
+   - for click/type, only use `@eN` refs from snapshot output
+   - do not use raw CSS/XPath for click/type
+   - if refs are stale/missing, re-snapshot (respecting loop constraints) and continue
+6. Verify Add to Cart succeeded (cart count increment, cart confirmation, or explicit cart state check).
+7. If no target exists, report paired=false and include a clear error.
+8. Output exactly one final line:
 RELAY_SMOKE_RESULT::<json>
 
 JSON schema:
@@ -70,7 +76,7 @@ printf -v msg_escaped '%q' "$message"
 cmd="SUPRCLAW_HOME=/home/suprclaw/.suprclaw SUPRCLAW_CONFIG=/home/suprclaw/.suprclaw/config.json suprclaw agent --session cli:${run_id} --message ${msg_escaped}"
 
 set +e
-raw="$(podman exec "$cid" su - suprclaw -s /bin/bash -lc "timeout 420s bash -lc $(printf '%q' "$cmd")" 2>&1)"
+raw="$(podman exec "$cid" su - suprclaw -s /bin/bash -lc "timeout 900s bash -lc $(printf '%q' "$cmd")" 2>&1)"
 agent_exit=$?
 set -e
 

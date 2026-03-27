@@ -343,6 +343,12 @@ func TestExtensionEngineSnapshotStableRefsAcrossGenerations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first snapshot error = %v", err)
 	}
+	if _, err = engine.ExecuteAction(ctx, "navigate", ActionRequest{
+		TargetID: "tab-1",
+		URL:      "https://example.com/search",
+	}); err != nil {
+		t.Fatalf("navigate between snapshots error = %v", err)
+	}
 	second, err := engine.ExecuteAction(ctx, "snapshot", ActionRequest{TargetID: "tab-1"})
 	if err != nil {
 		t.Fatalf("second snapshot error = %v", err)
@@ -394,6 +400,181 @@ func TestExtensionEngineSnapshotPayloadTooLargeDeterministicError(t *testing.T) 
 	_, err := engine.ExecuteAction(ctx, "snapshot", ActionRequest{TargetID: "tab-1"})
 	if !errors.Is(err, ErrSnapshotPayloadTooLarge) {
 		t.Fatalf("snapshot error = %v, want ErrSnapshotPayloadTooLarge", err)
+	}
+}
+
+func TestExtensionEngineClickRequiresRefSelector(t *testing.T) {
+	var mgr *Manager
+	mgr = setupAttachedManager(t, func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
+		}()
+	})
+	engine := NewExtensionEngine(mgr)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := engine.ExecuteAction(ctx, "click", ActionRequest{
+		TargetID: "tab-1",
+		Selector: "#submit",
+	})
+	if !errors.Is(err, ErrSnapshotRefRequired) {
+		t.Fatalf("click raw selector error = %v, want ErrSnapshotRefRequired", err)
+	}
+}
+
+func TestExtensionEngineSnapshotProgressBlockedWithoutStateChange(t *testing.T) {
+	var mgr *Manager
+	mgr = setupAttachedManager(t, func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			if req.Method == "Runtime.evaluate" {
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"result":{"value":{"ok":true,"page":{"url":"https://example.com","title":"Example"},"elements":[{"selector":"#submit","role":"button","name":"Submit","text":"Submit","tag":"button"}]}}}}`, req.RequestID)))
+				return
+			}
+			_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
+		}()
+	})
+	engine := NewExtensionEngine(mgr)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if _, err := engine.ExecuteAction(ctx, "snapshot", ActionRequest{TargetID: "tab-1"}); err != nil {
+		t.Fatalf("first snapshot error = %v", err)
+	}
+	_, err := engine.ExecuteAction(ctx, "snapshot", ActionRequest{TargetID: "tab-1"})
+	if !errors.Is(err, ErrSnapshotProgressBlocked) {
+		t.Fatalf("second snapshot error = %v, want ErrSnapshotProgressBlocked", err)
+	}
+}
+
+func TestExtensionEngineNavigationClearsSnapshotRefs(t *testing.T) {
+	var mgr *Manager
+	mgr = setupAttachedManager(t, func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
+		}()
+	})
+	engine := NewExtensionEngine(mgr)
+	engine.mu.Lock()
+	engine.snapshots["tab-1"] = []snapshotGeneration{
+		{
+			Generation: "g-1",
+			CreatedAt:  time.Now(),
+			Refs: map[string]snapshotRef{
+				"@e1": {Ref: "@e1", Selector: "#submit"},
+			},
+			Order: []string{"@e1"},
+		},
+	}
+	engine.snapshotProgress["tab-1"] = snapshotProgressState{InitialSnapshotTaken: true}
+	engine.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := engine.ExecuteAction(ctx, "navigate", ActionRequest{
+		TargetID: "tab-1",
+		URL:      "https://example.com/next",
+	}); err != nil {
+		t.Fatalf("navigate error = %v", err)
+	}
+	_, err := engine.ExecuteAction(ctx, "click", ActionRequest{
+		TargetID: "tab-1",
+		Selector: "@e1",
+	})
+	if !errors.Is(err, ErrSnapshotRefNotFound) {
+		t.Fatalf("click old ref after navigate error = %v, want ErrSnapshotRefNotFound", err)
+	}
+}
+
+func TestExtensionEngineClickActionabilityNotEnabled(t *testing.T) {
+	var mgr *Manager
+	mgr = setupAttachedManager(t, func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			if req.Method == "Runtime.evaluate" {
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"result":{"value":{"exists":true,"visible":true,"enabled":false,"editable":true,"receives_events":true,"x":10,"y":10,"left":0,"top":0,"width":10,"height":10,"reason":"not_enabled"}}}}`, req.RequestID)))
+				return
+			}
+			_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
+		}()
+	})
+	engine := NewExtensionEngine(mgr)
+	engine.mu.Lock()
+	engine.snapshots["tab-1"] = []snapshotGeneration{
+		{
+			Generation: "g-1",
+			CreatedAt:  time.Now(),
+			Refs:       map[string]snapshotRef{"@e1": {Ref: "@e1", Selector: "#submit"}},
+			Order:      []string{"@e1"},
+		},
+	}
+	engine.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := engine.ExecuteAction(ctx, "click", ActionRequest{
+		TargetID:   "tab-1",
+		Selector:   "@e1",
+		TimeoutMS:  150,
+		IntervalMS: 20,
+	})
+	if !errors.Is(err, ErrActionabilityNotEnabled) {
+		t.Fatalf("click actionability error = %v, want ErrActionabilityNotEnabled", err)
+	}
+}
+
+func TestExtensionEngineClickActionabilityNotReceivingEvents(t *testing.T) {
+	var mgr *Manager
+	mgr = setupAttachedManager(t, func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			if req.Method == "Runtime.evaluate" {
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"result":{"value":{"exists":true,"visible":true,"enabled":true,"editable":true,"receives_events":false,"x":10,"y":10,"left":0,"top":0,"width":10,"height":10,"reason":"not_receiving_events"}}}}`, req.RequestID)))
+				return
+			}
+			_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
+		}()
+	})
+	engine := NewExtensionEngine(mgr)
+	engine.mu.Lock()
+	engine.snapshots["tab-1"] = []snapshotGeneration{
+		{
+			Generation: "g-1",
+			CreatedAt:  time.Now(),
+			Refs:       map[string]snapshotRef{"@e1": {Ref: "@e1", Selector: "#submit"}},
+			Order:      []string{"@e1"},
+		},
+	}
+	engine.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := engine.ExecuteAction(ctx, "click", ActionRequest{
+		TargetID:   "tab-1",
+		Selector:   "@e1",
+		TimeoutMS:  150,
+		IntervalMS: 20,
+	})
+	if !errors.Is(err, ErrActionabilityNotEvents) {
+		t.Fatalf("click actionability error = %v, want ErrActionabilityNotEvents", err)
 	}
 }
 

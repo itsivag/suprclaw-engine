@@ -686,33 +686,38 @@ type SkillsToolsConfig struct {
 }
 
 type BrowserRelayConfig struct {
-	ToolConfig                  `                         envPrefix:"SUPRCLAW_TOOLS_BROWSER_RELAY_"`
-	Host                        string `json:"host"                    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_HOST"`
-	Port                        int    `json:"port"                    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_PORT"`
-	Token                       string `json:"token"                   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_TOKEN"`
-	CompatOpenClaw              bool   `json:"compat_openclaw"         env:"SUPRCLAW_TOOLS_BROWSER_RELAY_COMPAT_OPENCLAW"`
-	MaxClients                  int    `json:"max_clients"             env:"SUPRCLAW_TOOLS_BROWSER_RELAY_MAX_CLIENTS"`
-	IdleTimeoutSec              int    `json:"idle_timeout_sec"        env:"SUPRCLAW_TOOLS_BROWSER_RELAY_IDLE_TIMEOUT_SEC"`
-	AllowTokenQuery             bool   `json:"allow_token_query"       env:"SUPRCLAW_TOOLS_BROWSER_RELAY_ALLOW_TOKEN_QUERY"`
-	EngineMode                  string `json:"engine_mode"             env:"SUPRCLAW_TOOLS_BROWSER_RELAY_ENGINE_MODE"`
-	AgentBrowserEnabled         bool   `json:"agent_browser_enabled"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_ENABLED"`
-	AgentBrowserBinary          string `json:"agent_browser_binary"    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BINARY"`
-	AgentBrowserDefaultHeadless bool   `json:"agent_browser_default_headless" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_DEFAULT_HEADLESS"`
-	AgentBrowserMaxSessions     int    `json:"agent_browser_max_sessions" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_MAX_SESSIONS"`
-	AgentBrowserIdleTimeoutSec  int    `json:"agent_browser_idle_timeout_sec" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_IDLE_TIMEOUT_SEC"`
-	BootstrapIdentityHeader     string `json:"bootstrap_identity_header" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_BOOTSTRAP_IDENTITY_HEADER"`
-	PairingCodeTTLSec           int    `json:"pairing_code_ttl_sec"    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_PAIRING_CODE_TTL_SEC"`
-	SessionTokenTTLSec          int    `json:"session_token_ttl_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SESSION_TOKEN_TTL_SEC"`
-	RefreshTokenTTLSec          int    `json:"refresh_token_ttl_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_REFRESH_TOKEN_TTL_SEC"`
-	SnapshotDefaultMode         string `json:"snapshot_default_mode" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_DEFAULT_MODE"`
-	SnapshotMaxPayloadBytes     int    `json:"snapshot_max_payload_bytes" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_PAYLOAD_BYTES"`
-	SnapshotMaxNodes            int    `json:"snapshot_max_nodes" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_NODES"`
-	SnapshotMaxTextChars        int    `json:"snapshot_max_text_chars" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_TEXT_CHARS"`
-	SnapshotMaxDepth            int    `json:"snapshot_max_depth" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_DEPTH"`
-	SnapshotInteractiveOnly     bool   `json:"snapshot_interactive_only_default" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_INTERACTIVE_ONLY_DEFAULT"`
-	SnapshotRefTTLSec           int    `json:"snapshot_ref_ttl_sec" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_REF_TTL_SEC"`
-	SnapshotMaxGenerations      int    `json:"snapshot_max_generations" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_GENERATIONS"`
-	SnapshotAllowFullTree       bool   `json:"snapshot_allow_full_tree" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_ALLOW_FULL_TREE"`
+	ToolConfig                          `                         envPrefix:"SUPRCLAW_TOOLS_BROWSER_RELAY_"`
+	Host                                string `json:"host"                    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_HOST"`
+	Port                                int    `json:"port"                    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_PORT"`
+	Token                               string `json:"token"                   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_TOKEN"`
+	CompatOpenClaw                      bool   `json:"compat_openclaw"         env:"SUPRCLAW_TOOLS_BROWSER_RELAY_COMPAT_OPENCLAW"`
+	MaxClients                          int    `json:"max_clients"             env:"SUPRCLAW_TOOLS_BROWSER_RELAY_MAX_CLIENTS"`
+	IdleTimeoutSec                      int    `json:"idle_timeout_sec"        env:"SUPRCLAW_TOOLS_BROWSER_RELAY_IDLE_TIMEOUT_SEC"`
+	AllowTokenQuery                     bool   `json:"allow_token_query"       env:"SUPRCLAW_TOOLS_BROWSER_RELAY_ALLOW_TOKEN_QUERY"`
+	EngineMode                          string `json:"engine_mode"             env:"SUPRCLAW_TOOLS_BROWSER_RELAY_ENGINE_MODE"`
+	AgentBrowserEnabled                 bool   `json:"agent_browser_enabled"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_ENABLED"`
+	AgentBrowserBinary                  string `json:"agent_browser_binary"    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BINARY"`
+	AgentBrowserDefaultHeadless         bool   `json:"agent_browser_default_headless" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_DEFAULT_HEADLESS"`
+	AgentBrowserMaxSessions             int    `json:"agent_browser_max_sessions" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_MAX_SESSIONS"`
+	AgentBrowserIdleTimeoutSec          int    `json:"agent_browser_idle_timeout_sec" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_IDLE_TIMEOUT_SEC"`
+	AgentBrowserBatchWindowMS           int    `json:"agent_browser_batch_window_ms" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BATCH_WINDOW_MS"`
+	AgentBrowserBatchMaxSteps           int    `json:"agent_browser_batch_max_steps" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BATCH_MAX_STEPS"`
+	AgentBrowserStreamEnabled           bool   `json:"agent_browser_stream_enabled" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_STREAM_ENABLED"`
+	AgentBrowserStreamPort              int    `json:"agent_browser_stream_port" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_STREAM_PORT"`
+	AgentBrowserRuntimeCommandTimeoutMS int    `json:"agent_browser_runtime_command_timeout_ms" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_RUNTIME_COMMAND_TIMEOUT_MS"`
+	BootstrapIdentityHeader             string `json:"bootstrap_identity_header" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_BOOTSTRAP_IDENTITY_HEADER"`
+	PairingCodeTTLSec                   int    `json:"pairing_code_ttl_sec"    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_PAIRING_CODE_TTL_SEC"`
+	SessionTokenTTLSec                  int    `json:"session_token_ttl_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SESSION_TOKEN_TTL_SEC"`
+	RefreshTokenTTLSec                  int    `json:"refresh_token_ttl_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_REFRESH_TOKEN_TTL_SEC"`
+	SnapshotDefaultMode                 string `json:"snapshot_default_mode" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_DEFAULT_MODE"`
+	SnapshotMaxPayloadBytes             int    `json:"snapshot_max_payload_bytes" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_PAYLOAD_BYTES"`
+	SnapshotMaxNodes                    int    `json:"snapshot_max_nodes" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_NODES"`
+	SnapshotMaxTextChars                int    `json:"snapshot_max_text_chars" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_TEXT_CHARS"`
+	SnapshotMaxDepth                    int    `json:"snapshot_max_depth" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_DEPTH"`
+	SnapshotInteractiveOnly             bool   `json:"snapshot_interactive_only_default" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_INTERACTIVE_ONLY_DEFAULT"`
+	SnapshotRefTTLSec                   int    `json:"snapshot_ref_ttl_sec" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_REF_TTL_SEC"`
+	SnapshotMaxGenerations              int    `json:"snapshot_max_generations" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_GENERATIONS"`
+	SnapshotAllowFullTree               bool   `json:"snapshot_allow_full_tree" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_ALLOW_FULL_TREE"`
 }
 
 type MediaCleanupConfig struct {

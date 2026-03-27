@@ -4,42 +4,50 @@ import "time"
 
 // Config controls browser relay behavior.
 type Config struct {
-	Enabled                     bool
-	Host                        string
-	Port                        int
-	Token                       string
-	CompatOpenClaw              bool
-	MaxClients                  int
-	IdleTimeoutSec              int
-	AllowTokenQuery             bool
-	EngineMode                  string
-	AgentBrowserEnabled         bool
-	AgentBrowserBinary          string
-	AgentBrowserDefaultHeadless bool
-	AgentBrowserMaxSessions     int
-	AgentBrowserIdleTimeoutSec  int
-	SnapshotDefaultMode         string
-	SnapshotMaxPayloadBytes     int
-	SnapshotMaxNodes            int
-	SnapshotMaxTextChars        int
-	SnapshotMaxDepth            int
-	SnapshotInteractiveOnly     bool
-	SnapshotRefTTLSec           int
-	SnapshotMaxGenerations      int
-	SnapshotAllowFullTree       bool
+	Enabled                             bool
+	Host                                string
+	Port                                int
+	Token                               string
+	CompatOpenClaw                      bool
+	MaxClients                          int
+	IdleTimeoutSec                      int
+	AllowTokenQuery                     bool
+	EngineMode                          string
+	AgentBrowserEnabled                 bool
+	AgentBrowserBinary                  string
+	AgentBrowserDefaultHeadless         bool
+	AgentBrowserMaxSessions             int
+	AgentBrowserIdleTimeoutSec          int
+	AgentBrowserBatchWindowMS           int
+	AgentBrowserBatchMaxSteps           int
+	AgentBrowserStreamEnabled           bool
+	AgentBrowserStreamPort              int
+	AgentBrowserRuntimeCommandTimeoutMS int
+	SnapshotDefaultMode                 string
+	SnapshotMaxPayloadBytes             int
+	SnapshotMaxNodes                    int
+	SnapshotMaxTextChars                int
+	SnapshotMaxDepth                    int
+	SnapshotInteractiveOnly             bool
+	SnapshotRefTTLSec                   int
+	SnapshotMaxGenerations              int
+	SnapshotAllowFullTree               bool
 }
 
 // Target describes a browser tab/target known by the relay.
 type Target struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type,omitempty"`
-	Title     string    `json:"title,omitempty"`
-	URL       string    `json:"url,omitempty"`
-	Attached  bool      `json:"attached"`
-	OwnerID   string    `json:"owner_id,omitempty"`
-	LastSeen  time.Time `json:"last_seen"`
-	SessionID string    `json:"session_id,omitempty"`
-	Source    string    `json:"source,omitempty"`
+	ID            string    `json:"id"`
+	Type          string    `json:"type,omitempty"`
+	Title         string    `json:"title,omitempty"`
+	URL           string    `json:"url,omitempty"`
+	Attached      bool      `json:"attached"`
+	OwnerID       string    `json:"owner_id,omitempty"`
+	LastSeen      time.Time `json:"last_seen"`
+	SessionID     string    `json:"session_id,omitempty"`
+	Source        string    `json:"source,omitempty"`
+	StreamWSURL   string    `json:"stream_ws_url,omitempty"`
+	StreamPort    int       `json:"stream_port,omitempty"`
+	StreamEnabled bool      `json:"stream_enabled,omitempty"`
 }
 
 // Status summarizes current runtime state of the relay manager.
@@ -62,11 +70,14 @@ type JSONConn interface {
 
 // Session describes a dedicated automation browser session.
 type Session struct {
-	ID        string    `json:"id"`
-	TargetID  string    `json:"target_id"`
-	Source    string    `json:"source"`
-	CreatedAt time.Time `json:"created_at"`
-	LastSeen  time.Time `json:"last_seen"`
+	ID            string    `json:"id"`
+	TargetID      string    `json:"target_id"`
+	Source        string    `json:"source"`
+	CreatedAt     time.Time `json:"created_at"`
+	LastSeen      time.Time `json:"last_seen"`
+	StreamWSURL   string    `json:"stream_ws_url,omitempty"`
+	StreamPort    int       `json:"stream_port,omitempty"`
+	StreamEnabled bool      `json:"stream_enabled,omitempty"`
 }
 
 // ActionRequest captures browser-relay action payload fields.

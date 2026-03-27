@@ -358,6 +358,96 @@ func TestBrowserRelayBatchActionValidation(t *testing.T) {
 	}
 }
 
+func TestBrowserRelayActionV2ClickRequiresRefSelector(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.BrowserRelay.Token = "relay-token"
+	cfg.Tools.BrowserRelay.Host = "127.0.0.1"
+	if err = config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/browser-relay/actions",
+		strings.NewReader(`{"request_id":"req-click-ref","target":"ext:100","action":"click","args":{"selector":"#submit"}}`),
+	)
+	req.Header.Set("Authorization", "Bearer relay-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err = json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if payload["error_code"] != "snapshot_ref_required" {
+		t.Fatalf("error_code = %v, want snapshot_ref_required", payload["error_code"])
+	}
+	if payload["retry_class"] != "never" {
+		t.Fatalf("retry_class = %v, want never", payload["retry_class"])
+	}
+}
+
+func TestBrowserRelayActionV2BatchClickRequiresRefSelector(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.BrowserRelay.Token = "relay-token"
+	cfg.Tools.BrowserRelay.Host = "127.0.0.1"
+	if err = config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/browser-relay/actions",
+		strings.NewReader(`{"request_id":"req-batch-ref","target":"ext:100","action":"batch","steps":[{"action":"click","args":{"selector":"#submit"}}]}`),
+	)
+	req.Header.Set("Authorization", "Bearer relay-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err = json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if payload["error_code"] != "snapshot_ref_required" {
+		t.Fatalf("error_code = %v, want snapshot_ref_required", payload["error_code"])
+	}
+	if payload["retry_class"] != "never" {
+		t.Fatalf("retry_class = %v, want never", payload["retry_class"])
+	}
+}
+
 func TestBrowserRelayActionV2RequestIDIdempotencyConflict(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()

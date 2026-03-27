@@ -28,22 +28,26 @@ var (
 )
 
 const (
-	defaultMaxClients              = 16
-	defaultIdleTimeoutSec          = 60
-	defaultEngineMode              = EngineModeHybrid
-	defaultAgentBrowserBinary      = "agent-browser"
-	defaultAgentBrowserMaxSessions = 8
-	defaultAgentBrowserIdleTimeout = 300
-	defaultSnapshotMode            = "compact"
-	defaultSnapshotMaxPayloadBytes = 98304
-	defaultSnapshotMaxNodes        = 120
-	defaultSnapshotMaxTextChars    = 120
-	defaultSnapshotMaxDepth        = 6
-	defaultSnapshotRefTTLSec       = 600
-	defaultSnapshotMaxGenerations  = 4
-	defaultTargetQueueDepth        = 32
-	loopGuardFailureThreshold      = 3
-	loopGuardWindow                = 45 * time.Second
+	defaultMaxClients                   = 16
+	defaultIdleTimeoutSec               = 60
+	defaultEngineMode                   = EngineModeHybrid
+	defaultAgentBrowserBinary           = "agent-browser"
+	defaultAgentBrowserMaxSessions      = 8
+	defaultAgentBrowserIdleTimeout      = 300
+	defaultAgentBrowserBatchWindowMS    = 25
+	defaultAgentBrowserBatchMaxSteps    = 24
+	defaultAgentBrowserRuntimeTimeoutMS = 30000
+	defaultAgentBrowserQueueDepth       = 64
+	defaultSnapshotMode                 = "compact"
+	defaultSnapshotMaxPayloadBytes      = 98304
+	defaultSnapshotMaxNodes             = 120
+	defaultSnapshotMaxTextChars         = 120
+	defaultSnapshotMaxDepth             = 6
+	defaultSnapshotRefTTLSec            = 600
+	defaultSnapshotMaxGenerations       = 4
+	defaultTargetQueueDepth             = 32
+	loopGuardFailureThreshold           = 3
+	loopGuardWindow                     = 45 * time.Second
 )
 
 type extensionSession struct {
@@ -221,6 +225,11 @@ func normalizeConfig(cfg Config) Config {
 		cfg.SnapshotMaxDepth == 0 &&
 		cfg.SnapshotRefTTLSec == 0 &&
 		cfg.SnapshotMaxGenerations == 0
+	rawAgentBrowserRuntimeDefaultsUnset := cfg.AgentBrowserBatchWindowMS == 0 &&
+		cfg.AgentBrowserBatchMaxSteps == 0 &&
+		cfg.AgentBrowserRuntimeCommandTimeoutMS == 0 &&
+		cfg.AgentBrowserStreamPort == 0 &&
+		!cfg.AgentBrowserStreamEnabled
 
 	if cfg.MaxClients <= 0 {
 		cfg.MaxClients = defaultMaxClients
@@ -246,6 +255,21 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.AgentBrowserIdleTimeoutSec <= 0 {
 		cfg.AgentBrowserIdleTimeoutSec = defaultAgentBrowserIdleTimeout
+	}
+	if cfg.AgentBrowserBatchWindowMS <= 0 {
+		cfg.AgentBrowserBatchWindowMS = defaultAgentBrowserBatchWindowMS
+	}
+	if cfg.AgentBrowserBatchMaxSteps <= 0 {
+		cfg.AgentBrowserBatchMaxSteps = defaultAgentBrowserBatchMaxSteps
+	}
+	if cfg.AgentBrowserRuntimeCommandTimeoutMS <= 0 {
+		cfg.AgentBrowserRuntimeCommandTimeoutMS = defaultAgentBrowserRuntimeTimeoutMS
+	}
+	if cfg.AgentBrowserStreamPort < 0 {
+		cfg.AgentBrowserStreamPort = 0
+	}
+	if rawAgentBrowserRuntimeDefaultsUnset && !cfg.AgentBrowserStreamEnabled {
+		cfg.AgentBrowserStreamEnabled = true
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.SnapshotDefaultMode)) {
 	case "", "compact":

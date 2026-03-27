@@ -22,6 +22,18 @@ func TestNormalizeBrowserRelayConfigDefaultsEngineMode(t *testing.T) {
 	if got.AgentBrowserIdleTimeoutSec <= 0 {
 		t.Fatalf("AgentBrowserIdleTimeoutSec = %d, want > 0", got.AgentBrowserIdleTimeoutSec)
 	}
+	if got.AgentBrowserBatchWindowMS <= 0 {
+		t.Fatalf("AgentBrowserBatchWindowMS = %d, want > 0", got.AgentBrowserBatchWindowMS)
+	}
+	if got.AgentBrowserBatchMaxSteps <= 0 {
+		t.Fatalf("AgentBrowserBatchMaxSteps = %d, want > 0", got.AgentBrowserBatchMaxSteps)
+	}
+	if got.AgentBrowserRuntimeCommandTimeoutMS <= 0 {
+		t.Fatalf("AgentBrowserRuntimeCommandTimeoutMS = %d, want > 0", got.AgentBrowserRuntimeCommandTimeoutMS)
+	}
+	if !got.AgentBrowserStreamEnabled {
+		t.Fatal("AgentBrowserStreamEnabled default should be true")
+	}
 	if got.SnapshotDefaultMode != "compact" {
 		t.Fatalf("SnapshotDefaultMode = %q, want compact", got.SnapshotDefaultMode)
 	}
@@ -112,5 +124,48 @@ func TestClassifyRelayErrorSnapshotCodes(t *testing.T) {
 	modeUnsupported := classifyRelayError(browserrelay.ErrSnapshotModeUnsupported)
 	if modeUnsupported.Code != "snapshot_mode_unsupported" || modeUnsupported.RetryClass != retryClassNever {
 		t.Fatalf("modeUnsupported = %+v", modeUnsupported)
+	}
+
+	refRequired := classifyRelayError(browserrelay.ErrSnapshotRefRequired)
+	if refRequired.Code != "snapshot_ref_required" || refRequired.RetryClass != retryClassNever {
+		t.Fatalf("refRequired = %+v", refRequired)
+	}
+
+	progressBlocked := classifyRelayError(browserrelay.ErrSnapshotProgressBlocked)
+	if progressBlocked.Code != "snapshot_progress_blocked" || progressBlocked.RetryClass != retryClassNever {
+		t.Fatalf("progressBlocked = %+v", progressBlocked)
+	}
+
+	notEnabled := classifyRelayError(browserrelay.ErrActionabilityNotEnabled)
+	if notEnabled.Code != "actionability_not_enabled" || notEnabled.RetryClass != retryClassAfterStateChange {
+		t.Fatalf("notEnabled = %+v", notEnabled)
+	}
+
+	notReceiving := classifyRelayError(browserrelay.ErrActionabilityNotEvents)
+	if notReceiving.Code != "actionability_not_receiving_events" || notReceiving.RetryClass != retryClassAfterStateChange {
+		t.Fatalf("notReceiving = %+v", notReceiving)
+	}
+
+	timeout := classifyRelayError(browserrelay.ErrActionabilityTimeout)
+	if timeout.Code != "actionability_timeout" || timeout.RetryClass != retryClassAfterStateChange {
+		t.Fatalf("timeout = %+v", timeout)
+	}
+
+	runtimeDisconnected := classifyRelayError(browserrelay.ErrAgentBrowserRuntimeDisconnected)
+	if runtimeDisconnected.Code != "agent_browser_runtime_disconnected" ||
+		runtimeDisconnected.RetryClass != retryClassAfterStateChange {
+		t.Fatalf("runtimeDisconnected = %+v", runtimeDisconnected)
+	}
+
+	queueCanceled := classifyRelayError(browserrelay.ErrAgentBrowserQueueCanceled)
+	if queueCanceled.Code != "agent_browser_queue_canceled" ||
+		queueCanceled.RetryClass != retryClassAfterStateChange {
+		t.Fatalf("queueCanceled = %+v", queueCanceled)
+	}
+
+	batchFailed := classifyRelayError(browserrelay.ErrAgentBrowserBatchFailed)
+	if batchFailed.Code != "agent_browser_batch_failed" ||
+		batchFailed.RetryClass != retryClassAfterStateChange {
+		t.Fatalf("batchFailed = %+v", batchFailed)
 	}
 }

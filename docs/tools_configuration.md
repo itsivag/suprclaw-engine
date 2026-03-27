@@ -374,6 +374,11 @@ Browser relay supports hybrid execution:
 | `agent_browser_default_headless` | bool | true | Default headless mode for dedicated sessions |
 | `agent_browser_max_sessions` | int | 8 | Maximum dedicated sessions |
 | `agent_browser_idle_timeout_sec` | int | 300 | Idle eviction for dedicated sessions |
+| `agent_browser_batch_window_ms` | int | 25 | Queue coalescing window before batch flush |
+| `agent_browser_batch_max_steps` | int | 24 | Maximum commands per batch flush |
+| `agent_browser_stream_enabled` | bool | true | Enable runtime stream lifecycle on session create |
+| `agent_browser_stream_port` | int | 0 | Preferred stream port (`0` uses auto-assigned port) |
+| `agent_browser_runtime_command_timeout_ms` | int | 30000 | Command timeout for daemon calls |
 | `snapshot_default_mode` | string | `compact` | Default snapshot mode (`compact` or `full`) |
 | `snapshot_max_payload_bytes` | int | 98304 | Max snapshot payload returned to callers |
 | `snapshot_max_nodes` | int | 120 | Max nodes captured in compact snapshots |
@@ -400,6 +405,11 @@ Browser relay supports hybrid execution:
       "agent_browser_default_headless": true,
       "agent_browser_max_sessions": 8,
       "agent_browser_idle_timeout_sec": 300,
+      "agent_browser_batch_window_ms": 25,
+      "agent_browser_batch_max_steps": 24,
+      "agent_browser_stream_enabled": true,
+      "agent_browser_stream_port": 0,
+      "agent_browser_runtime_command_timeout_ms": 30000,
       "snapshot_default_mode": "compact",
       "snapshot_max_payload_bytes": 98304,
       "snapshot_max_nodes": 120,
@@ -427,6 +437,8 @@ For example:
 - `SUPRCLAW_TOOLS_SKILLS_GLOBAL_DIR=~/.suprclaw/skills`
 - `SUPRCLAW_TOOLS_BROWSER_RELAY_ENGINE_MODE=hybrid`
 - `SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BINARY=agent-browser`
+- `SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BATCH_WINDOW_MS=25`
+- `SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_STREAM_ENABLED=true`
 - `SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_DEFAULT_MODE=compact`
 - `SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_PAYLOAD_BYTES=98304`
 

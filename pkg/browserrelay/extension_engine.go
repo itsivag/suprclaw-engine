@@ -22,10 +22,16 @@ const (
 	defaultSnapshotRefTTL      = time.Duration(defaultSnapshotRefTTLSec) * time.Second
 	defaultSnapshotGenerations = defaultSnapshotMaxGenerations
 	networkIdleQuietWindow     = 750 * time.Millisecond
+	actionabilityStableChecks  = 2
 
 	snapshotModeCompact = "compact"
 	snapshotModeFull    = "full"
 )
+
+type snapshotProgressState struct {
+	InitialSnapshotTaken bool
+	AllowResnapshot      bool
+}
 
 type snapshotRef struct {
 	Ref      string
@@ -63,12 +69,28 @@ type snapshotPolicy struct {
 	AllowFullTree          bool
 }
 
+type actionabilityProbe struct {
+	Exists         bool
+	Visible        bool
+	Enabled        bool
+	Editable       bool
+	ReceivesEvents bool
+	X              float64
+	Y              float64
+	Left           float64
+	Top            float64
+	Width          float64
+	Height         float64
+	Reason         string
+}
+
 // ExtensionEngine executes browser actions through the extension relay manager.
 type ExtensionEngine struct {
 	manager *Manager
 
 	mu                sync.Mutex
 	snapshots         map[string][]snapshotGeneration
+	snapshotProgress  map[string]snapshotProgressState
 	generationCounter uint64
 
 	snapshotCompactTotal  uint64
@@ -79,8 +101,9 @@ type ExtensionEngine struct {
 
 func NewExtensionEngine(manager *Manager) *ExtensionEngine {
 	return &ExtensionEngine{
-		manager:   manager,
-		snapshots: make(map[string][]snapshotGeneration),
+		manager:          manager,
+		snapshots:        make(map[string][]snapshotGeneration),
+		snapshotProgress: make(map[string]snapshotProgressState),
 	}
 }
 
@@ -143,30 +166,59 @@ func (e *ExtensionEngine) executeActionInternal(
 		if err != nil {
 			return nil, err
 		}
+		e.clearSnapshotState(targetID)
+		e.markSnapshotResyncNeeded(targetID)
 		return decodeRawResult(raw), nil
 	case "click":
 		if targetID == "" || req.Selector == "" {
 			return nil, fmt.Errorf("target_id and selector are required")
 		}
+		if !isSnapshotSelectorRef(req.Selector) {
+			return nil, fmt.Errorf("%w: selector must be @eN", ErrSnapshotRefRequired)
+		}
 		selector, err := e.resolveSelectorRef(targetID, req.Selector, req.RefGeneration)
+		if err != nil {
+			if errors.Is(err, ErrSnapshotRefNotFound) {
+				e.markSnapshotResyncNeeded(targetID)
+			}
+			return nil, err
+		}
+		result, err := e.click(ctx, targetID, selector, req.TimeoutMS, req.IntervalMS)
 		if err != nil {
 			return nil, err
 		}
-		return e.click(ctx, targetID, selector)
+		e.markSnapshotResyncNeeded(targetID)
+		return result, nil
 	case "type":
 		if targetID == "" || req.Selector == "" {
 			return nil, fmt.Errorf("target_id and selector are required")
 		}
+		if !isSnapshotSelectorRef(req.Selector) {
+			return nil, fmt.Errorf("%w: selector must be @eN", ErrSnapshotRefRequired)
+		}
 		selector, err := e.resolveSelectorRef(targetID, req.Selector, req.RefGeneration)
+		if err != nil {
+			if errors.Is(err, ErrSnapshotRefNotFound) {
+				e.markSnapshotResyncNeeded(targetID)
+			}
+			return nil, err
+		}
+		result, err := e.typeText(ctx, targetID, selector, req.Text, req.TimeoutMS, req.IntervalMS)
 		if err != nil {
 			return nil, err
 		}
-		return e.typeText(ctx, targetID, selector, req.Text)
+		e.markSnapshotResyncNeeded(targetID)
+		return result, nil
 	case "press":
 		if targetID == "" || req.Key == "" {
 			return nil, fmt.Errorf("target_id and key are required")
 		}
-		return e.press(ctx, targetID, req.Key)
+		result, err := e.press(ctx, targetID, req.Key)
+		if err != nil {
+			return nil, err
+		}
+		e.markSnapshotResyncNeeded(targetID)
+		return result, nil
 	case "screenshot":
 		if targetID == "" {
 			return nil, fmt.Errorf("target_id is required")
@@ -282,6 +334,21 @@ func (e *ExtensionEngine) executeBatch(ctx context.Context, targetID string, req
 			}
 			continue
 		}
+		if (stepAction == "click" || stepAction == "type") && !isSnapshotSelectorRef(step.Selector) {
+			err := fmt.Errorf("%w: step[%d].selector must be @eN for action=%s", ErrSnapshotRefRequired, i, stepAction)
+			results = append(results, map[string]any{
+				"index":       i,
+				"action":      stepAction,
+				"ok":          false,
+				"error":       err.Error(),
+				"duration_ms": time.Since(stepStart).Milliseconds(),
+			})
+			failedCount++
+			if stopOnError {
+				break
+			}
+			continue
+		}
 
 		stepResult, err := e.executeActionInternal(ctx, stepAction, stepReq, false)
 		if err != nil {
@@ -322,41 +389,40 @@ func (e *ExtensionEngine) executeBatch(ctx context.Context, targetID string, req
 	}, nil
 }
 
-func (e *ExtensionEngine) click(ctx context.Context, targetID, selector string) (any, error) {
-	x, y, err := e.resolveElementCenter(ctx, targetID, selector)
+func (e *ExtensionEngine) click(
+	ctx context.Context,
+	targetID, selector string,
+	timeoutMS int,
+	intervalMS int,
+) (any, error) {
+	x, y, err := e.waitForActionable(ctx, targetID, selector, false, timeoutMS, intervalMS)
 	if err != nil {
 		return nil, err
 	}
 
-	if _, err = e.manager.SendCommand(ctx, targetID, "Input.dispatchMouseEvent", map[string]any{
-		"type":       "mousePressed",
-		"x":          x,
-		"y":          y,
-		"button":     "left",
-		"clickCount": 1,
-	}, true); err != nil {
-		return nil, err
-	}
-	if _, err = e.manager.SendCommand(ctx, targetID, "Input.dispatchMouseEvent", map[string]any{
-		"type":       "mouseReleased",
-		"x":          x,
-		"y":          y,
-		"button":     "left",
-		"clickCount": 1,
-	}, true); err != nil {
+	if err = e.dispatchClickAt(ctx, targetID, x, y); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true, "x": x, "y": y}, nil
 }
 
-func (e *ExtensionEngine) typeText(ctx context.Context, targetID, selector, text string) (any, error) {
-	if _, err := e.click(ctx, targetID, selector); err != nil {
+func (e *ExtensionEngine) typeText(
+	ctx context.Context,
+	targetID, selector, text string,
+	timeoutMS int,
+	intervalMS int,
+) (any, error) {
+	x, y, err := e.waitForActionable(ctx, targetID, selector, true, timeoutMS, intervalMS)
+	if err != nil {
+		return nil, err
+	}
+	if err = e.dispatchClickAt(ctx, targetID, x, y); err != nil {
 		return nil, err
 	}
 	if _, err := e.manager.SendCommand(ctx, targetID, "Input.insertText", map[string]any{"text": text}, true); err != nil {
 		return nil, err
 	}
-	return map[string]any{"ok": true}, nil
+	return map[string]any{"ok": true, "x": x, "y": y}, nil
 }
 
 func (e *ExtensionEngine) press(ctx context.Context, targetID, key string) (any, error) {
@@ -375,8 +441,37 @@ func (e *ExtensionEngine) press(ctx context.Context, targetID, key string) (any,
 	return map[string]any{"ok": true}, nil
 }
 
+func (e *ExtensionEngine) dispatchClickAt(ctx context.Context, targetID string, x, y float64) error {
+	if _, err := e.manager.SendCommand(ctx, targetID, "Input.dispatchMouseEvent", map[string]any{
+		"type":       "mousePressed",
+		"x":          x,
+		"y":          y,
+		"button":     "left",
+		"clickCount": 1,
+	}, true); err != nil {
+		return err
+	}
+	if _, err := e.manager.SendCommand(ctx, targetID, "Input.dispatchMouseEvent", map[string]any{
+		"type":       "mouseReleased",
+		"x":          x,
+		"y":          y,
+		"button":     "left",
+		"clickCount": 1,
+	}, true); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (e *ExtensionEngine) snapshot(ctx context.Context, targetID string, req ActionRequest) (any, error) {
 	start := time.Now()
+	if err := e.ensureSnapshotProgressAllowed(targetID); err != nil {
+		logger.WarnCF("browser-relay", "snapshot progression blocked", map[string]any{
+			"target": normalizeExtensionTargetID(targetID),
+			"error":  err.Error(),
+		})
+		return nil, err
+	}
 	policy := e.snapshotPolicy()
 	mode, err := normalizeSnapshotMode(req.SnapshotMode, policy.DefaultMode)
 	if err != nil {
@@ -438,6 +533,7 @@ func (e *ExtensionEngine) snapshot(ctx context.Context, targetID string, req Act
 		atomic.AddUint64(&e.snapshotTruncateTotal, 1)
 	}
 	stats["output_bytes"] = outputBytes
+	e.recordSnapshotTaken(targetID)
 
 	logger.DebugCF("browser-relay", "snapshot generated", map[string]any{
 		"mode":         mode,
@@ -538,6 +634,46 @@ func clampBoundedInt(value, fallback, minValue, maxValue int) int {
 		return maxValue
 	}
 	return value
+}
+
+func isSnapshotSelectorRef(selector string) bool {
+	selector = strings.TrimSpace(selector)
+	return parseSnapshotRefIndex(selector) > 0
+}
+
+func (e *ExtensionEngine) ensureSnapshotProgressAllowed(targetID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state := e.snapshotProgress[targetID]
+	if !state.InitialSnapshotTaken || state.AllowResnapshot {
+		return nil
+	}
+	return fmt.Errorf("%w: target=%s", ErrSnapshotProgressBlocked, targetID)
+}
+
+func (e *ExtensionEngine) recordSnapshotTaken(targetID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state := e.snapshotProgress[targetID]
+	state.InitialSnapshotTaken = true
+	state.AllowResnapshot = false
+	e.snapshotProgress[targetID] = state
+}
+
+func (e *ExtensionEngine) markSnapshotResyncNeeded(targetID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state := e.snapshotProgress[targetID]
+	if state.InitialSnapshotTaken {
+		state.AllowResnapshot = true
+	}
+	e.snapshotProgress[targetID] = state
+}
+
+func (e *ExtensionEngine) clearSnapshotState(targetID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.snapshots, targetID)
 }
 
 func (e *ExtensionEngine) captureCompactSnapshot(
@@ -951,6 +1087,189 @@ func (e *ExtensionEngine) resolveSelectorRef(targetID, selector, generation stri
 	return entry.Selector, nil
 }
 
+func (e *ExtensionEngine) waitForActionable(
+	ctx context.Context,
+	targetID string,
+	selector string,
+	requireEditable bool,
+	timeoutMS int,
+	intervalMS int,
+) (float64, float64, error) {
+	timeoutMS, intervalMS = normalizeWaitDurations(timeoutMS, intervalMS)
+	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
+	stableCount := 0
+	lastRect := ""
+	lastReason := "timeout"
+
+	for {
+		if time.Now().After(deadline) {
+			break
+		}
+		probe, err := e.evaluateActionability(ctx, targetID, selector, requireEditable)
+		if err != nil {
+			return 0, 0, err
+		}
+		lastReason = strings.TrimSpace(probe.Reason)
+		if lastReason == "" {
+			lastReason = "timeout"
+		}
+
+		if probe.Exists && probe.Visible && probe.Enabled && probe.Editable && probe.ReceivesEvents {
+			rectKey := fmt.Sprintf("%.2f|%.2f|%.2f|%.2f", probe.Left, probe.Top, probe.Width, probe.Height)
+			if rectKey == lastRect {
+				stableCount++
+			} else {
+				lastRect = rectKey
+				stableCount = 1
+			}
+			if stableCount >= actionabilityStableChecks {
+				logger.DebugCF("browser-relay", "actionability resolved", map[string]any{
+					"target":            normalizeExtensionTargetID(targetID),
+					"selector":          selector,
+					"requires_editable": requireEditable,
+					"x":                 probe.X,
+					"y":                 probe.Y,
+				})
+				return probe.X, probe.Y, nil
+			}
+		} else {
+			stableCount = 0
+			lastRect = ""
+		}
+
+		select {
+		case <-ctx.Done():
+			return 0, 0, ErrRequestCanceled
+		case <-time.After(time.Duration(intervalMS) * time.Millisecond):
+		}
+	}
+
+	logger.WarnCF("browser-relay", "actionability timeout", map[string]any{
+		"target":            normalizeExtensionTargetID(targetID),
+		"selector":          selector,
+		"requires_editable": requireEditable,
+		"reason":            lastReason,
+		"timeout_ms":        timeoutMS,
+	})
+
+	switch lastReason {
+	case "not_enabled", "not_editable":
+		return 0, 0, fmt.Errorf("%w: selector=%s reason=%s", ErrActionabilityNotEnabled, selector, lastReason)
+	case "not_receiving_events":
+		return 0, 0, fmt.Errorf("%w: selector=%s", ErrActionabilityNotEvents, selector)
+	default:
+		return 0, 0, fmt.Errorf("%w: selector=%s reason=%s", ErrActionabilityTimeout, selector, lastReason)
+	}
+}
+
+func (e *ExtensionEngine) evaluateActionability(
+	ctx context.Context,
+	targetID string,
+	selector string,
+	requireEditable bool,
+) (actionabilityProbe, error) {
+	expr := fmt.Sprintf(`(() => {
+		const sel = %s;
+		const requireEditable = %t;
+		const el = document.querySelector(sel);
+		if (!el) {
+			return { exists: false, reason: "not_found" };
+		}
+		if (typeof el.scrollIntoView === "function") {
+			try { el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); } catch (_) {}
+		}
+
+		const style = window.getComputedStyle(el);
+		const rect = el.getBoundingClientRect();
+		const visible = !!style &&
+			style.display !== "none" &&
+			style.visibility !== "hidden" &&
+			rect.width > 0 &&
+			rect.height > 0;
+
+		const ariaDisabled = (el.getAttribute("aria-disabled") || "").toLowerCase() === "true";
+		const fieldsetDisabled = !!(el.closest && el.closest("fieldset[disabled]"));
+		const nativeDisabled = !!el.disabled;
+		const enabled = !(ariaDisabled || fieldsetDisabled || nativeDisabled);
+
+		const tag = (el.tagName || "").toLowerCase();
+		const ariaReadOnly = (el.getAttribute("aria-readonly") || "").toLowerCase() === "true";
+		const readOnly = !!el.readOnly || el.hasAttribute("readonly") || ariaReadOnly;
+		const canEditTag = tag === "input" || tag === "textarea" || tag === "select" || !!el.isContentEditable;
+		const editable = !requireEditable || (canEditTag && !readOnly && enabled);
+
+		const x = Math.max(0, Math.min(window.innerWidth - 1, rect.left + (rect.width / 2)));
+		const y = Math.max(0, Math.min(window.innerHeight - 1, rect.top + (rect.height / 2)));
+		const hit = document.elementFromPoint(x, y);
+		const receivesEvents = !!hit && (hit === el || el.contains(hit));
+
+		let reason = "ok";
+		if (!visible) reason = "not_visible";
+		else if (!enabled) reason = "not_enabled";
+		else if (!editable) reason = "not_editable";
+		else if (!receivesEvents) reason = "not_receiving_events";
+
+		return {
+			exists: true,
+			visible,
+			enabled,
+			editable,
+			receives_events: receivesEvents,
+			x,
+			y,
+			left: rect.left,
+			top: rect.top,
+			width: rect.width,
+			height: rect.height,
+			reason,
+		};
+	})()`, strconv.Quote(selector), requireEditable)
+
+	raw, err := e.manager.SendCommand(ctx, targetID, "Runtime.evaluate", map[string]any{
+		"expression":    expr,
+		"returnByValue": true,
+		"awaitPromise":  true,
+	}, true)
+	if err != nil {
+		return actionabilityProbe{}, err
+	}
+	value, parseErr := runtimeEvaluateValue(raw)
+	if parseErr != nil {
+		return actionabilityProbe{}, parseErr
+	}
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return actionabilityProbe{}, fmt.Errorf("actionability evaluate expected object")
+	}
+	probe := actionabilityProbe{
+		Exists:         anyBool(obj["exists"]),
+		Visible:        anyBool(obj["visible"]),
+		Enabled:        anyBool(obj["enabled"]),
+		Editable:       anyBool(obj["editable"]),
+		ReceivesEvents: anyBool(obj["receives_events"]),
+		Reason:         strings.TrimSpace(anyToString(obj["reason"])),
+	}
+	if x, okX := toFloat(obj["x"]); okX {
+		probe.X = x
+	}
+	if y, okY := toFloat(obj["y"]); okY {
+		probe.Y = y
+	}
+	if left, okLeft := toFloat(obj["left"]); okLeft {
+		probe.Left = left
+	}
+	if top, okTop := toFloat(obj["top"]); okTop {
+		probe.Top = top
+	}
+	if width, okWidth := toFloat(obj["width"]); okWidth {
+		probe.Width = width
+	}
+	if height, okHeight := toFloat(obj["height"]); okHeight {
+		probe.Height = height
+	}
+	return probe, nil
+}
+
 func (e *ExtensionEngine) waitExpression(
 	ctx context.Context,
 	targetID string,
@@ -1258,6 +1577,19 @@ func anyToString(v any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+func anyBool(v any) bool {
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		switch strings.ToLower(strings.TrimSpace(b)) {
+		case "1", "true", "yes", "on":
+			return true
+		}
+	}
+	return false
 }
 
 func eventStringField(raw json.RawMessage, key string) string {
