@@ -20,9 +20,9 @@ const (
 
 // BrowserRelayV2Options contains request wiring for Browser Relay V2 tools.
 type BrowserRelayV2Options struct {
-	ActionsURL string
-	Headers    map[string]string
-	Timeout    time.Duration
+	EndpointURL string
+	Headers     map[string]string
+	Timeout     time.Duration
 }
 
 // NewBrowserRelayV2Tools registers strict Browser Relay V2 tools only.
@@ -34,17 +34,17 @@ func NewBrowserRelayV2Tools(cfg *config.Config) []Tool {
 	client := &http.Client{Timeout: opts.Timeout}
 	return []Tool{
 		&browserRelayV2TargetsListTool{
-			actionsURL: opts.ActionsURL,
+			endpointURL: opts.EndpointURL,
 			headers:    cloneStringMap(opts.Headers),
 			client:     client,
 		},
 		&browserRelayV2ActionTool{
-			actionsURL: opts.ActionsURL,
+			endpointURL: opts.EndpointURL,
 			headers:    cloneStringMap(opts.Headers),
 			client:     client,
 		},
 		&browserRelayV2BatchTool{
-			actionsURL: opts.ActionsURL,
+			endpointURL: opts.EndpointURL,
 			headers:    cloneStringMap(opts.Headers),
 			client:     client,
 		},
@@ -62,8 +62,8 @@ func ResolveBrowserRelayV2Options(cfg *config.Config) (BrowserRelayV2Options, bo
 	if !ok || strings.TrimSpace(server.URL) == "" {
 		return BrowserRelayV2Options{}, false
 	}
-	actionsURL := deriveBrowserRelayV2ActionsURL(server.URL)
-	if actionsURL == "" {
+	endpointURL := normalizeBrowserRelayV2EndpointURL(server.URL)
+	if endpointURL == "" {
 		return BrowserRelayV2Options{}, false
 	}
 	headers := map[string]string{
@@ -78,13 +78,13 @@ func ResolveBrowserRelayV2Options(cfg *config.Config) (BrowserRelayV2Options, bo
 		headers[key] = val
 	}
 	return BrowserRelayV2Options{
-		ActionsURL: actionsURL,
-		Headers:    headers,
-		Timeout:    defaultBrowserRelayV2Timeout,
+		EndpointURL: endpointURL,
+		Headers:     headers,
+		Timeout:     defaultBrowserRelayV2Timeout,
 	}, true
 }
 
-func deriveBrowserRelayV2ActionsURL(raw string) string {
+func normalizeBrowserRelayV2EndpointURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
@@ -95,11 +95,12 @@ func deriveBrowserRelayV2ActionsURL(raw string) string {
 	}
 	u.RawQuery = ""
 	u.Fragment = ""
-	switch strings.TrimRight(u.Path, "/") {
+	path := strings.TrimRight(u.Path, "/")
+	switch path {
 	case "/api/mcp/browser-relay":
-		u.Path = "/api/browser-relay/actions"
+		u.Path = path
 	case "/api/browser-relay/actions":
-		// already actions endpoint
+		u.Path = path
 	default:
 		// unsupported path for hard migrate mode
 		return ""
@@ -108,9 +109,9 @@ func deriveBrowserRelayV2ActionsURL(raw string) string {
 }
 
 type browserRelayV2TargetsListTool struct {
-	actionsURL string
-	headers    map[string]string
-	client     *http.Client
+	endpointURL string
+	headers     map[string]string
+	client      *http.Client
 }
 
 func (t *browserRelayV2TargetsListTool) Name() string {
@@ -138,7 +139,7 @@ func (t *browserRelayV2TargetsListTool) Execute(ctx context.Context, args map[st
 		"action":     "tabs.list",
 		"args":       map[string]any{},
 	}
-	res, err := callBrowserRelayV2(ctx, t.client, t.actionsURL, t.headers, payload)
+	res, err := callBrowserRelayV2(ctx, t.client, t.endpointURL, t.headers, "browser_relay_v2_targets_list", payload)
 	if err != nil {
 		return ErrorResult(err.Error()).WithError(err)
 	}
@@ -146,9 +147,9 @@ func (t *browserRelayV2TargetsListTool) Execute(ctx context.Context, args map[st
 }
 
 type browserRelayV2ActionTool struct {
-	actionsURL string
-	headers    map[string]string
-	client     *http.Client
+	endpointURL string
+	headers     map[string]string
+	client      *http.Client
 }
 
 func (t *browserRelayV2ActionTool) Name() string {
@@ -194,7 +195,7 @@ func (t *browserRelayV2ActionTool) Execute(ctx context.Context, args map[string]
 	if policy, ok := asObject(args["execution_policy"]); ok {
 		payload["execution_policy"] = policy
 	}
-	res, err := callBrowserRelayV2(ctx, t.client, t.actionsURL, t.headers, payload)
+	res, err := callBrowserRelayV2(ctx, t.client, t.endpointURL, t.headers, "browser_relay_v2_action", payload)
 	if err != nil {
 		return ErrorResult(err.Error()).WithError(err)
 	}
@@ -202,9 +203,9 @@ func (t *browserRelayV2ActionTool) Execute(ctx context.Context, args map[string]
 }
 
 type browserRelayV2BatchTool struct {
-	actionsURL string
-	headers    map[string]string
-	client     *http.Client
+	endpointURL string
+	headers     map[string]string
+	client      *http.Client
 }
 
 func (t *browserRelayV2BatchTool) Name() string {
@@ -259,7 +260,7 @@ func (t *browserRelayV2BatchTool) Execute(ctx context.Context, args map[string]a
 	if policy, ok := asObject(args["execution_policy"]); ok {
 		payload["execution_policy"] = policy
 	}
-	res, err := callBrowserRelayV2(ctx, t.client, t.actionsURL, t.headers, payload)
+	res, err := callBrowserRelayV2(ctx, t.client, t.endpointURL, t.headers, "browser_relay_v2_batch", payload)
 	if err != nil {
 		return ErrorResult(err.Error()).WithError(err)
 	}
@@ -279,13 +280,36 @@ func requestIDFromArgs(args map[string]any) string {
 func callBrowserRelayV2(
 	ctx context.Context,
 	client *http.Client,
+	endpointURL string,
+	headers map[string]string,
+	toolName string,
+	payload map[string]any,
+) (string, error) {
+	if strings.TrimSpace(endpointURL) == "" {
+		return "", fmt.Errorf("browser relay v2 is not configured")
+	}
+	parsedURL, err := url.Parse(endpointURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid browser relay v2 endpoint: %w", err)
+	}
+	path := strings.TrimRight(parsedURL.Path, "/")
+	switch path {
+	case "/api/mcp/browser-relay":
+		return callBrowserRelayV2ViaMCP(ctx, client, endpointURL, headers, toolName, payload)
+	case "/api/browser-relay/actions":
+		return callBrowserRelayV2ViaActions(ctx, client, endpointURL, headers, payload)
+	default:
+		return "", fmt.Errorf("unsupported browser relay v2 endpoint path: %s", parsedURL.Path)
+	}
+}
+
+func callBrowserRelayV2ViaActions(
+	ctx context.Context,
+	client *http.Client,
 	actionsURL string,
 	headers map[string]string,
 	payload map[string]any,
 ) (string, error) {
-	if strings.TrimSpace(actionsURL) == "" {
-		return "", fmt.Errorf("browser relay v2 is not configured")
-	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -340,6 +364,96 @@ func callBrowserRelayV2(
 		return string(data), nil
 	}
 	return string(envelope.Result), nil
+}
+
+func callBrowserRelayV2ViaMCP(
+	ctx context.Context,
+	client *http.Client,
+	mcpURL string,
+	headers map[string]string,
+	toolName string,
+	payload map[string]any,
+) (string, error) {
+	if strings.TrimSpace(toolName) == "" {
+		return "", fmt.Errorf("tool name is required for browser relay mcp call")
+	}
+	id := requestIDFromArgs(payload)
+	reqPayload := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      toolName,
+			"arguments": payload,
+		},
+	}
+	body, err := json.Marshal(reqPayload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, mcpURL, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("browser relay v2 mcp request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		return "", fmt.Errorf("browser relay v2 mcp HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+
+	var envelope struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Result struct {
+			IsError bool            `json:"isError"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+			StructuredContent json.RawMessage `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return "", fmt.Errorf("invalid browser relay v2 mcp response: %w", err)
+	}
+	if envelope.Error != nil {
+		return "", fmt.Errorf(
+			"browser relay v2 mcp error (%d): %s",
+			envelope.Error.Code,
+			strings.TrimSpace(envelope.Error.Message),
+		)
+	}
+	if envelope.Result.IsError {
+		if len(envelope.Result.StructuredContent) > 0 && string(envelope.Result.StructuredContent) != "null" {
+			return "", fmt.Errorf("browser relay v2 mcp tool error: %s", strings.TrimSpace(string(envelope.Result.StructuredContent)))
+		}
+		if len(envelope.Result.Content) > 0 {
+			return "", fmt.Errorf("browser relay v2 mcp tool error: %s", strings.TrimSpace(envelope.Result.Content[0].Text))
+		}
+		return "", fmt.Errorf("browser relay v2 mcp tool error")
+	}
+	if len(envelope.Result.StructuredContent) > 0 && string(envelope.Result.StructuredContent) != "null" {
+		return string(envelope.Result.StructuredContent), nil
+	}
+	if len(envelope.Result.Content) > 0 {
+		return strings.TrimSpace(envelope.Result.Content[0].Text), nil
+	}
+	return string(data), nil
 }
 
 func asString(v any) string {
