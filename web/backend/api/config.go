@@ -214,6 +214,19 @@ func validateConfig(cfg *config.Config) []string {
 				"tools.browser_relay.port %d is out of valid range (1-65535)",
 				cfg.Tools.BrowserRelay.Port))
 		}
+		switch strings.ToLower(strings.TrimSpace(cfg.Tools.BrowserRelay.EngineMode)) {
+		case "", "hybrid", "extension_only", "agent_browser_only":
+		default:
+			errs = append(errs, fmt.Sprintf(
+				"tools.browser_relay.engine_mode %q is invalid (allowed: hybrid, extension_only, agent_browser_only)",
+				cfg.Tools.BrowserRelay.EngineMode))
+		}
+		if cfg.Tools.BrowserRelay.AgentBrowserMaxSessions < 0 {
+			errs = append(errs, "tools.browser_relay.agent_browser_max_sessions must be >= 0")
+		}
+		if cfg.Tools.BrowserRelay.AgentBrowserIdleTimeoutSec < 0 {
+			errs = append(errs, "tools.browser_relay.agent_browser_idle_timeout_sec must be >= 0")
+		}
 	}
 
 	return errs

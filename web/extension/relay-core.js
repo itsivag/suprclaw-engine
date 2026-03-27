@@ -38,7 +38,8 @@ export function buildTargets(tabs, attachedMap) {
       type: "page",
       title: tab.title || "",
       url: tab.url || "",
-      attached: Boolean(attachedMap[String(tab.id)])
+      attached: Boolean(attachedMap[String(tab.id)]),
+      source: "extension"
     }));
 }
 

@@ -10,17 +10,19 @@ import (
 
 // Handler serves HTTP API requests.
 type Handler struct {
-	configPath           string
-	serverPort           int
-	serverPublic         bool
-	serverPublicExplicit bool
-	serverCIDRs          []string
-	oauthMu              sync.Mutex
-	oauthFlows           map[string]*oauthFlow
-	oauthState           map[string]string
-	browserRelayMu       sync.Mutex
-	browserRelay         *browserrelay.Manager
-	browserRelayStateMu  sync.Mutex
+	configPath               string
+	serverPort               int
+	serverPublic             bool
+	serverPublicExplicit     bool
+	serverCIDRs              []string
+	oauthMu                  sync.Mutex
+	oauthFlows               map[string]*oauthFlow
+	oauthState               map[string]string
+	browserRelayMu           sync.Mutex
+	browserRelay             *browserrelay.Manager
+	browserRelayActionRouter *browserrelay.EngineRouter
+	browserRelayAgent        *browserrelay.AgentBrowserEngine
+	browserRelayStateMu      sync.Mutex
 }
 
 // NewHandler creates an instance of the API handler.
@@ -83,4 +85,9 @@ func (h *Handler) Shutdown() {
 		h.browserRelay.Close()
 		h.browserRelay = nil
 	}
+	if h.browserRelayAgent != nil {
+		h.browserRelayAgent.Close()
+		h.browserRelayAgent = nil
+	}
+	h.browserRelayActionRouter = nil
 }

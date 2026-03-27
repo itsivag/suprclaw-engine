@@ -21,6 +21,9 @@ SuprClaw's tools configuration is located in the `tools` field of `config.json`.
     },
     "skills": {
       ...
+    },
+    "browser_relay": {
+      ...
     }
   }
 }
@@ -334,6 +337,48 @@ The skills tool configures skill discovery and installation via registries like 
 }
 ```
 
+## Browser Relay Tool
+
+Browser relay supports hybrid execution:
+- `extension` path for active user tab control (paired extension debugger attach).
+- `agent-browser` path for dedicated automation sessions.
+
+### General
+
+| Config | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | false | Enable browser relay APIs and WS routes |
+| `host` | string | `127.0.0.1` | Relay host (must be loopback for this milestone) |
+| `port` | int | `18792` | Relay port |
+| `token` | string | `""` | Relay auth token |
+| `engine_mode` | string | `hybrid` | `hybrid`, `extension_only`, or `agent_browser_only` |
+| `agent_browser_enabled` | bool | true | Enable dedicated session execution via `agent-browser` |
+| `agent_browser_binary` | string | `agent-browser` | Binary name or absolute path |
+| `agent_browser_default_headless` | bool | true | Default headless mode for dedicated sessions |
+| `agent_browser_max_sessions` | int | 8 | Maximum dedicated sessions |
+| `agent_browser_idle_timeout_sec` | int | 300 | Idle eviction for dedicated sessions |
+
+### Configuration Example
+
+```json
+{
+  "tools": {
+    "browser_relay": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 18792,
+      "token": "replace-me",
+      "engine_mode": "hybrid",
+      "agent_browser_enabled": true,
+      "agent_browser_binary": "agent-browser",
+      "agent_browser_default_headless": true,
+      "agent_browser_max_sessions": 8,
+      "agent_browser_idle_timeout_sec": 300
+    }
+  }
+}
+```
+
 ## Environment Variables
 
 All configuration options can be overridden via environment variables with the format `SUPRCLAW_TOOLS_<SECTION>_<KEY>`:
@@ -345,6 +390,8 @@ For example:
 - `SUPRCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES=10`
 - `SUPRCLAW_TOOLS_MCP_ENABLED=true`
 - `SUPRCLAW_TOOLS_SKILLS_GLOBAL_DIR=~/.suprclaw/skills`
+- `SUPRCLAW_TOOLS_BROWSER_RELAY_ENGINE_MODE=hybrid`
+- `SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BINARY=agent-browser`
 
 Note: Nested map-style config (for example `tools.mcp.servers.<name>.*`) is configured in `config.json` rather than
 environment variables.

@@ -406,7 +406,13 @@
       "compat_openclaw": true,
       "max_clients": 16,
       "idle_timeout_sec": 60,
-      "allow_token_query": false
+      "allow_token_query": false,
+      "engine_mode": "hybrid",
+      "agent_browser_enabled": true,
+      "agent_browser_binary": "agent-browser",
+      "agent_browser_default_headless": true,
+      "agent_browser_max_sessions": 8,
+      "agent_browser_idle_timeout_sec": 300
     },
     "media_cleanup": {
       "enabled": true,

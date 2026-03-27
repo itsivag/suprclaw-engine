@@ -289,3 +289,34 @@ func TestBrowserRelayPairClaimAndHardStopWithSessionToken(t *testing.T) {
 		t.Fatalf("targets-after-stop status = %d, want %d, body=%s", targetsRec2.Code, http.StatusUnauthorized, targetsRec2.Body.String())
 	}
 }
+
+func TestBrowserRelaySessionActionsReturnServiceUnavailableWhenAgentBrowserDisabled(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.BrowserRelay.Token = "relay-token"
+	cfg.Tools.BrowserRelay.Host = "127.0.0.1"
+	cfg.Tools.BrowserRelay.EngineMode = "hybrid"
+	cfg.Tools.BrowserRelay.AgentBrowserEnabled = false
+	if err = config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/browser-relay/actions/session.list", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer relay-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+}

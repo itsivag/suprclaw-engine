@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,8 +24,12 @@ var (
 )
 
 const (
-	defaultMaxClients     = 16
-	defaultIdleTimeoutSec = 60
+	defaultMaxClients              = 16
+	defaultIdleTimeoutSec          = 60
+	defaultEngineMode              = EngineModeHybrid
+	defaultAgentBrowserBinary      = "agent-browser"
+	defaultAgentBrowserMaxSessions = 8
+	defaultAgentBrowserIdleTimeout = 300
 )
 
 type extensionSession struct {
@@ -150,6 +155,25 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.IdleTimeoutSec <= 0 {
 		cfg.IdleTimeoutSec = defaultIdleTimeoutSec
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.EngineMode)) {
+	case "", EngineModeHybrid:
+		cfg.EngineMode = EngineModeHybrid
+	case EngineModeExtension:
+		cfg.EngineMode = EngineModeExtension
+	case EngineModeAgentBrowser:
+		cfg.EngineMode = EngineModeAgentBrowser
+	default:
+		cfg.EngineMode = defaultEngineMode
+	}
+	if strings.TrimSpace(cfg.AgentBrowserBinary) == "" {
+		cfg.AgentBrowserBinary = defaultAgentBrowserBinary
+	}
+	if cfg.AgentBrowserMaxSessions <= 0 {
+		cfg.AgentBrowserMaxSessions = defaultAgentBrowserMaxSessions
+	}
+	if cfg.AgentBrowserIdleTimeoutSec <= 0 {
+		cfg.AgentBrowserIdleTimeoutSec = defaultAgentBrowserIdleTimeout
 	}
 	return cfg
 }
