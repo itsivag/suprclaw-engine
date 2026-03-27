@@ -412,7 +412,16 @@
       "agent_browser_binary": "agent-browser",
       "agent_browser_default_headless": true,
       "agent_browser_max_sessions": 8,
-      "agent_browser_idle_timeout_sec": 300
+      "agent_browser_idle_timeout_sec": 300,
+      "snapshot_default_mode": "compact",
+      "snapshot_max_payload_bytes": 98304,
+      "snapshot_max_nodes": 120,
+      "snapshot_max_text_chars": 120,
+      "snapshot_max_depth": 6,
+      "snapshot_interactive_only_default": true,
+      "snapshot_ref_ttl_sec": 600,
+      "snapshot_max_generations": 4,
+      "snapshot_allow_full_tree": true
     },
     "media_cleanup": {
       "enabled": true,

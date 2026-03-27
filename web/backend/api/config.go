@@ -227,6 +227,31 @@ func validateConfig(cfg *config.Config) []string {
 		if cfg.Tools.BrowserRelay.AgentBrowserIdleTimeoutSec < 0 {
 			errs = append(errs, "tools.browser_relay.agent_browser_idle_timeout_sec must be >= 0")
 		}
+		switch strings.ToLower(strings.TrimSpace(cfg.Tools.BrowserRelay.SnapshotDefaultMode)) {
+		case "", "compact", "full":
+		default:
+			errs = append(errs, fmt.Sprintf(
+				"tools.browser_relay.snapshot_default_mode %q is invalid (allowed: compact, full)",
+				cfg.Tools.BrowserRelay.SnapshotDefaultMode))
+		}
+		if cfg.Tools.BrowserRelay.SnapshotMaxPayloadBytes < 0 {
+			errs = append(errs, "tools.browser_relay.snapshot_max_payload_bytes must be >= 0")
+		}
+		if cfg.Tools.BrowserRelay.SnapshotMaxNodes < 0 {
+			errs = append(errs, "tools.browser_relay.snapshot_max_nodes must be >= 0")
+		}
+		if cfg.Tools.BrowserRelay.SnapshotMaxTextChars < 0 {
+			errs = append(errs, "tools.browser_relay.snapshot_max_text_chars must be >= 0")
+		}
+		if cfg.Tools.BrowserRelay.SnapshotMaxDepth < 0 {
+			errs = append(errs, "tools.browser_relay.snapshot_max_depth must be >= 0")
+		}
+		if cfg.Tools.BrowserRelay.SnapshotRefTTLSec < 0 {
+			errs = append(errs, "tools.browser_relay.snapshot_ref_ttl_sec must be >= 0")
+		}
+		if cfg.Tools.BrowserRelay.SnapshotMaxGenerations < 0 {
+			errs = append(errs, "tools.browser_relay.snapshot_max_generations must be >= 0")
+		}
 	}
 
 	return errs

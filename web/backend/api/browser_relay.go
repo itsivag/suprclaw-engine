@@ -69,18 +69,27 @@ func (h *Handler) handleBrowserRelayStatus(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":                status,
-		"enabled":               relayCfg.Enabled,
-		"host":                  relayCfg.Host,
-		"port":                  relayCfg.Port,
-		"compat_openclaw":       relayCfg.CompatOpenClaw,
-		"allow_token_query":     relayCfg.AllowTokenQuery,
-		"engine_mode":           relayCfg.EngineMode,
-		"agent_browser_enabled": relayCfg.AgentBrowserEnabled,
-		"agent_browser_binary":  relayCfg.AgentBrowserBinary,
-		"extension_ws_url":      h.browserRelayExtensionURL(r, relayCfg),
-		"cdp_ws_url_template":   h.browserRelayCDPTemplateURL(r, relayCfg),
-		"configured_relay_port": relayCfg.Port,
+		"status":                            status,
+		"enabled":                           relayCfg.Enabled,
+		"host":                              relayCfg.Host,
+		"port":                              relayCfg.Port,
+		"compat_openclaw":                   relayCfg.CompatOpenClaw,
+		"allow_token_query":                 relayCfg.AllowTokenQuery,
+		"engine_mode":                       relayCfg.EngineMode,
+		"agent_browser_enabled":             relayCfg.AgentBrowserEnabled,
+		"agent_browser_binary":              relayCfg.AgentBrowserBinary,
+		"snapshot_default_mode":             relayCfg.SnapshotDefaultMode,
+		"snapshot_max_payload_bytes":        relayCfg.SnapshotMaxPayloadBytes,
+		"snapshot_max_nodes":                relayCfg.SnapshotMaxNodes,
+		"snapshot_max_text_chars":           relayCfg.SnapshotMaxTextChars,
+		"snapshot_max_depth":                relayCfg.SnapshotMaxDepth,
+		"snapshot_interactive_only_default": relayCfg.SnapshotInteractiveOnly,
+		"snapshot_ref_ttl_sec":              relayCfg.SnapshotRefTTLSec,
+		"snapshot_max_generations":          relayCfg.SnapshotMaxGenerations,
+		"snapshot_allow_full_tree":          relayCfg.SnapshotAllowFullTree,
+		"extension_ws_url":                  h.browserRelayExtensionURL(r, relayCfg),
+		"cdp_ws_url_template":               h.browserRelayCDPTemplateURL(r, relayCfg),
+		"configured_relay_port":             relayCfg.Port,
 	})
 }
 
@@ -428,17 +437,23 @@ func (h *Handler) validateAndConvertRelayActionV2(req relayActionV2Request) (str
 				return "", browserrelay.ActionRequest{}, fmt.Errorf("steps[%d].action is required", i)
 			}
 			bs := browserrelay.BatchStep{
-				Action:        a,
-				TargetID:      target,
-				URL:           argString(step.Args, "url"),
-				Selector:      argString(step.Args, "selector"),
-				Text:          argString(step.Args, "text"),
-				Key:           argString(step.Args, "key"),
-				Expression:    argString(step.Args, "expression"),
-				WaitMode:      argString(step.Args, "wait_mode"),
-				RefGeneration: argString(step.Args, "ref_generation"),
-				TimeoutMS:     argInt(step.Args, "timeout_ms"),
-				IntervalMS:    argInt(step.Args, "interval_ms"),
+				Action:          a,
+				TargetID:        target,
+				URL:             argString(step.Args, "url"),
+				Selector:        argString(step.Args, "selector"),
+				Text:            argString(step.Args, "text"),
+				Key:             argString(step.Args, "key"),
+				Expression:      argString(step.Args, "expression"),
+				WaitMode:        argString(step.Args, "wait_mode"),
+				RefGeneration:   argString(step.Args, "ref_generation"),
+				SnapshotMode:    argString(step.Args, "mode"),
+				InteractiveOnly: argBoolPtr(step.Args, "interactive_only"),
+				ScopeSelector:   argString(step.Args, "scope_selector"),
+				Depth:           argInt(step.Args, "depth"),
+				MaxNodes:        argInt(step.Args, "max_nodes"),
+				MaxTextChars:    argInt(step.Args, "max_text_chars"),
+				TimeoutMS:       argInt(step.Args, "timeout_ms"),
+				IntervalMS:      argInt(step.Args, "interval_ms"),
 			}
 			payload.Steps = append(payload.Steps, bs)
 		}
@@ -453,6 +468,12 @@ func (h *Handler) validateAndConvertRelayActionV2(req relayActionV2Request) (str
 	payload.Expression = argString(req.Args, "expression")
 	payload.WaitMode = argString(req.Args, "wait_mode")
 	payload.RefGeneration = argString(req.Args, "ref_generation")
+	payload.SnapshotMode = argString(req.Args, "mode")
+	payload.InteractiveOnly = argBoolPtr(req.Args, "interactive_only")
+	payload.ScopeSelector = argString(req.Args, "scope_selector")
+	payload.Depth = argInt(req.Args, "depth")
+	payload.MaxNodes = argInt(req.Args, "max_nodes")
+	payload.MaxTextChars = argInt(req.Args, "max_text_chars")
 	payload.TimeoutMS = argInt(req.Args, "timeout_ms")
 	payload.IntervalMS = argInt(req.Args, "interval_ms")
 	return action, payload, nil
@@ -495,6 +516,32 @@ func argInt(args map[string]any, key string) int {
 	return 0
 }
 
+func argBoolPtr(args map[string]any, key string) *bool {
+	if len(args) == 0 {
+		return nil
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch t := v.(type) {
+	case bool:
+		val := t
+		return &val
+	case string:
+		trimmed := strings.TrimSpace(strings.ToLower(t))
+		if trimmed == "true" || trimmed == "1" || trimmed == "yes" || trimmed == "on" {
+			val := true
+			return &val
+		}
+		if trimmed == "false" || trimmed == "0" || trimmed == "no" || trimmed == "off" {
+			val := false
+			return &val
+		}
+	}
+	return nil
+}
+
 func classifyRelayError(err error) relayErrorInfo {
 	if strings.Contains(err.Error(), "is required") || strings.Contains(err.Error(), "are required") {
 		return relayErrorInfo{HTTPStatus: http.StatusBadRequest, Code: "validation_error", RetryClass: retryClassNever}
@@ -514,6 +561,12 @@ func classifyRelayError(err error) relayErrorInfo {
 		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "relay_loop_guard_triggered", RetryClass: retryClassNever}
 	case errors.Is(err, browserrelay.ErrSnapshotRefNotFound):
 		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "snapshot_ref_not_found", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrSnapshotPayloadTooLarge):
+		return relayErrorInfo{HTTPStatus: http.StatusRequestEntityTooLarge, Code: "snapshot_payload_too_large", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrSnapshotScopeNotFound):
+		return relayErrorInfo{HTTPStatus: http.StatusNotFound, Code: "snapshot_scope_not_found", RetryClass: retryClassNever}
+	case errors.Is(err, browserrelay.ErrSnapshotModeUnsupported):
+		return relayErrorInfo{HTTPStatus: http.StatusBadRequest, Code: "snapshot_mode_unsupported", RetryClass: retryClassNever}
 	case errors.Is(err, browserrelay.ErrRelayQueueCanceled):
 		return relayErrorInfo{HTTPStatus: http.StatusConflict, Code: "queue_canceled", RetryClass: retryClassAfterStateChange}
 	case errors.Is(err, browserrelay.ErrAgentBrowserUnavailable):
@@ -828,6 +881,14 @@ func (h *Handler) requireBrowserRelayEnabled(
 }
 
 func normalizeBrowserRelayConfig(cfg config.BrowserRelayConfig) config.BrowserRelayConfig {
+	rawSnapshotDefaultsUnset := strings.TrimSpace(cfg.SnapshotDefaultMode) == "" &&
+		cfg.SnapshotMaxPayloadBytes == 0 &&
+		cfg.SnapshotMaxNodes == 0 &&
+		cfg.SnapshotMaxTextChars == 0 &&
+		cfg.SnapshotMaxDepth == 0 &&
+		cfg.SnapshotRefTTLSec == 0 &&
+		cfg.SnapshotMaxGenerations == 0
+
 	if strings.TrimSpace(cfg.Host) == "" {
 		cfg.Host = defaultBrowserRelayHost
 	}
@@ -858,6 +919,38 @@ func normalizeBrowserRelayConfig(cfg config.BrowserRelayConfig) config.BrowserRe
 	}
 	if cfg.AgentBrowserIdleTimeoutSec <= 0 {
 		cfg.AgentBrowserIdleTimeoutSec = 300
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.SnapshotDefaultMode)) {
+	case "", "compact":
+		cfg.SnapshotDefaultMode = "compact"
+	case "full":
+		cfg.SnapshotDefaultMode = "full"
+	default:
+		cfg.SnapshotDefaultMode = "compact"
+	}
+	if cfg.SnapshotMaxPayloadBytes <= 0 {
+		cfg.SnapshotMaxPayloadBytes = 98304
+	}
+	if cfg.SnapshotMaxNodes <= 0 {
+		cfg.SnapshotMaxNodes = 120
+	}
+	if cfg.SnapshotMaxTextChars <= 0 {
+		cfg.SnapshotMaxTextChars = 120
+	}
+	if cfg.SnapshotMaxDepth <= 0 {
+		cfg.SnapshotMaxDepth = 6
+	}
+	if cfg.SnapshotRefTTLSec <= 0 {
+		cfg.SnapshotRefTTLSec = 600
+	}
+	if cfg.SnapshotMaxGenerations <= 0 {
+		cfg.SnapshotMaxGenerations = 4
+	}
+	if rawSnapshotDefaultsUnset && !cfg.SnapshotInteractiveOnly {
+		cfg.SnapshotInteractiveOnly = true
+	}
+	if rawSnapshotDefaultsUnset && !cfg.SnapshotAllowFullTree {
+		cfg.SnapshotAllowFullTree = true
 	}
 	if cfg.PairingCodeTTLSec <= 0 {
 		cfg.PairingCodeTTLSec = 180
@@ -899,6 +992,15 @@ func browserRelayConfigFromConfig(cfg *config.Config) browserrelay.Config {
 		AgentBrowserDefaultHeadless: relayCfg.AgentBrowserDefaultHeadless,
 		AgentBrowserMaxSessions:     relayCfg.AgentBrowserMaxSessions,
 		AgentBrowserIdleTimeoutSec:  relayCfg.AgentBrowserIdleTimeoutSec,
+		SnapshotDefaultMode:         relayCfg.SnapshotDefaultMode,
+		SnapshotMaxPayloadBytes:     relayCfg.SnapshotMaxPayloadBytes,
+		SnapshotMaxNodes:            relayCfg.SnapshotMaxNodes,
+		SnapshotMaxTextChars:        relayCfg.SnapshotMaxTextChars,
+		SnapshotMaxDepth:            relayCfg.SnapshotMaxDepth,
+		SnapshotInteractiveOnly:     relayCfg.SnapshotInteractiveOnly,
+		SnapshotRefTTLSec:           relayCfg.SnapshotRefTTLSec,
+		SnapshotMaxGenerations:      relayCfg.SnapshotMaxGenerations,
+		SnapshotAllowFullTree:       relayCfg.SnapshotAllowFullTree,
 	}
 }
 

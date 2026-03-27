@@ -350,7 +350,10 @@ Browser relay supports hybrid execution:
   - Response: `{request_id,ok,result,error_code,error_message,retry_class,trace_id,timing}`
 - `batch` executes multiple steps against one `target`:
   - Request: `{request_id,target,steps:[{action,args}],execution_policy}`
-- `snapshot` may include `refs` + `ref_generation`; selector actions can use `@eN` with optional `ref_generation`.
+- `snapshot` is compact-first by default (`mode=compact`) and returns:
+  - `refs`, `ref_generation`, `elements`, `page`, `truncated`, `stats`
+  - `mode=full` is explicit opt-in and can return `full_tree_omitted=true` when payload guards apply
+- Selector actions can use `@eN` refs (resolved server-side) with optional `ref_generation`.
 - `wait` supports `wait_mode`:
   - `expression` (default; uses `expression`)
   - `selector` (uses `selector`)
@@ -371,6 +374,15 @@ Browser relay supports hybrid execution:
 | `agent_browser_default_headless` | bool | true | Default headless mode for dedicated sessions |
 | `agent_browser_max_sessions` | int | 8 | Maximum dedicated sessions |
 | `agent_browser_idle_timeout_sec` | int | 300 | Idle eviction for dedicated sessions |
+| `snapshot_default_mode` | string | `compact` | Default snapshot mode (`compact` or `full`) |
+| `snapshot_max_payload_bytes` | int | 98304 | Max snapshot payload returned to callers |
+| `snapshot_max_nodes` | int | 120 | Max nodes captured in compact snapshots |
+| `snapshot_max_text_chars` | int | 120 | Max per-element text chars in compact snapshots |
+| `snapshot_max_depth` | int | 6 | Max traversal depth for compact snapshots |
+| `snapshot_interactive_only_default` | bool | true | Capture interactive elements by default |
+| `snapshot_ref_ttl_sec` | int | 600 | Snapshot ref cache TTL (seconds) |
+| `snapshot_max_generations` | int | 4 | Max per-target snapshot generations cached |
+| `snapshot_allow_full_tree` | bool | true | Allow explicit `mode=full` snapshots |
 
 ### Configuration Example
 
@@ -387,7 +399,16 @@ Browser relay supports hybrid execution:
       "agent_browser_binary": "agent-browser",
       "agent_browser_default_headless": true,
       "agent_browser_max_sessions": 8,
-      "agent_browser_idle_timeout_sec": 300
+      "agent_browser_idle_timeout_sec": 300,
+      "snapshot_default_mode": "compact",
+      "snapshot_max_payload_bytes": 98304,
+      "snapshot_max_nodes": 120,
+      "snapshot_max_text_chars": 120,
+      "snapshot_max_depth": 6,
+      "snapshot_interactive_only_default": true,
+      "snapshot_ref_ttl_sec": 600,
+      "snapshot_max_generations": 4,
+      "snapshot_allow_full_tree": true
     }
   }
 }
@@ -406,6 +427,8 @@ For example:
 - `SUPRCLAW_TOOLS_SKILLS_GLOBAL_DIR=~/.suprclaw/skills`
 - `SUPRCLAW_TOOLS_BROWSER_RELAY_ENGINE_MODE=hybrid`
 - `SUPRCLAW_TOOLS_BROWSER_RELAY_AGENT_BROWSER_BINARY=agent-browser`
+- `SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_DEFAULT_MODE=compact`
+- `SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_PAYLOAD_BYTES=98304`
 
 Note: Nested map-style config (for example `tools.mcp.servers.<name>.*`) is configured in `config.json` rather than
 environment variables.

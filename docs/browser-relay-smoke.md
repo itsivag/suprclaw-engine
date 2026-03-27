@@ -77,7 +77,8 @@ Every response uses a shared envelope:
 
 ### Snapshot refs for token-efficient follow-up
 
-`snapshot` now returns optional `refs` and `ref_generation` fields when extraction succeeds.
+`snapshot` is compact-first by default and returns `refs`, `ref_generation`, `elements`, `page`, `truncated`, and `stats`.
+Use one compact snapshot, then drive follow-up actions via refs. Re-snapshot only after major DOM change.
 Follow-up selector actions can use ref IDs such as `@e1`:
 
 ```bash
@@ -92,7 +93,23 @@ curl -sS -X POST http://127.0.0.1:18800/api/browser-relay/actions \
   }'
 ```
 
+Explicit full tree snapshots are still available:
+
+```bash
+curl -sS -X POST http://127.0.0.1:18800/api/browser-relay/actions \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id":"snapshot-full-1",
+    "target":"<target_id>",
+    "action":"snapshot",
+    "args":{"mode":"full"}
+  }'
+```
+
 If a ref is stale/missing, the relay returns `snapshot_ref_not_found`.
+If a scope selector is invalid, relay returns `snapshot_scope_not_found`.
+If payload guard is exceeded and cannot be compacted safely, relay returns `snapshot_payload_too_large`.
 
 8. Run dedicated session actions (agent-browser path):
 
@@ -121,8 +138,11 @@ curl -sS -X POST http://127.0.0.1:18800/api/browser-relay/actions \
 ## Retry guidance for agents
 
 - Prefer `batch` for multi-step interactions.
+- Prefer one compact `snapshot` and ref-driven follow-ups instead of repeated full-page snapshots.
 - Retry only retriable transport failures (`relay request timed out`, transient websocket issues).
 - Do not blindly retry on:
   - `relay_loop_guard_triggered`
   - `snapshot_ref_not_found`
+  - `snapshot_payload_too_large`
+  - `snapshot_scope_not_found`
   - ownership/attach conflicts (`target not attached`, `target already controlled`)

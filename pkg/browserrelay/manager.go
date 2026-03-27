@@ -34,6 +34,13 @@ const (
 	defaultAgentBrowserBinary      = "agent-browser"
 	defaultAgentBrowserMaxSessions = 8
 	defaultAgentBrowserIdleTimeout = 300
+	defaultSnapshotMode            = "compact"
+	defaultSnapshotMaxPayloadBytes = 98304
+	defaultSnapshotMaxNodes        = 120
+	defaultSnapshotMaxTextChars    = 120
+	defaultSnapshotMaxDepth        = 6
+	defaultSnapshotRefTTLSec       = 600
+	defaultSnapshotMaxGenerations  = 4
 	defaultTargetQueueDepth        = 32
 	loopGuardFailureThreshold      = 3
 	loopGuardWindow                = 45 * time.Second
@@ -207,6 +214,14 @@ func NewManager(cfg Config) *Manager {
 }
 
 func normalizeConfig(cfg Config) Config {
+	rawSnapshotDefaultsUnset := strings.TrimSpace(cfg.SnapshotDefaultMode) == "" &&
+		cfg.SnapshotMaxPayloadBytes == 0 &&
+		cfg.SnapshotMaxNodes == 0 &&
+		cfg.SnapshotMaxTextChars == 0 &&
+		cfg.SnapshotMaxDepth == 0 &&
+		cfg.SnapshotRefTTLSec == 0 &&
+		cfg.SnapshotMaxGenerations == 0
+
 	if cfg.MaxClients <= 0 {
 		cfg.MaxClients = defaultMaxClients
 	}
@@ -231,6 +246,38 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.AgentBrowserIdleTimeoutSec <= 0 {
 		cfg.AgentBrowserIdleTimeoutSec = defaultAgentBrowserIdleTimeout
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.SnapshotDefaultMode)) {
+	case "", "compact":
+		cfg.SnapshotDefaultMode = defaultSnapshotMode
+	case "full":
+		cfg.SnapshotDefaultMode = "full"
+	default:
+		cfg.SnapshotDefaultMode = defaultSnapshotMode
+	}
+	if cfg.SnapshotMaxPayloadBytes <= 0 {
+		cfg.SnapshotMaxPayloadBytes = defaultSnapshotMaxPayloadBytes
+	}
+	if cfg.SnapshotMaxNodes <= 0 {
+		cfg.SnapshotMaxNodes = defaultSnapshotMaxNodes
+	}
+	if cfg.SnapshotMaxTextChars <= 0 {
+		cfg.SnapshotMaxTextChars = defaultSnapshotMaxTextChars
+	}
+	if cfg.SnapshotMaxDepth <= 0 {
+		cfg.SnapshotMaxDepth = defaultSnapshotMaxDepth
+	}
+	if cfg.SnapshotRefTTLSec <= 0 {
+		cfg.SnapshotRefTTLSec = defaultSnapshotRefTTLSec
+	}
+	if cfg.SnapshotMaxGenerations <= 0 {
+		cfg.SnapshotMaxGenerations = defaultSnapshotMaxGenerations
+	}
+	if rawSnapshotDefaultsUnset && !cfg.SnapshotInteractiveOnly {
+		cfg.SnapshotInteractiveOnly = true
+	}
+	if rawSnapshotDefaultsUnset && !cfg.SnapshotAllowFullTree {
+		cfg.SnapshotAllowFullTree = true
 	}
 	return cfg
 }

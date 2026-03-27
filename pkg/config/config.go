@@ -704,6 +704,15 @@ type BrowserRelayConfig struct {
 	PairingCodeTTLSec           int    `json:"pairing_code_ttl_sec"    env:"SUPRCLAW_TOOLS_BROWSER_RELAY_PAIRING_CODE_TTL_SEC"`
 	SessionTokenTTLSec          int    `json:"session_token_ttl_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SESSION_TOKEN_TTL_SEC"`
 	RefreshTokenTTLSec          int    `json:"refresh_token_ttl_sec"   env:"SUPRCLAW_TOOLS_BROWSER_RELAY_REFRESH_TOKEN_TTL_SEC"`
+	SnapshotDefaultMode         string `json:"snapshot_default_mode" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_DEFAULT_MODE"`
+	SnapshotMaxPayloadBytes     int    `json:"snapshot_max_payload_bytes" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_PAYLOAD_BYTES"`
+	SnapshotMaxNodes            int    `json:"snapshot_max_nodes" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_NODES"`
+	SnapshotMaxTextChars        int    `json:"snapshot_max_text_chars" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_TEXT_CHARS"`
+	SnapshotMaxDepth            int    `json:"snapshot_max_depth" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_DEPTH"`
+	SnapshotInteractiveOnly     bool   `json:"snapshot_interactive_only_default" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_INTERACTIVE_ONLY_DEFAULT"`
+	SnapshotRefTTLSec           int    `json:"snapshot_ref_ttl_sec" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_REF_TTL_SEC"`
+	SnapshotMaxGenerations      int    `json:"snapshot_max_generations" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_MAX_GENERATIONS"`
+	SnapshotAllowFullTree       bool   `json:"snapshot_allow_full_tree" env:"SUPRCLAW_TOOLS_BROWSER_RELAY_SNAPSHOT_ALLOW_FULL_TREE"`
 }
 
 type MediaCleanupConfig struct {

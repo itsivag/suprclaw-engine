@@ -224,3 +224,33 @@ func TestHandlePatchConfig_RejectsInvalidBrowserRelayEngineMode(t *testing.T) {
 		t.Fatalf("expected browser_relay.engine_mode validation error, body=%s", rec.Body.String())
 	}
 }
+
+func TestHandlePatchConfig_RejectsInvalidBrowserRelaySnapshotMode(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/config", bytes.NewBufferString(`{
+		"tools": {
+			"browser_relay": {
+				"enabled": true,
+				"host": "127.0.0.1",
+				"port": 18792,
+				"snapshot_default_mode": "invalid_mode"
+			}
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("tools.browser_relay.snapshot_default_mode")) {
+		t.Fatalf("expected browser_relay.snapshot_default_mode validation error, body=%s", rec.Body.String())
+	}
+}

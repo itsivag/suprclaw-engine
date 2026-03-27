@@ -18,6 +18,15 @@ type Config struct {
 	AgentBrowserDefaultHeadless bool
 	AgentBrowserMaxSessions     int
 	AgentBrowserIdleTimeoutSec  int
+	SnapshotDefaultMode         string
+	SnapshotMaxPayloadBytes     int
+	SnapshotMaxNodes            int
+	SnapshotMaxTextChars        int
+	SnapshotMaxDepth            int
+	SnapshotInteractiveOnly     bool
+	SnapshotRefTTLSec           int
+	SnapshotMaxGenerations      int
+	SnapshotAllowFullTree       bool
 }
 
 // Target describes a browser tab/target known by the relay.
@@ -62,35 +71,47 @@ type Session struct {
 
 // ActionRequest captures browser-relay action payload fields.
 type ActionRequest struct {
-	TargetID       string
-	SessionID      string
-	URL            string
-	Selector       string
-	Text           string
-	Key            string
-	Expression     string
-	WaitMode       string
-	RefGeneration  string
-	TimeoutMS      int
-	IntervalMS     int
-	StopOnError    bool
-	StopOnErrorSet bool
-	Steps          []BatchStep
+	TargetID        string
+	SessionID       string
+	URL             string
+	Selector        string
+	Text            string
+	Key             string
+	Expression      string
+	WaitMode        string
+	RefGeneration   string
+	SnapshotMode    string
+	InteractiveOnly *bool
+	ScopeSelector   string
+	Depth           int
+	MaxNodes        int
+	MaxTextChars    int
+	TimeoutMS       int
+	IntervalMS      int
+	StopOnError     bool
+	StopOnErrorSet  bool
+	Steps           []BatchStep
 }
 
 // BatchStep represents one operation inside a browser-relay batch action.
 type BatchStep struct {
-	Action        string `json:"action"`
-	TargetID      string `json:"target_id,omitempty"`
-	URL           string `json:"url,omitempty"`
-	Selector      string `json:"selector,omitempty"`
-	Text          string `json:"text,omitempty"`
-	Key           string `json:"key,omitempty"`
-	Expression    string `json:"expression,omitempty"`
-	WaitMode      string `json:"wait_mode,omitempty"`
-	RefGeneration string `json:"ref_generation,omitempty"`
-	TimeoutMS     int    `json:"timeout_ms,omitempty"`
-	IntervalMS    int    `json:"interval_ms,omitempty"`
+	Action          string `json:"action"`
+	TargetID        string `json:"target_id,omitempty"`
+	URL             string `json:"url,omitempty"`
+	Selector        string `json:"selector,omitempty"`
+	Text            string `json:"text,omitempty"`
+	Key             string `json:"key,omitempty"`
+	Expression      string `json:"expression,omitempty"`
+	WaitMode        string `json:"wait_mode,omitempty"`
+	RefGeneration   string `json:"ref_generation,omitempty"`
+	SnapshotMode    string `json:"mode,omitempty"`
+	InteractiveOnly *bool  `json:"interactive_only,omitempty"`
+	ScopeSelector   string `json:"scope_selector,omitempty"`
+	Depth           int    `json:"depth,omitempty"`
+	MaxNodes        int    `json:"max_nodes,omitempty"`
+	MaxTextChars    int    `json:"max_text_chars,omitempty"`
+	TimeoutMS       int    `json:"timeout_ms,omitempty"`
+	IntervalMS      int    `json:"interval_ms,omitempty"`
 }
 
 const (

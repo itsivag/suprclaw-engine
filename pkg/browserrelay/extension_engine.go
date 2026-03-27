@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/itsivag/suprclaw/pkg/logger"
 )
 
 const (
@@ -17,9 +19,12 @@ const (
 	defaultWaitIntervalMS      = 250
 	defaultBatchMaxSteps       = 32
 	defaultSnapshotRefMax      = 120
-	defaultSnapshotRefTTL      = 10 * time.Minute
-	defaultSnapshotGenerations = 4
+	defaultSnapshotRefTTL      = time.Duration(defaultSnapshotRefTTLSec) * time.Second
+	defaultSnapshotGenerations = defaultSnapshotMaxGenerations
 	networkIdleQuietWindow     = 750 * time.Millisecond
+
+	snapshotModeCompact = "compact"
+	snapshotModeFull    = "full"
 )
 
 type snapshotRef struct {
@@ -28,6 +33,7 @@ type snapshotRef struct {
 	Role     string
 	Name     string
 	Text     string
+	Tag      string
 }
 
 type snapshotGeneration struct {
@@ -37,6 +43,26 @@ type snapshotGeneration struct {
 	Order      []string
 }
 
+type snapshotElement struct {
+	Selector string
+	Role     string
+	Name     string
+	Text     string
+	Tag      string
+}
+
+type snapshotPolicy struct {
+	DefaultMode            string
+	MaxPayloadBytes        int
+	MaxNodes               int
+	MaxTextChars           int
+	MaxDepth               int
+	InteractiveOnlyDefault bool
+	RefTTL                 time.Duration
+	MaxGenerations         int
+	AllowFullTree          bool
+}
+
 // ExtensionEngine executes browser actions through the extension relay manager.
 type ExtensionEngine struct {
 	manager *Manager
@@ -44,6 +70,11 @@ type ExtensionEngine struct {
 	mu                sync.Mutex
 	snapshots         map[string][]snapshotGeneration
 	generationCounter uint64
+
+	snapshotCompactTotal  uint64
+	snapshotFullTotal     uint64
+	snapshotTruncateTotal uint64
+	snapshotTooLargeTotal uint64
 }
 
 func NewExtensionEngine(manager *Manager) *ExtensionEngine {
@@ -149,7 +180,7 @@ func (e *ExtensionEngine) executeActionInternal(
 		if targetID == "" {
 			return nil, fmt.Errorf("target_id is required")
 		}
-		return e.snapshot(ctx, targetID)
+		return e.snapshot(ctx, targetID, req)
 	case "wait":
 		if targetID == "" {
 			return nil, fmt.Errorf("target_id is required")
@@ -203,16 +234,22 @@ func (e *ExtensionEngine) executeBatch(ctx context.Context, targetID string, req
 		stepStart := time.Now()
 		stepAction := strings.TrimSpace(step.Action)
 		stepReq := ActionRequest{
-			TargetID:      targetID,
-			URL:           step.URL,
-			Selector:      step.Selector,
-			Text:          step.Text,
-			Key:           step.Key,
-			Expression:    step.Expression,
-			WaitMode:      step.WaitMode,
-			RefGeneration: step.RefGeneration,
-			TimeoutMS:     step.TimeoutMS,
-			IntervalMS:    step.IntervalMS,
+			TargetID:        targetID,
+			URL:             step.URL,
+			Selector:        step.Selector,
+			Text:            step.Text,
+			Key:             step.Key,
+			Expression:      step.Expression,
+			WaitMode:        step.WaitMode,
+			RefGeneration:   step.RefGeneration,
+			SnapshotMode:    step.SnapshotMode,
+			InteractiveOnly: step.InteractiveOnly,
+			ScopeSelector:   step.ScopeSelector,
+			Depth:           step.Depth,
+			MaxNodes:        step.MaxNodes,
+			MaxTextChars:    step.MaxTextChars,
+			TimeoutMS:       step.TimeoutMS,
+			IntervalMS:      step.IntervalMS,
 		}
 		if explicit := extensionTargetRawID(step.TargetID); explicit != "" && explicit != targetID {
 			err := fmt.Errorf("step[%d] target_id must match batch target_id", i)
@@ -338,84 +375,264 @@ func (e *ExtensionEngine) press(ctx context.Context, targetID, key string) (any,
 	return map[string]any{"ok": true}, nil
 }
 
-func (e *ExtensionEngine) snapshot(ctx context.Context, targetID string) (any, error) {
-	out := map[string]any{}
-	raw, err := e.manager.SendCommand(ctx, targetID, "Accessibility.getFullAXTree", nil, true)
-	if err == nil {
-		out["kind"] = "ax_tree"
-		out["value"] = decodeRawResult(raw)
-	} else {
-		fallback, fallbackErr := e.manager.SendCommand(ctx, targetID, "DOMSnapshot.captureSnapshot", map[string]any{
-			"computedStyles": []string{},
-		}, true)
-		if fallbackErr != nil {
-			return nil, err
-		}
-		out["kind"] = "dom_snapshot"
-		out["value"] = decodeRawResult(fallback)
+func (e *ExtensionEngine) snapshot(ctx context.Context, targetID string, req ActionRequest) (any, error) {
+	start := time.Now()
+	policy := e.snapshotPolicy()
+	mode, err := normalizeSnapshotMode(req.SnapshotMode, policy.DefaultMode)
+	if err != nil {
+		return nil, err
 	}
 
-	refs, generation, refErr := e.captureSnapshotRefs(ctx, targetID)
-	if refErr == nil && len(refs) > 0 {
-		out["refs"] = refs
-		out["ref_generation"] = generation
+	if mode == snapshotModeFull {
+		atomic.AddUint64(&e.snapshotFullTotal, 1)
+		if !policy.AllowFullTree {
+			return nil, fmt.Errorf("%w: full mode disabled", ErrSnapshotModeUnsupported)
+		}
+	} else {
+		atomic.AddUint64(&e.snapshotCompactTotal, 1)
 	}
+
+	options := e.snapshotOptions(req, policy)
+	page, elements, compactRawBytes, err := e.captureCompactSnapshot(ctx, targetID, options)
+	if err != nil {
+		return nil, err
+	}
+	refs, generation, elementPayload, refTruncated, err := e.captureSnapshotRefs(targetID, elements, policy)
+	if err != nil {
+		return nil, err
+	}
+
+	rawBytes := compactRawBytes
+	out := map[string]any{
+		"mode":           mode,
+		"page":           page,
+		"refs":           refs,
+		"ref_generation": generation,
+		"elements":       elementPayload,
+		"truncated":      refTruncated,
+		"stats": map[string]any{
+			"raw_bytes":    compactRawBytes,
+			"output_bytes": 0,
+		},
+	}
+
+	if mode == snapshotModeFull {
+		fullKind, fullTree, fullRawBytes, fullErr := e.captureFullSnapshot(ctx, targetID)
+		if fullErr != nil {
+			return nil, fullErr
+		}
+		out["full_tree_kind"] = fullKind
+		out["full_tree"] = fullTree
+		rawBytes += fullRawBytes
+	}
+
+	stats := out["stats"].(map[string]any)
+	stats["raw_bytes"] = rawBytes
+	outputBytes, capTruncated, capErr := e.enforceSnapshotPayloadCap(out, policy.MaxPayloadBytes, mode)
+	if capErr != nil {
+		atomic.AddUint64(&e.snapshotTooLargeTotal, 1)
+		return nil, capErr
+	}
+	if refTruncated || capTruncated {
+		out["truncated"] = true
+		atomic.AddUint64(&e.snapshotTruncateTotal, 1)
+	}
+	stats["output_bytes"] = outputBytes
+
+	logger.DebugCF("browser-relay", "snapshot generated", map[string]any{
+		"mode":         mode,
+		"target":       normalizeExtensionTargetID(targetID),
+		"ref_count":    len(refs),
+		"raw_bytes":    rawBytes,
+		"output_bytes": outputBytes,
+		"truncated":    out["truncated"],
+		"queue_depth":  e.manager.QueueDepth(targetID),
+		"latency_ms":   time.Since(start).Milliseconds(),
+	})
 	return out, nil
 }
 
-func (e *ExtensionEngine) captureSnapshotRefs(
+type snapshotOptions struct {
+	InteractiveOnly bool
+	ScopeSelector   string
+	Depth           int
+	MaxNodes        int
+	MaxTextChars    int
+}
+
+func (e *ExtensionEngine) snapshotPolicy() snapshotPolicy {
+	cfg := e.manager.Config()
+	p := snapshotPolicy{
+		DefaultMode:            strings.ToLower(strings.TrimSpace(cfg.SnapshotDefaultMode)),
+		MaxPayloadBytes:        cfg.SnapshotMaxPayloadBytes,
+		MaxNodes:               cfg.SnapshotMaxNodes,
+		MaxTextChars:           cfg.SnapshotMaxTextChars,
+		MaxDepth:               cfg.SnapshotMaxDepth,
+		InteractiveOnlyDefault: cfg.SnapshotInteractiveOnly,
+		RefTTL:                 time.Duration(cfg.SnapshotRefTTLSec) * time.Second,
+		MaxGenerations:         cfg.SnapshotMaxGenerations,
+		AllowFullTree:          cfg.SnapshotAllowFullTree,
+	}
+	if p.DefaultMode == "" {
+		p.DefaultMode = snapshotModeCompact
+	}
+	if p.MaxPayloadBytes <= 0 {
+		p.MaxPayloadBytes = defaultSnapshotMaxPayloadBytes
+	}
+	if p.MaxNodes <= 0 {
+		p.MaxNodes = defaultSnapshotRefMax
+	}
+	if p.MaxTextChars <= 0 {
+		p.MaxTextChars = defaultSnapshotMaxTextChars
+	}
+	if p.MaxDepth <= 0 {
+		p.MaxDepth = defaultSnapshotMaxDepth
+	}
+	if p.RefTTL <= 0 {
+		p.RefTTL = defaultSnapshotRefTTL
+	}
+	if p.MaxGenerations <= 0 {
+		p.MaxGenerations = defaultSnapshotGenerations
+	}
+	return p
+}
+
+func (e *ExtensionEngine) snapshotOptions(req ActionRequest, policy snapshotPolicy) snapshotOptions {
+	interactiveOnly := policy.InteractiveOnlyDefault
+	if req.InteractiveOnly != nil {
+		interactiveOnly = *req.InteractiveOnly
+	}
+	return snapshotOptions{
+		InteractiveOnly: interactiveOnly,
+		ScopeSelector:   strings.TrimSpace(req.ScopeSelector),
+		Depth:           clampBoundedInt(req.Depth, policy.MaxDepth, 1, 10),
+		MaxNodes:        clampBoundedInt(req.MaxNodes, policy.MaxNodes, 1, 300),
+		MaxTextChars:    clampBoundedInt(req.MaxTextChars, policy.MaxTextChars, 16, 1024),
+	}
+}
+
+func normalizeSnapshotMode(requested, fallback string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(requested))
+	if mode == "" {
+		mode = strings.ToLower(strings.TrimSpace(fallback))
+	}
+	if mode == "" {
+		mode = snapshotModeCompact
+	}
+	switch mode {
+	case snapshotModeCompact, snapshotModeFull:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("%w: %s", ErrSnapshotModeUnsupported, mode)
+	}
+}
+
+func clampBoundedInt(value, fallback, minValue, maxValue int) int {
+	if value <= 0 {
+		value = fallback
+	}
+	if value < minValue {
+		return minValue
+	}
+	if maxValue > 0 && value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func (e *ExtensionEngine) captureCompactSnapshot(
 	ctx context.Context,
 	targetID string,
-) ([]map[string]any, string, error) {
-	expr := `(() => {
-		const max = 120;
-		const picked = [];
-		const seen = new Set();
+	options snapshotOptions,
+) (map[string]any, []snapshotElement, int, error) {
+	expr := fmt.Sprintf(`(() => {
+		const scopeSelector = %s;
+		const maxNodes = %d;
+		const maxTextChars = %d;
+		const maxDepth = %d;
+		const interactiveOnly = %t;
+		const interactiveSelector = "a,button,input,textarea,select,summary,[role='button'],[role='link'],[data-testid],[onclick],[tabindex]";
+		const root = scopeSelector ? document.querySelector(scopeSelector) : document;
+		if (!root) {
+			return { ok: false, error: "scope_not_found" };
+		}
+
 		const isVisible = (el) => {
+			if (!el || !(el instanceof Element)) return false;
 			const style = window.getComputedStyle(el);
 			if (!style || style.display === "none" || style.visibility === "hidden") return false;
 			const r = el.getBoundingClientRect();
 			return r.width > 0 && r.height > 0;
 		};
+
+		const isInteractive = (el) => {
+			if (!el || !(el instanceof Element)) return false;
+			if (el.matches(interactiveSelector)) return true;
+			const role = (el.getAttribute("role") || "").toLowerCase();
+			if (role === "button" || role === "link" || role === "textbox" || role === "combobox") return true;
+			const tabIndex = el.getAttribute("tabindex");
+			return tabIndex !== null && tabIndex !== "-1";
+		};
+
+		const withinDepth = (el) => {
+			let depth = 0;
+			let node = el;
+			while (node && node !== root && node.parentElement) {
+				depth += 1;
+				if (depth > maxDepth) return false;
+				node = node.parentElement;
+			}
+			return true;
+		};
+
 		const cssPath = (el) => {
 			if (!el || el.nodeType !== 1) return "";
 			if (el.id) return "#" + CSS.escape(el.id);
 			const parts = [];
 			let node = el;
 			let depth = 0;
-			while (node && node.nodeType === 1 && depth < 6) {
+			const pathDepth = Math.max(2, maxDepth);
+			while (node && node.nodeType === 1 && depth < pathDepth) {
 				let part = node.nodeName.toLowerCase();
 				if (!part) break;
 				const parent = node.parentElement;
 				if (parent) {
 					const siblings = Array.from(parent.children).filter((n) => n.nodeName === node.nodeName);
 					if (siblings.length > 1) {
-						const idx = siblings.indexOf(node) + 1;
-						part += ":nth-of-type(" + idx + ")";
+						part += ":nth-of-type(" + (siblings.indexOf(node) + 1) + ")";
 					}
 				}
 				parts.unshift(part);
-				node = node.parentElement;
+				node = parent;
 				depth += 1;
 			}
 			return parts.join(" > ");
 		};
-		const candidates = document.querySelectorAll("a,button,input,textarea,select,[role='button'],[role='link'],[data-testid],[onclick]");
-		for (const el of candidates) {
-			if (picked.length >= max) break;
+
+		const source = interactiveOnly ? root.querySelectorAll(interactiveSelector) : root.querySelectorAll("*");
+		const picked = [];
+		const seen = new Set();
+		for (const el of source) {
+			if (picked.length >= maxNodes) break;
+			if (!withinDepth(el)) continue;
 			if (!isVisible(el)) continue;
+			if (interactiveOnly && !isInteractive(el)) continue;
 			const selector = cssPath(el);
 			if (!selector || seen.has(selector)) continue;
 			seen.add(selector);
-			picked.push({
-				selector,
-				role: ((el.getAttribute("role") || el.tagName || "").toLowerCase()),
-				name: (el.getAttribute("aria-label") || el.getAttribute("name") || el.getAttribute("placeholder") || "").trim(),
-				text: ((el.innerText || el.value || "").trim()).slice(0, 120)
-			});
+			const tag = ((el.tagName || "").toLowerCase());
+			const role = ((el.getAttribute("role") || tag || "").toLowerCase());
+			const name = (el.getAttribute("aria-label") || el.getAttribute("name") || el.getAttribute("placeholder") || "").trim();
+			const text = ((el.innerText || el.textContent || el.value || "").replace(/\s+/g, " ").trim()).slice(0, maxTextChars);
+			picked.push({ selector, role, name, text, tag });
 		}
-		return picked;
-	})()`
+
+		return {
+			ok: true,
+			page: { url: String(location.href || ""), title: String(document.title || "") },
+			elements: picked,
+		};
+	})()`, strconv.Quote(options.ScopeSelector), options.MaxNodes, options.MaxTextChars, options.Depth, options.InteractiveOnly)
 
 	raw, err := e.manager.SendCommand(ctx, targetID, "Runtime.evaluate", map[string]any{
 		"expression":    expr,
@@ -423,78 +640,269 @@ func (e *ExtensionEngine) captureSnapshotRefs(
 		"awaitPromise":  true,
 	}, true)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, 0, err
 	}
 	value, parseErr := runtimeEvaluateValue(raw)
 	if parseErr != nil {
-		return nil, "", parseErr
+		return nil, nil, 0, parseErr
 	}
-	list, ok := value.([]any)
+	obj, ok := value.(map[string]any)
 	if !ok {
-		return nil, "", fmt.Errorf("snapshot refs expected array")
+		return nil, nil, 0, fmt.Errorf("snapshot compact expected object")
 	}
-	if len(list) == 0 {
-		return nil, "", nil
+	if okValue, _ := obj["ok"].(bool); !okValue {
+		if strings.TrimSpace(anyToString(obj["error"])) == "scope_not_found" {
+			return nil, nil, 0, fmt.Errorf("%w: %s", ErrSnapshotScopeNotFound, options.ScopeSelector)
+		}
+		return nil, nil, 0, fmt.Errorf("snapshot compact evaluation failed")
 	}
-	if len(list) > defaultSnapshotRefMax {
-		list = list[:defaultSnapshotRefMax]
+
+	pageObj, _ := obj["page"].(map[string]any)
+	page := map[string]any{
+		"url":   strings.TrimSpace(anyToString(pageObj["url"])),
+		"title": strings.TrimSpace(anyToString(pageObj["title"])),
+	}
+	rawElements, _ := obj["elements"].([]any)
+	elements := make([]snapshotElement, 0, len(rawElements))
+	for _, item := range rawElements {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		selector := strings.TrimSpace(anyToString(entry["selector"]))
+		if selector == "" {
+			continue
+		}
+		elements = append(elements, snapshotElement{
+			Selector: selector,
+			Role:     strings.TrimSpace(anyToString(entry["role"])),
+			Name:     strings.TrimSpace(anyToString(entry["name"])),
+			Text:     strings.TrimSpace(anyToString(entry["text"])),
+			Tag:      strings.TrimSpace(anyToString(entry["tag"])),
+		})
+	}
+	return page, elements, len(raw), nil
+}
+
+func (e *ExtensionEngine) captureFullSnapshot(
+	ctx context.Context,
+	targetID string,
+) (string, any, int, error) {
+	raw, err := e.manager.SendCommand(ctx, targetID, "Accessibility.getFullAXTree", nil, true)
+	if err == nil {
+		return "ax_tree", decodeRawResult(raw), len(raw), nil
+	}
+	fallback, fallbackErr := e.manager.SendCommand(ctx, targetID, "DOMSnapshot.captureSnapshot", map[string]any{
+		"computedStyles": []string{},
+	}, true)
+	if fallbackErr != nil {
+		return "", nil, 0, err
+	}
+	return "dom_snapshot", decodeRawResult(fallback), len(fallback), nil
+}
+
+func (e *ExtensionEngine) captureSnapshotRefs(
+	targetID string,
+	elements []snapshotElement,
+	policy snapshotPolicy,
+) ([]map[string]any, string, []map[string]any, bool, error) {
+	trimmed := false
+	if len(elements) > policy.MaxNodes {
+		elements = elements[:policy.MaxNodes]
+		trimmed = true
 	}
 
 	nextID := atomic.AddUint64(&e.generationCounter, 1)
 	generation := fmt.Sprintf("g-%d", nextID)
-	refs := make([]map[string]any, 0, len(list))
 	gen := snapshotGeneration{
 		Generation: generation,
 		CreatedAt:  time.Now().UTC(),
-		Refs:       make(map[string]snapshotRef, len(list)),
-		Order:      make([]string, 0, len(list)),
+		Refs:       make(map[string]snapshotRef, len(elements)),
+		Order:      make([]string, 0, len(elements)),
 	}
 
-	for i, item := range list {
-		obj, ok := item.(map[string]any)
-		if !ok {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.pruneSnapshotCacheLocked(targetID, policy.RefTTL)
+	prevBySelector := make(map[string]string, len(elements))
+	if existing := e.snapshots[targetID]; len(existing) > 0 {
+		latest := existing[len(existing)-1]
+		for _, ref := range latest.Order {
+			entry, ok := latest.Refs[ref]
+			if !ok || strings.TrimSpace(entry.Selector) == "" {
+				continue
+			}
+			prevBySelector[entry.Selector] = ref
+		}
+	}
+	usedRefs := make(map[string]struct{}, len(elements))
+	nextRefIndex := e.nextRefIndexLocked(targetID)
+
+	for _, item := range elements {
+		if strings.TrimSpace(item.Selector) == "" {
 			continue
 		}
-		selector := strings.TrimSpace(anyToString(obj["selector"]))
-		if selector == "" {
-			continue
+		ref := ""
+		if prev := strings.TrimSpace(prevBySelector[item.Selector]); prev != "" {
+			if _, exists := usedRefs[prev]; !exists {
+				ref = prev
+			}
 		}
-		ref := fmt.Sprintf("@e%d", i+1)
-		entry := snapshotRef{
+		if ref == "" {
+			for {
+				candidate := fmt.Sprintf("@e%d", nextRefIndex)
+				nextRefIndex++
+				if _, exists := usedRefs[candidate]; exists {
+					continue
+				}
+				ref = candidate
+				break
+			}
+		}
+		usedRefs[ref] = struct{}{}
+		gen.Refs[ref] = snapshotRef{
 			Ref:      ref,
-			Selector: selector,
-			Role:     strings.TrimSpace(anyToString(obj["role"])),
-			Name:     strings.TrimSpace(anyToString(obj["name"])),
-			Text:     strings.TrimSpace(anyToString(obj["text"])),
+			Selector: item.Selector,
+			Role:     item.Role,
+			Name:     item.Name,
+			Text:     item.Text,
+			Tag:      item.Tag,
 		}
-		gen.Refs[ref] = entry
 		gen.Order = append(gen.Order, ref)
+	}
+
+	e.snapshots[targetID] = append(e.snapshots[targetID], gen)
+	if len(e.snapshots[targetID]) > policy.MaxGenerations {
+		e.snapshots[targetID] = e.snapshots[targetID][len(e.snapshots[targetID])-policy.MaxGenerations:]
+	}
+
+	refs := make([]map[string]any, 0, len(gen.Order))
+	elementPayload := make([]map[string]any, 0, len(gen.Order))
+	for _, ref := range gen.Order {
+		entry := gen.Refs[ref]
 		refs = append(refs, map[string]any{
-			"ref":      ref,
-			"selector": selector,
+			"ref":      entry.Ref,
+			"selector": entry.Selector,
 			"role":     entry.Role,
 			"name":     entry.Name,
 			"text":     entry.Text,
 		})
+		elementPayload = append(elementPayload, map[string]any{
+			"ref":      entry.Ref,
+			"selector": entry.Selector,
+			"role":     entry.Role,
+			"name":     entry.Name,
+			"text":     entry.Text,
+			"tag":      entry.Tag,
+		})
 	}
-
-	e.mu.Lock()
-	e.pruneSnapshotCacheLocked(targetID)
-	e.snapshots[targetID] = append(e.snapshots[targetID], gen)
-	if len(e.snapshots[targetID]) > defaultSnapshotGenerations {
-		e.snapshots[targetID] = e.snapshots[targetID][len(e.snapshots[targetID])-defaultSnapshotGenerations:]
-	}
-	e.mu.Unlock()
-
-	return refs, generation, nil
+	return refs, generation, elementPayload, trimmed, nil
 }
 
-func (e *ExtensionEngine) pruneSnapshotCacheLocked(targetID string) {
+func (e *ExtensionEngine) nextRefIndexLocked(targetID string) int {
+	maxIndex := 0
+	for _, generation := range e.snapshots[targetID] {
+		for ref := range generation.Refs {
+			index := parseSnapshotRefIndex(ref)
+			if index > maxIndex {
+				maxIndex = index
+			}
+		}
+	}
+	if maxIndex <= 0 {
+		return 1
+	}
+	return maxIndex + 1
+}
+
+func parseSnapshotRefIndex(ref string) int {
+	ref = strings.TrimSpace(ref)
+	if !strings.HasPrefix(ref, "@e") {
+		return 0
+	}
+	num, err := strconv.Atoi(strings.TrimPrefix(ref, "@e"))
+	if err != nil || num <= 0 {
+		return 0
+	}
+	return num
+}
+
+func (e *ExtensionEngine) enforceSnapshotPayloadCap(
+	payload map[string]any,
+	maxPayloadBytes int,
+	mode string,
+) (int, bool, error) {
+	encode := func() (int, error) {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return 0, err
+		}
+		return len(b), nil
+	}
+
+	outputBytes, err := encode()
+	if err != nil {
+		return 0, false, err
+	}
+	if maxPayloadBytes <= 0 || outputBytes <= maxPayloadBytes {
+		return outputBytes, false, nil
+	}
+
+	truncated := false
+	if mode == snapshotModeFull {
+		if _, ok := payload["full_tree"]; ok {
+			delete(payload, "full_tree")
+			payload["full_tree_omitted"] = true
+			payload["truncated"] = true
+			truncated = true
+			outputBytes, err = encode()
+			if err != nil {
+				return 0, truncated, err
+			}
+			if outputBytes <= maxPayloadBytes {
+				return outputBytes, truncated, nil
+			}
+		}
+	}
+
+	elements, _ := payload["elements"].([]map[string]any)
+	refs, _ := payload["refs"].([]map[string]any)
+	for len(elements) > 0 {
+		elements = elements[:len(elements)-1]
+		if len(refs) > len(elements) {
+			refs = refs[:len(elements)]
+		}
+		payload["elements"] = elements
+		payload["refs"] = refs
+		payload["truncated"] = true
+		truncated = true
+		outputBytes, err = encode()
+		if err != nil {
+			return 0, truncated, err
+		}
+		if outputBytes <= maxPayloadBytes {
+			return outputBytes, truncated, nil
+		}
+	}
+
+	return 0, truncated, fmt.Errorf(
+		"%w: %d > %d",
+		ErrSnapshotPayloadTooLarge,
+		outputBytes,
+		maxPayloadBytes,
+	)
+}
+
+func (e *ExtensionEngine) pruneSnapshotCacheLocked(targetID string, ttl time.Duration) {
 	gens := e.snapshots[targetID]
 	if len(gens) == 0 {
 		return
 	}
-	cutoff := time.Now().Add(-defaultSnapshotRefTTL)
+	if ttl <= 0 {
+		ttl = defaultSnapshotRefTTL
+	}
+	cutoff := time.Now().Add(-ttl)
 	kept := make([]snapshotGeneration, 0, len(gens))
 	for _, g := range gens {
 		if g.CreatedAt.After(cutoff) {
@@ -516,7 +924,7 @@ func (e *ExtensionEngine) resolveSelectorRef(targetID, selector, generation stri
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.pruneSnapshotCacheLocked(targetID)
+	e.pruneSnapshotCacheLocked(targetID, e.snapshotPolicy().RefTTL)
 	gens := e.snapshots[targetID]
 	if len(gens) == 0 {
 		return "", fmt.Errorf("%w: no active snapshot refs for target", ErrSnapshotRefNotFound)

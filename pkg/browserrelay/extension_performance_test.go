@@ -12,7 +12,12 @@ import (
 
 func setupAttachedManager(t *testing.T, onWrite func(v any)) *Manager {
 	t.Helper()
-	m := NewManager(Config{Enabled: true, IdleTimeoutSec: 60})
+	return setupAttachedManagerWithConfig(t, Config{Enabled: true, IdleTimeoutSec: 60}, onWrite)
+}
+
+func setupAttachedManagerWithConfig(t *testing.T, cfg Config, onWrite func(v any)) *Manager {
+	t.Helper()
+	m := NewManager(cfg)
 	t.Cleanup(m.Close)
 
 	extConn := &fakeConn{onWrite: onWrite}
@@ -149,10 +154,8 @@ func TestExtensionEngineSnapshotReturnsRefs(t *testing.T) {
 		}
 		go func() {
 			switch req.Method {
-			case "Accessibility.getFullAXTree":
-				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"nodes":[]}}`, req.RequestID)))
 			case "Runtime.evaluate":
-				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"result":{"value":[{"selector":"#submit","role":"button","name":"Submit","text":"Submit"}]}}}`, req.RequestID)))
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"result":{"value":{"ok":true,"page":{"url":"https://example.com","title":"Example"},"elements":[{"selector":"#submit","role":"button","name":"Submit","text":"Submit","tag":"button"}]}}}}`, req.RequestID)))
 			default:
 				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
 			}
@@ -177,6 +180,18 @@ func TestExtensionEngineSnapshotReturnsRefs(t *testing.T) {
 	refs, ok := payload["refs"].([]map[string]any)
 	if !ok || len(refs) == 0 {
 		t.Fatalf("refs = %T %v, want non-empty []map[string]any", payload["refs"], payload["refs"])
+	}
+	if mode := strings.TrimSpace(anyToString(payload["mode"])); mode != "compact" {
+		t.Fatalf("mode = %q, want compact", mode)
+	}
+	if _, ok := payload["page"].(map[string]any); !ok {
+		t.Fatalf("page type = %T, want map[string]any", payload["page"])
+	}
+	if _, ok := payload["elements"].([]map[string]any); !ok {
+		t.Fatalf("elements type = %T, want []map[string]any", payload["elements"])
+	}
+	if _, exists := payload["full_tree"]; exists {
+		t.Fatalf("full_tree should not exist in compact snapshot: %v", payload)
 	}
 }
 
@@ -215,6 +230,188 @@ func TestExtensionEngineSelectorRefExpired(t *testing.T) {
 	if !errors.Is(err, ErrSnapshotRefNotFound) {
 		t.Fatalf("click(@e1) with expired refs error = %v, want ErrSnapshotRefNotFound", err)
 	}
+}
+
+func TestExtensionEngineSnapshotScopeSelectorNotFound(t *testing.T) {
+	var mgr *Manager
+	mgr = setupAttachedManager(t, func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			if req.Method == "Runtime.evaluate" {
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(
+					`{"type":"response","requestId":"%s","result":{"result":{"value":{"ok":false,"error":"scope_not_found"}}}}`,
+					req.RequestID,
+				)))
+				return
+			}
+			_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
+		}()
+	})
+
+	engine := NewExtensionEngine(mgr)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := engine.ExecuteAction(ctx, "snapshot", ActionRequest{
+		TargetID:      "tab-1",
+		ScopeSelector: "#missing-scope",
+	})
+	if !errors.Is(err, ErrSnapshotScopeNotFound) {
+		t.Fatalf("snapshot scope error = %v, want ErrSnapshotScopeNotFound", err)
+	}
+}
+
+func TestExtensionEngineSnapshotFullModeOmitsTreeWhenOverCap(t *testing.T) {
+	var mgr *Manager
+	mgr = setupAttachedManagerWithConfig(t, Config{
+		Enabled:                 true,
+		IdleTimeoutSec:          60,
+		SnapshotMaxPayloadBytes: 320,
+		SnapshotAllowFullTree:   true,
+		SnapshotInteractiveOnly: true,
+	}, func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			switch req.Method {
+			case "Runtime.evaluate":
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"result":{"value":{"ok":true,"page":{"url":"https://example.com","title":"Example"},"elements":[{"selector":"#submit","role":"button","name":"Submit","text":"Submit","tag":"button"}]}}}}`, req.RequestID)))
+			case "Accessibility.getFullAXTree":
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"nodes":[{"name":{"value":"%s"}}]}}`, req.RequestID, strings.Repeat("x", 3000))))
+			default:
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
+			}
+		}()
+	})
+
+	engine := NewExtensionEngine(mgr)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result, err := engine.ExecuteAction(ctx, "snapshot", ActionRequest{
+		TargetID:        "tab-1",
+		SnapshotMode:    "full",
+		InteractiveOnly: boolPtr(true),
+	})
+	if err != nil {
+		t.Fatalf("snapshot full mode error = %v", err)
+	}
+	payload, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("snapshot payload type = %T, want map[string]any", result)
+	}
+	if _, exists := payload["full_tree"]; exists {
+		t.Fatalf("full_tree must be omitted when exceeding payload cap: %v", payload)
+	}
+	if omitted, _ := payload["full_tree_omitted"].(bool); !omitted {
+		t.Fatalf("full_tree_omitted = %v, want true", payload["full_tree_omitted"])
+	}
+}
+
+func TestExtensionEngineSnapshotStableRefsAcrossGenerations(t *testing.T) {
+	var (
+		mgr         *Manager
+		evalCounter int
+	)
+	mgr = setupAttachedManager(t, func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			if req.Method == "Runtime.evaluate" {
+				evalCounter++
+				if evalCounter == 1 {
+					_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"result":{"value":{"ok":true,"page":{"url":"https://example.com","title":"Example"},"elements":[{"selector":"#submit","role":"button","name":"Submit","text":"Submit","tag":"button"},{"selector":"#search","role":"textbox","name":"Search","text":"Search","tag":"input"}]}}}}`, req.RequestID)))
+					return
+				}
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"result":{"value":{"ok":true,"page":{"url":"https://example.com","title":"Example"},"elements":[{"selector":"#submit","role":"button","name":"Submit","text":"Submit","tag":"button"},{"selector":"#buy","role":"button","name":"Buy","text":"Buy","tag":"button"}]}}}}`, req.RequestID)))
+				return
+			}
+			_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
+		}()
+	})
+
+	engine := NewExtensionEngine(mgr)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	first, err := engine.ExecuteAction(ctx, "snapshot", ActionRequest{TargetID: "tab-1"})
+	if err != nil {
+		t.Fatalf("first snapshot error = %v", err)
+	}
+	second, err := engine.ExecuteAction(ctx, "snapshot", ActionRequest{TargetID: "tab-1"})
+	if err != nil {
+		t.Fatalf("second snapshot error = %v", err)
+	}
+
+	firstPayload, ok := first.(map[string]any)
+	if !ok {
+		t.Fatalf("first snapshot payload type = %T", first)
+	}
+	secondPayload, ok := second.(map[string]any)
+	if !ok {
+		t.Fatalf("second snapshot payload type = %T", second)
+	}
+
+	firstRef := findRefBySelector(firstPayload["refs"], "#submit")
+	secondRef := findRefBySelector(secondPayload["refs"], "#submit")
+	if firstRef == "" || secondRef == "" {
+		t.Fatalf("missing stable selector ref: first=%q second=%q", firstRef, secondRef)
+	}
+	if firstRef != secondRef {
+		t.Fatalf("expected stable ref for #submit, got first=%q second=%q", firstRef, secondRef)
+	}
+}
+
+func TestExtensionEngineSnapshotPayloadTooLargeDeterministicError(t *testing.T) {
+	var mgr *Manager
+	mgr = setupAttachedManagerWithConfig(t, Config{
+		Enabled:                 true,
+		IdleTimeoutSec:          60,
+		SnapshotMaxPayloadBytes: 32,
+		SnapshotInteractiveOnly: true,
+	}, func(v any) {
+		req, ok := v.(requestEnvelope)
+		if !ok {
+			return
+		}
+		go func() {
+			if req.Method == "Runtime.evaluate" {
+				_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"result":{"value":{"ok":true,"page":{"url":"https://example.com","title":"Example"},"elements":[{"selector":"#submit","role":"button","name":"Submit","text":"Submit","tag":"button"}]}}}}`, req.RequestID)))
+				return
+			}
+			_ = mgr.HandleExtensionMessage("ext-1", []byte(fmt.Sprintf(`{"type":"response","requestId":"%s","result":{"ok":true}}`, req.RequestID)))
+		}()
+	})
+
+	engine := NewExtensionEngine(mgr)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := engine.ExecuteAction(ctx, "snapshot", ActionRequest{TargetID: "tab-1"})
+	if !errors.Is(err, ErrSnapshotPayloadTooLarge) {
+		t.Fatalf("snapshot error = %v, want ErrSnapshotPayloadTooLarge", err)
+	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func findRefBySelector(raw any, selector string) string {
+	list, ok := raw.([]map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, entry := range list {
+		if strings.TrimSpace(anyToString(entry["selector"])) == selector {
+			return strings.TrimSpace(anyToString(entry["ref"]))
+		}
+	}
+	return ""
 }
 
 func TestExtensionEngineWaitModeInvalid(t *testing.T) {
