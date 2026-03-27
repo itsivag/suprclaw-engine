@@ -79,7 +79,7 @@ func (al *AgentLoop) ensureMCPInitialized(ctx context.Context) error {
 				filtered[name] = serverCfg
 			}
 			mcpCfg.Servers = filtered
-			logger.InfoCF("agent", "Skipping legacy MCP browser_relay server; using local Browser Relay V2 compat tools", nil)
+			logger.InfoCF("agent", "Skipping legacy MCP browser_relay server; using local Browser Relay V2 tools", nil)
 		}
 	}
 

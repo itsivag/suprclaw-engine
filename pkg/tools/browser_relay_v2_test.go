@@ -10,39 +10,31 @@ import (
 	"github.com/itsivag/suprclaw/pkg/config"
 )
 
-func TestDeriveBrowserRelayActionsURL(t *testing.T) {
-	got := deriveBrowserRelayActionsURL("https://api.suprclaw.com/api/mcp/browser-relay")
-	want := "https://api.suprclaw.com/api/browser-relay/actions"
-	if got != want {
-		t.Fatalf("deriveBrowserRelayActionsURL() = %q, want %q", got, want)
-	}
-}
-
-func TestResolveBrowserRelayCompatOptions_FromMCPServer(t *testing.T) {
+func TestResolveBrowserRelayV2Options_StrictDefault(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Tools.BrowserRelay.Enabled = true
+	cfg.Tools.BrowserRelay.Token = "relay-token"
 	cfg.Tools.MCP.Servers = map[string]config.MCPServerConfig{
 		"browser_relay": {
 			Enabled: true,
 			Type:    "http",
 			URL:     "https://api.suprclaw.com/api/mcp/browser-relay",
-			Headers: map[string]string{"Authorization": "Bearer abc"},
 		},
 	}
 
-	opts, ok := ResolveBrowserRelayCompatOptions(cfg)
+	opts, ok := ResolveBrowserRelayV2Options(cfg)
 	if !ok {
-		t.Fatal("ResolveBrowserRelayCompatOptions() ok = false, want true")
+		t.Fatal("ResolveBrowserRelayV2Options() ok = false, want true")
 	}
-	if opts.ActionsURL != "https://api.suprclaw.com/api/browser-relay/actions" {
-		t.Fatalf("ActionsURL = %q", opts.ActionsURL)
+	if opts.ActionsURL != defaultBrowserRelayV2ActionsURL {
+		t.Fatalf("ActionsURL = %q, want %q", opts.ActionsURL, defaultBrowserRelayV2ActionsURL)
 	}
-	if got := opts.Headers["Authorization"]; got != "Bearer abc" {
-		t.Fatalf("Authorization header = %q, want Bearer abc", got)
+	if got := opts.Headers["Authorization"]; got != "Bearer relay-token" {
+		t.Fatalf("Authorization header = %q, want Bearer relay-token", got)
 	}
 }
 
-func TestBrowserRelayCompatTool_ExecuteNavigateCallsV2(t *testing.T) {
+func TestBrowserRelayV2ActionTool_ExecuteCallsV2(t *testing.T) {
 	var gotBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -53,7 +45,7 @@ func TestBrowserRelayCompatTool_ExecuteNavigateCallsV2(t *testing.T) {
 			t.Fatalf("decode request body: %v", err)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"request_id": "r1",
+			"request_id": "req-1",
 			"ok":         true,
 			"result": map[string]any{
 				"ok": true,
@@ -62,17 +54,19 @@ func TestBrowserRelayCompatTool_ExecuteNavigateCallsV2(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tool := &browserRelayCompatTool{
-		name:       "mcp_browser_relay_browser_relay_navigate",
-		action:     "navigate",
+	tool := &browserRelayV2ActionTool{
 		actionsURL: ts.URL + "/api/browser-relay/actions",
 		headers:    map[string]string{"Authorization": "Bearer abc"},
 		client:     ts.Client(),
 	}
 
 	result := tool.Execute(context.Background(), map[string]any{
-		"targetId": "394834123",
-		"url":      "https://www.amazon.in/",
+		"request_id": "req-1",
+		"target":     "ext:394834123",
+		"action":     "navigate",
+		"args": map[string]any{
+			"url": "https://www.amazon.in/",
+		},
 	})
 	if result == nil || result.IsError {
 		t.Fatalf("Execute() error = %v, for_llm=%s", result.Err, result.ForLLM)
@@ -88,3 +82,26 @@ func TestBrowserRelayCompatTool_ExecuteNavigateCallsV2(t *testing.T) {
 		t.Fatalf("args.url = %q", got)
 	}
 }
+
+func TestBrowserRelayV2Tools_NamesAreV2Only(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Tools.BrowserRelay.Enabled = true
+	tools := NewBrowserRelayV2Tools(cfg)
+	if len(tools) != 3 {
+		t.Fatalf("len(tools) = %d, want 3", len(tools))
+	}
+	names := map[string]bool{}
+	for _, tool := range tools {
+		names[tool.Name()] = true
+	}
+	for _, want := range []string{
+		"browser_relay_v2_targets_list",
+		"browser_relay_v2_action",
+		"browser_relay_v2_batch",
+	} {
+		if !names[want] {
+			t.Fatalf("missing tool %q", want)
+		}
+	}
+}
+
