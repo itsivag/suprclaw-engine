@@ -758,8 +758,24 @@ func (e *ExtensionEngine) captureCompactSnapshot(
 		for (const el of source) {
 			if (picked.length >= scanLimit) break;
 			if (!withinDepth(el)) continue;
-			if (!isVisible(el)) continue;
 			if (interactiveOnly && !isInteractive(el)) continue;
+			const visible = isVisible(el);
+			if (!visible) {
+				const probe = (
+					el.getAttribute("aria-label") ||
+					el.getAttribute("name") ||
+					el.getAttribute("value") ||
+					el.textContent ||
+					""
+				).toLowerCase();
+				const hasHiddenSignal = (
+					probe.includes("add to cart") ||
+					probe.includes("add to basket") ||
+					probe.includes("checkout") ||
+					probe.includes("buy now")
+				);
+				if (!hasHiddenSignal) continue;
+			}
 			const selector = cssPath(el);
 			if (!selector || seen.has(selector)) continue;
 			seen.add(selector);
