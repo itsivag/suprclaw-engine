@@ -37,25 +37,33 @@ Browser relay smoke test.
 
 Hard requirements:
 1. Use browser relay capabilities only (not generic browser automation).
+   - Use only Browser Relay V2 tools (`browser_relay_v2_targets_list`, `browser_relay_v2_action`, `browser_relay_v2_batch`).
 2. List relay targets and identify source tags.
-3. If at least one target exists, use the first target and follow a ref-first flow:
+3. Before any snapshot/action, establish an attached target deterministically:
+   - if a target has `attached=true`, select that target
+   - otherwise call `tabs.select` on the first target, then continue
+4. If at least one target exists, follow a ref-first flow:
    - take one compact snapshot first (`mode=compact`, interactive elements only)
    - use snapshot refs for click/type operations where possible
    - use `batch` for multi-step interactions when safe
    - do not loop snapshots: before the first interaction, snapshot at most once
    - after that, only snapshot again if navigation/state changed
-4. Execute deterministic commerce steps:
+5. Execute deterministic commerce steps:
    - navigate to https://www.amazon.in (or https://www.amazon.com if redirected)
    - search for: iphone 17
    - open a relevant iPhone 17 product page
+   - if selected product page does not expose Add to Cart, go back and try another result (max 3 products)
    - click Add to Cart
-5. Strict ref policy:
+6. Strict ref policy:
    - for click/type, only use `@eN` refs from snapshot output
    - do not use raw CSS/XPath for click/type
+   - for the final purchase interaction, click only refs whose visible text/name contains `Add to Cart` or `Add to Basket`
+   - do not click refs containing `Without Exchange`, `Buy Now`, `Protection`, `See details`
    - if refs are stale/missing, re-snapshot (respecting loop constraints) and continue
-6. Verify Add to Cart succeeded (cart count increment, cart confirmation, or explicit cart state check).
-7. If no target exists, report paired=false and include a clear error.
-8. Output exactly one final line:
+   - if relay returns `snapshot_progress_blocked` or `relay_loop_guard_triggered`, stop and return failure JSON (do not blind retry)
+7. Verify Add to Cart succeeded (cart count increment, cart confirmation, or explicit cart state check).
+8. If no target exists, report paired=false and include a clear error.
+9. Output exactly one final line:
 RELAY_SMOKE_RESULT::<json>
 
 JSON schema:
@@ -87,7 +95,7 @@ printf '%s\n' "$raw" | tail -n 200
 raw_clean="$(printf '%s\n' "$raw" | perl -pe 's/\e\[[0-9;]*[A-Za-z]//g')"
 result_line="$(
   printf '%s\n' "$raw_clean" \
-    | grep -E '^[[:space:]]*RELAY_SMOKE_RESULT::\{.*\}[[:space:]]*$' \
+    | grep -oE 'RELAY_SMOKE_RESULT::\{.*\}' \
     | tail -n 1 || true
 )"
 if [[ -z "$result_line" ]]; then

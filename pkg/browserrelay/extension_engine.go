@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,6 +56,11 @@ type snapshotElement struct {
 	Name     string
 	Text     string
 	Tag      string
+}
+
+type scoredSnapshotElement struct {
+	Element snapshotElement
+	Score   int
 }
 
 type snapshotPolicy struct {
@@ -684,6 +690,7 @@ func (e *ExtensionEngine) captureCompactSnapshot(
 	expr := fmt.Sprintf(`(() => {
 		const scopeSelector = %s;
 		const maxNodes = %d;
+		const scanLimit = Math.max(maxNodes * 8, maxNodes);
 		const maxTextChars = %d;
 		const maxDepth = %d;
 		const interactiveOnly = %t;
@@ -749,7 +756,7 @@ func (e *ExtensionEngine) captureCompactSnapshot(
 		const picked = [];
 		const seen = new Set();
 		for (const el of source) {
-			if (picked.length >= maxNodes) break;
+			if (picked.length >= scanLimit) break;
 			if (!withinDepth(el)) continue;
 			if (!isVisible(el)) continue;
 			if (interactiveOnly && !isInteractive(el)) continue;
@@ -817,7 +824,100 @@ func (e *ExtensionEngine) captureCompactSnapshot(
 			Tag:      strings.TrimSpace(anyToString(entry["tag"])),
 		})
 	}
+	elements = prioritizeSnapshotElements(elements, options.MaxNodes)
 	return page, elements, len(raw), nil
+}
+
+func prioritizeSnapshotElements(elements []snapshotElement, maxNodes int) []snapshotElement {
+	if len(elements) == 0 {
+		return elements
+	}
+	if maxNodes <= 0 {
+		maxNodes = defaultSnapshotRefMax
+	}
+	scored := make([]scoredSnapshotElement, 0, len(elements))
+	for _, el := range elements {
+		scored = append(scored, scoredSnapshotElement{
+			Element: el,
+			Score:   snapshotElementPriorityScore(el),
+		})
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].Score > scored[j].Score
+	})
+	if len(scored) > maxNodes {
+		scored = scored[:maxNodes]
+	}
+	prioritized := make([]snapshotElement, 0, len(scored))
+	for _, entry := range scored {
+		prioritized = append(prioritized, entry.Element)
+	}
+	return prioritized
+}
+
+func snapshotElementPriorityScore(el snapshotElement) int {
+	score := 0
+	tag := strings.ToLower(strings.TrimSpace(el.Tag))
+	role := strings.ToLower(strings.TrimSpace(el.Role))
+	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{el.Name, el.Text}, " ")))
+
+	switch tag {
+	case "button":
+		score += 80
+	case "input", "textarea", "select":
+		score += 60
+	case "a":
+		score += 30
+	}
+	switch role {
+	case "button":
+		score += 80
+	case "textbox", "searchbox":
+		score += 60
+	case "link":
+		score += 20
+	}
+	if strings.TrimSpace(text) == "" {
+		score -= 40
+	}
+
+	positive := []struct {
+		term   string
+		weight int
+	}{
+		{term: "add to cart", weight: 900},
+		{term: "add to basket", weight: 860},
+		{term: "add to bag", weight: 820},
+		{term: "add", weight: 120},
+		{term: "cart", weight: 260},
+		{term: "checkout", weight: 220},
+		{term: "search", weight: 180},
+		{term: "submit", weight: 160},
+		{term: "continue", weight: 80},
+	}
+	for _, rule := range positive {
+		if strings.Contains(text, rule.term) {
+			score += rule.weight
+		}
+	}
+
+	negative := []struct {
+		term   string
+		weight int
+	}{
+		{term: "without exchange", weight: 500},
+		{term: "exchange", weight: 140},
+		{term: "protection plan", weight: 220},
+		{term: "sponsored", weight: 200},
+		{term: "learn more", weight: 80},
+		{term: "see details", weight: 60},
+	}
+	for _, rule := range negative {
+		if strings.Contains(text, rule.term) {
+			score -= rule.weight
+		}
+	}
+	return score
 }
 
 func (e *ExtensionEngine) captureFullSnapshot(
