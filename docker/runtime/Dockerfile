@@ -1,11 +1,11 @@
-FROM docker.io/library/golang:1.25-bookworm AS builder
+FROM public.ecr.aws/docker/library/golang:1.25-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates make && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
 RUN make build
 
-FROM docker.io/library/ubuntu:24.04
+FROM public.ecr.aws/docker/library/ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV SUPRCLAW_HOME=/home/suprclaw/.suprclaw
