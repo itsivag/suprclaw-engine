@@ -105,6 +105,12 @@ func (h *adminHandler) upsertAgent(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if err := waitForAgentRuntimeVisibility(h.agentLoop, req.AgentID, true, 5*time.Second); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent saved to config but runtime visibility check failed: " + err.Error(),
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -140,6 +146,12 @@ func (h *adminHandler) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	if err := h.reloadAgentLoopFromConfig(); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "agent removed from config but runtime sync failed: " + err.Error(),
+		})
+		return
+	}
+	if err := waitForAgentRuntimeVisibility(h.agentLoop, agentID, false, 5*time.Second); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent removed from config but runtime visibility check failed: " + err.Error(),
 		})
 		return
 	}
@@ -336,6 +348,26 @@ func verifyAgentRegistrySync(loop *agent.AgentLoop, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+func waitForAgentRuntimeVisibility(loop *agent.AgentLoop, agentID string, shouldExist bool, timeout time.Duration) error {
+	if loop == nil {
+		return fmt.Errorf("agent loop unavailable")
+	}
+	normalized := routing.NormalizeAgentID(agentID)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		_, exists := loop.GetRegistry().GetAgent(normalized)
+		if exists == shouldExist {
+			return nil
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	state := "present"
+	if !shouldExist {
+		state = "absent"
+	}
+	return fmt.Errorf("agent %q did not become %s in runtime within %s", normalized, state, timeout)
 }
 
 // --- POST /api/admin/runtime/stop ---

@@ -31,6 +31,11 @@ type agentSummary struct {
 	Name string `json:"name"`
 }
 
+type sessionRouteMetadata struct {
+	resolvedAgentID string
+	routeMatchedBy  string
+}
+
 // suprConn represents a single WebSocket connection.
 type suprConn struct {
 	id        string
@@ -69,6 +74,7 @@ type SuprChannel struct {
 	cancel       context.CancelFunc
 	agents       []agentSummary
 	defaultAgent string
+	routeMeta    sync.Map // sessionID -> sessionRouteMetadata
 }
 
 // NewSuprChannel creates a new Supr WebSocket channel.
@@ -157,6 +163,7 @@ func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if !c.IsRunning() {
 		return channels.ErrNotRunning
 	}
+	c.rememberRouteMetadata(msg.ChatID, msg.ResolvedAgentID, msg.RouteMatchedBy)
 
 	// Typed error — send as error event, not message.create
 	if msg.ErrorCode != "" {
@@ -204,7 +211,7 @@ func (c *SuprChannel) StartTyping(ctx context.Context, chatID string) (func(), e
 		return func() {}, err
 	}
 	return func() {
-		stopMsg := newMessage(TypeTypingStop, nil)
+		stopMsg := newMessage(TypeTypingStop, c.routeMetadataPayload(chatID))
 		c.broadcastToSession(chatID, stopMsg)
 	}, nil
 }
@@ -239,8 +246,63 @@ func (c *SuprChannel) SendPlaceholder(ctx context.Context, chatID string) (strin
 // It sends a typing.status WebSocket event to all connected clients for the session,
 // giving the browser instant feedback about the current agent operation.
 func (c *SuprChannel) BroadcastStatus(ctx context.Context, chatID, text string) error {
-	msg := newMessage(TypeTypingStatus, map[string]any{"text": text})
+	payload := map[string]any{"text": text}
+	for key, value := range c.routeMetadataPayload(chatID) {
+		payload[key] = value
+	}
+	msg := newMessage(TypeTypingStatus, payload)
 	return c.broadcastToSession(chatID, msg)
+}
+
+func (c *SuprChannel) rememberRouteMetadata(chatID, resolvedAgentID, routeMatchedBy string) {
+	sessionID := strings.TrimPrefix(chatID, "supr:")
+	if sessionID == "" {
+		return
+	}
+	if strings.TrimSpace(resolvedAgentID) == "" && strings.TrimSpace(routeMatchedBy) == "" {
+		return
+	}
+
+	currentAny, _ := c.routeMeta.Load(sessionID)
+	current, _ := currentAny.(sessionRouteMetadata)
+	next := sessionRouteMetadata{
+		resolvedAgentID: strings.TrimSpace(resolvedAgentID),
+		routeMatchedBy:  strings.TrimSpace(routeMatchedBy),
+	}
+	if next.resolvedAgentID == "" {
+		next.resolvedAgentID = current.resolvedAgentID
+	}
+	if next.routeMatchedBy == "" {
+		next.routeMatchedBy = current.routeMatchedBy
+	}
+	c.routeMeta.Store(sessionID, next)
+}
+
+func (c *SuprChannel) routeMetadataPayload(chatID string) map[string]any {
+	sessionID := strings.TrimPrefix(chatID, "supr:")
+	if sessionID == "" {
+		return nil
+	}
+	value, ok := c.routeMeta.Load(sessionID)
+	if !ok {
+		return nil
+	}
+	meta, ok := value.(sessionRouteMetadata)
+	if !ok {
+		return nil
+	}
+
+	payload := map[string]any{}
+	if meta.resolvedAgentID != "" {
+		payload["resolved_agent_id"] = meta.resolvedAgentID
+	}
+	if meta.routeMatchedBy != "" {
+		payload["route_matched_by"] = meta.routeMatchedBy
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	return payload
 }
 
 // broadcastToSession sends a message to all connections with a matching session.

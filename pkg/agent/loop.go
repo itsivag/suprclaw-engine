@@ -80,6 +80,8 @@ type processOptions struct {
 	SendResponse      bool     // Whether to send response via bus
 	MaxTokensOverride int      // If > 0, overrides agent.MaxTokens for this run (heartbeat token budget)
 	ModelOverride     string   // If non-empty, overrides the agent's model for this turn only
+	ResolvedAgentID   string   // Route metadata for this request (if available)
+	RouteMatchedBy    string   // Route metadata for this request (if available)
 }
 
 const (
@@ -940,6 +942,8 @@ func (al *AgentLoop) processMessageDetailed(
 		EnableSummary:     true,
 		SendResponse:      true,
 		ModelOverride:     inboundMetadata(msg, metadataKeyModelOverride),
+		ResolvedAgentID:   routeMeta.ResolvedAgentID,
+		RouteMatchedBy:    routeMeta.RouteMatchedBy,
 	}
 
 	// context-dependent commands check their own Runtime fields and report
@@ -1453,9 +1457,11 @@ func (al *AgentLoop) runLLMIteration(
 
 				if retry == 0 && !constants.IsInternalChannel(opts.Channel) {
 					al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-						Channel: opts.Channel,
-						ChatID:  opts.ChatID,
-						Content: "Context window exceeded. Compressing history and retrying...",
+						Channel:         opts.Channel,
+						ChatID:          opts.ChatID,
+						Content:         "Context window exceeded. Compressing history and retrying...",
+						ResolvedAgentID: opts.ResolvedAgentID,
+						RouteMatchedBy:  opts.RouteMatchedBy,
 					})
 				}
 				forceEmergencyCompaction = true
@@ -1609,9 +1615,11 @@ func (al *AgentLoop) runLLMIteration(
 						outCtx, outCancel := context.WithTimeout(context.Background(), 5*time.Second)
 						defer outCancel()
 						_ = al.bus.PublishOutbound(outCtx, bus.OutboundMessage{
-							Channel: opts.Channel,
-							ChatID:  opts.ChatID,
-							Content: result.ForUser,
+							Channel:         opts.Channel,
+							ChatID:          opts.ChatID,
+							Content:         result.ForUser,
+							ResolvedAgentID: opts.ResolvedAgentID,
+							RouteMatchedBy:  opts.RouteMatchedBy,
 						})
 					}
 
@@ -1667,9 +1675,11 @@ func (al *AgentLoop) runLLMIteration(
 			// Send ForUser content to user immediately if not Silent
 			if !r.result.Silent && r.result.ForUser != "" && opts.SendResponse {
 				al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-					Channel: opts.Channel,
-					ChatID:  opts.ChatID,
-					Content: r.result.ForUser,
+					Channel:         opts.Channel,
+					ChatID:          opts.ChatID,
+					Content:         r.result.ForUser,
+					ResolvedAgentID: opts.ResolvedAgentID,
+					RouteMatchedBy:  opts.RouteMatchedBy,
 				})
 				logger.DebugCF("agent", "Sent tool result to user",
 					map[string]any{
