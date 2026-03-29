@@ -17,6 +17,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/agent"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/fileutil"
+	"github.com/itsivag/suprclaw/pkg/routing"
 )
 
 // Input validation regexes.
@@ -95,6 +96,13 @@ func (h *adminHandler) upsertAgent(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if err := h.reloadAgentLoopFromConfig(); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent saved to config but runtime sync failed: " + err.Error(),
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -303,12 +311,30 @@ func verifyAgentRegistrySync(loop *agent.AgentLoop, cfg *config.Config) error {
 	if loop == nil || cfg == nil {
 		return fmt.Errorf("invalid reload state")
 	}
-	registry := loop.GetRegistry()
-	for _, a := range cfg.Agents.List {
-		if _, ok := registry.GetAgent(a.ID); !ok {
-			return fmt.Errorf("agent %q missing from runtime registry after reload", a.ID)
+
+	expected := map[string]struct{}{}
+	if len(cfg.Agents.List) == 0 {
+		expected["main"] = struct{}{}
+	} else {
+		for _, a := range cfg.Agents.List {
+			expected[routing.NormalizeAgentID(a.ID)] = struct{}{}
 		}
 	}
+
+	registry := loop.GetRegistry()
+	for expectedID := range expected {
+		if _, ok := registry.GetAgent(expectedID); !ok {
+			return fmt.Errorf("agent %q missing from runtime registry after reload", expectedID)
+		}
+	}
+
+	for _, registryID := range registry.ListAgentIDs() {
+		normalized := routing.NormalizeAgentID(registryID)
+		if _, ok := expected[normalized]; !ok {
+			return fmt.Errorf("stale agent %q still present in runtime registry after reload", normalized)
+		}
+	}
+
 	return nil
 }
 

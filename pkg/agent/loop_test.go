@@ -235,6 +235,30 @@ func TestProcessMessage_ExplicitAgentRouteIsPreserved(t *testing.T) {
 	}
 }
 
+func TestProcessMessage_NoExplicitAgentUsesDefaultRoute(t *testing.T) {
+	al, _, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	_, _, routeMeta, err := al.processMessageDetailed(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:test",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("processMessageDetailed() error = %v", err)
+	}
+	if routeMeta == nil {
+		t.Fatal("route metadata is nil")
+	}
+	if routeMeta.ResolvedAgentID != "main" {
+		t.Fatalf("resolved agent = %q, want %q", routeMeta.ResolvedAgentID, "main")
+	}
+	if routeMeta.RouteMatchedBy == "explicit" {
+		t.Fatalf("matched by = %q, expected non-explicit route", routeMeta.RouteMatchedBy)
+	}
+}
+
 func TestProcessMessage_ToolStatusEmitsEvenWhenStatusUpdatesDisabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{

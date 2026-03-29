@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,6 +11,47 @@ import (
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/config"
 )
+
+func TestAdminUpsertAgent_SyncsRuntimeRegistry(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+			},
+		},
+	}
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{configPath: cfgPath, secret: "test-secret", agentLoop: loop}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer","model":"test-model"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+
+	if _, ok := loop.GetRegistry().GetAgent("writer"); !ok {
+		t.Fatal("writer should be present in runtime registry after upsert")
+	}
+}
 
 func TestAdminDeleteAgent_SyncsRuntimeRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -52,6 +94,39 @@ func TestAdminDeleteAgent_SyncsRuntimeRegistry(t *testing.T) {
 	}
 	if _, ok := loop.GetRegistry().GetAgent("main"); !ok {
 		t.Fatal("main agent should remain after deleting writer")
+	}
+}
+
+func TestVerifyAgentRegistrySync_DetectsStaleAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	runtimeCfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+				{ID: "writer"},
+			},
+		},
+	}
+	loop := agent.NewAgentLoop(runtimeCfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+
+	expectedCfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: runtimeCfg.Agents.Defaults,
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+			},
+		},
+	}
+
+	if err := verifyAgentRegistrySync(loop, expectedCfg); err == nil {
+		t.Fatal("expected stale-agent sync error, got nil")
 	}
 }
 
