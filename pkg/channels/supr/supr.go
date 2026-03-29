@@ -197,11 +197,19 @@ func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 
 // EditMessage implements channels.MessageEditor.
 func (c *SuprChannel) EditMessage(ctx context.Context, chatID string, messageID string, content string) error {
-	outMsg := newMessage(TypeMessageUpdate, map[string]any{
+	outMsg := newMessage(TypeMessageUpdate, c.messageUpdatePayload(chatID, messageID, content))
+	return c.broadcastToSession(chatID, outMsg)
+}
+
+func (c *SuprChannel) messageUpdatePayload(chatID, messageID, content string) map[string]any {
+	payload := map[string]any{
 		"message_id": messageID,
 		"content":    content,
-	})
-	return c.broadcastToSession(chatID, outMsg)
+	}
+	for key, value := range c.routeMetadataPayload(chatID) {
+		payload[key] = value
+	}
+	return payload
 }
 
 // StartTyping implements channels.TypingCapable.
