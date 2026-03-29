@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/itsivag/suprclaw/pkg/agent"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/fileutil"
 )
@@ -23,6 +25,8 @@ var (
 	reModel   = regexp.MustCompile(`^[a-zA-Z0-9._:/-]+$`)
 	reRelPath = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
 )
+
+const adminReloadTimeout = 30 * time.Second
 
 // baseDir returns the directory that holds config.json.
 func (h *adminHandler) baseDir() string { return filepath.Dir(h.configPath) }
@@ -122,6 +126,13 @@ func (h *adminHandler) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
+		return
+	}
+
+	if err := h.reloadAgentLoopFromConfig(); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent removed from config but runtime sync failed: " + err.Error(),
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -244,14 +255,61 @@ func (h *adminHandler) compactSession(w http.ResponseWriter, r *http.Request) {
 // --- POST /api/admin/runtime/reload ---
 
 func (h *adminHandler) reloadRuntime(w http.ResponseWriter, r *http.Request) {
-	// Fire-and-forget: delay 500ms so the response can be sent before the process exits.
+	if err := h.reloadAgentLoopFromConfig(); err == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
+		return
+	}
+
+	// Fallback: fire-and-forget supervisor restart when in-process reload fails.
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		exec.Command("supervisorctl", "restart", "suprclaw-engine-gateway").Run() //nolint:errcheck
 	}()
-	// Poll until port 18790 is reachable (up to 30s) so callers can block if needed.
-	// We return 202 immediately; the caller may re-poll /health.
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+	writeJSON(
+		w,
+		http.StatusAccepted,
+		map[string]string{"status": "restarting", "error": "in-process reload failed; falling back to supervisor restart"},
+	)
+}
+
+func (h *adminHandler) reloadAgentLoopFromConfig() error {
+	if h.agentLoop == nil {
+		return fmt.Errorf("agent loop not initialized")
+	}
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	provider := h.agentLoop.CurrentProvider()
+	if provider == nil {
+		return fmt.Errorf("current provider unavailable")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), adminReloadTimeout)
+	defer cancel()
+
+	if err := h.agentLoop.ReloadProviderAndConfig(ctx, provider, cfg); err != nil {
+		return err
+	}
+	if err := verifyAgentRegistrySync(h.agentLoop, cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func verifyAgentRegistrySync(loop *agent.AgentLoop, cfg *config.Config) error {
+	if loop == nil || cfg == nil {
+		return fmt.Errorf("invalid reload state")
+	}
+	registry := loop.GetRegistry()
+	for _, a := range cfg.Agents.List {
+		if _, ok := registry.GetAgent(a.ID); !ok {
+			return fmt.Errorf("agent %q missing from runtime registry after reload", a.ID)
+		}
+	}
+	return nil
 }
 
 // --- POST /api/admin/runtime/stop ---

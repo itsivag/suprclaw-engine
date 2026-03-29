@@ -11,6 +11,17 @@ test("normalizeRelayURL fills protocol and extension path", () => {
   );
 });
 
+test("normalizeRelayURL upgrades legacy browser-relay path", () => {
+  assert.equal(
+    normalizeRelayURL("wss://api.suprclaw.com/browser-relay/extension"),
+    "wss://api.suprclaw.com/agent-browser/extension"
+  );
+  assert.equal(
+    normalizeRelayURL("https://api.suprclaw.com/browser-relay"),
+    "wss://api.suprclaw.com/agent-browser/extension"
+  );
+});
+
 test("badgeForState returns expected labels", () => {
   assert.deepEqual(badgeForState("connected"), { text: "ON", color: "#1f9d55" });
   assert.deepEqual(badgeForState("connecting"), { text: "…", color: "#b08900" });

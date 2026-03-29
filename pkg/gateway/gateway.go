@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -17,8 +18,8 @@ import (
 	_ "github.com/itsivag/suprclaw/pkg/channels/irc"
 	_ "github.com/itsivag/suprclaw/pkg/channels/line"
 	_ "github.com/itsivag/suprclaw/pkg/channels/matrix"
-	_ "github.com/itsivag/suprclaw/pkg/channels/supr"
 	_ "github.com/itsivag/suprclaw/pkg/channels/slack"
+	_ "github.com/itsivag/suprclaw/pkg/channels/supr"
 	_ "github.com/itsivag/suprclaw/pkg/channels/telegram"
 	_ "github.com/itsivag/suprclaw/pkg/channels/whatsapp"
 	_ "github.com/itsivag/suprclaw/pkg/channels/whatsapp_native"
@@ -224,6 +225,7 @@ func setupAndStartServices(
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
+	registerRuntimeHealthChecks(runningServices.HealthServer, agentLoop, runningServices.ChannelManager)
 
 	if cfg.Gateway.RemoteAdminControl {
 		adminH := newAdminHandler(configPath, runningServices.CronService, cfg.Gateway.AdminSecret, agentLoop)
@@ -420,6 +422,7 @@ func restartServices(
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
+	registerRuntimeHealthChecks(runningServices.HealthServer, al, runningServices.ChannelManager)
 
 	if cfg.Gateway.RemoteAdminControl {
 		adminH := newAdminHandler(runningServices.configPath, runningServices.CronService, cfg.Gateway.AdminSecret, al)
@@ -539,6 +542,44 @@ func setupConfigWatcherPolling(configPath string, debug bool) (chan *config.Conf
 	}
 
 	return configChan, stopFunc
+}
+
+func registerRuntimeHealthChecks(hs *health.Server, al *agent.AgentLoop, cm *channels.Manager) {
+	if hs == nil {
+		return
+	}
+
+	hs.RegisterCheck("agent_registry", func() (bool, string) {
+		if al == nil {
+			return false, "agent loop unavailable"
+		}
+		count := len(al.GetRegistry().ListAgentIDs())
+		if count == 0 {
+			return false, "no agents registered"
+		}
+		return true, fmt.Sprintf("%d agents registered", count)
+	})
+
+	hs.RegisterCheck("runtime_reload", func() (bool, string) {
+		if al == nil {
+			return false, "agent loop unavailable"
+		}
+		if al.IsReloading() {
+			return false, "reload in progress"
+		}
+		return true, "idle"
+	})
+
+	hs.RegisterCheck("channel_manager", func() (bool, string) {
+		if cm == nil {
+			return false, "channel manager unavailable"
+		}
+		enabled := cm.GetEnabledChannels()
+		if len(enabled) == 0 {
+			return false, "no enabled channels"
+		}
+		return true, strings.Join(enabled, ",")
+	})
 }
 
 func getFileModTime(path string) time.Time {

@@ -41,6 +41,7 @@ type AgentLoop struct {
 	registry       *AgentRegistry
 	state          *state.Manager
 	running        atomic.Bool
+	reloading      atomic.Bool
 	summarizing    sync.Map
 	fallback       *providers.FallbackChain
 	channelManager *channels.Manager
@@ -58,6 +59,11 @@ type AgentLoop struct {
 	compactionStageFailTotal atomic.Uint64
 	contextBudgetUnfitTotal  atomic.Uint64
 	providerContext400Total  atomic.Uint64
+}
+
+type routeMetadata struct {
+	ResolvedAgentID string
+	RouteMatchedBy  string
 }
 
 // processOptions configures how a message is processed
@@ -301,16 +307,28 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			// 	}
 			// }()
 
-			response, modelUsed, err := al.processMessage(ctx, msg)
+			response, modelUsed, routeMeta, err := al.processMessageDetailed(ctx, msg)
 			if err != nil {
 				var reqErr *RequestError
 				if errors.As(err, &reqErr) {
 					// Send typed error to client — not as assistant text
+					resolvedAgentID := reqErr.ResolvedAgentID
+					routeMatchedBy := reqErr.RouteMatchedBy
+					if routeMeta != nil {
+						if resolvedAgentID == "" {
+							resolvedAgentID = routeMeta.ResolvedAgentID
+						}
+						if routeMatchedBy == "" {
+							routeMatchedBy = routeMeta.RouteMatchedBy
+						}
+					}
 					al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-						Channel:      msg.Channel,
-						ChatID:       msg.ChatID,
-						ErrorCode:    reqErr.Code,
-						ErrorMessage: reqErr.Message,
+						Channel:         msg.Channel,
+						ChatID:          msg.ChatID,
+						ErrorCode:       reqErr.Code,
+						ErrorMessage:    reqErr.Message,
+						ResolvedAgentID: resolvedAgentID,
+						RouteMatchedBy:  routeMatchedBy,
 					})
 					continue
 				}
@@ -333,10 +351,12 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 				if !alreadySent {
 					al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-						Channel:   msg.Channel,
-						ChatID:    msg.ChatID,
-						Content:   response,
-						ModelUsed: modelUsed,
+						Channel:         msg.Channel,
+						ChatID:          msg.ChatID,
+						Content:         response,
+						ModelUsed:       modelUsed,
+						ResolvedAgentID: routeMetaValue(routeMeta, func(m routeMetadata) string { return m.ResolvedAgentID }),
+						RouteMatchedBy:  routeMetaValue(routeMeta, func(m routeMetadata) string { return m.RouteMatchedBy }),
 					})
 					logger.InfoCF("agent", "Published outbound response",
 						map[string]any{
@@ -401,6 +421,9 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 	provider providers.LLMProvider,
 	cfg *config.Config,
 ) error {
+	al.reloading.Store(true)
+	defer al.reloading.Store(false)
+
 	// Validate inputs
 	if provider == nil {
 		return fmt.Errorf("provider cannot be nil")
@@ -466,6 +489,9 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 	// Close old provider after releasing the lock
 	// This prevents blocking readers while closing
 	if oldProvider, ok := extractProvider(oldRegistry); ok {
+		if sameProvider(oldProvider, provider) {
+			return nil
+		}
 		if stateful, ok := oldProvider.(providers.StatefulProvider); ok {
 			// Give in-flight requests a moment to complete
 			// Use a reasonable timeout that balances cleanup vs resource usage
@@ -501,6 +527,19 @@ func (al *AgentLoop) GetConfig() *config.Config {
 	al.mu.RLock()
 	defer al.mu.RUnlock()
 	return al.cfg
+}
+
+// CurrentProvider returns the provider currently attached to the active registry.
+func (al *AgentLoop) CurrentProvider() providers.LLMProvider {
+	if provider, ok := extractProvider(al.GetRegistry()); ok {
+		return provider
+	}
+	return nil
+}
+
+// IsReloading reports whether ReloadProviderAndConfig is currently executing.
+func (al *AgentLoop) IsReloading() bool {
+	return al.reloading.Load()
 }
 
 // SetMediaStore injects a MediaStore for media lifecycle management.
@@ -818,6 +857,14 @@ func (al *AgentLoop) CompactSession(agentID, sessionKey string) error {
 }
 
 func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, string, error) {
+	response, modelUsed, _, err := al.processMessageDetailed(ctx, msg)
+	return response, modelUsed, err
+}
+
+func (al *AgentLoop) processMessageDetailed(
+	ctx context.Context,
+	msg bus.InboundMessage,
+) (string, string, *routeMetadata, error) {
 	// Add message preview to log (show full content for error messages)
 	var logContent string
 	if strings.Contains(msg.Content, "Error:") || strings.Contains(msg.Content, "error") {
@@ -848,12 +895,16 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	// Route system messages to processSystemMessage
 	if msg.Channel == "system" {
 		content, err := al.processSystemMessage(ctx, msg)
-		return content, "", err
+		return content, "", nil, err
 	}
 
 	route, agent, routeErr := al.resolveMessageRoute(msg)
 	if routeErr != nil {
-		return "", "", routeErr
+		return "", "", nil, routeErr
+	}
+	routeMeta := &routeMetadata{
+		ResolvedAgentID: route.AgentID,
+		RouteMatchedBy:  route.MatchedBy,
 	}
 
 	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
@@ -894,10 +945,11 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	// context-dependent commands check their own Runtime fields and report
 	// "unavailable" when the required capability is nil.
 	if response, handled := al.handleCommand(ctx, msg, agent, &opts); handled {
-		return response, "", nil
+		return response, "", routeMeta, nil
 	}
 
-	return al.runAgentLoop(ctx, agent, opts)
+	response, modelUsed, err := al.runAgentLoop(ctx, agent, opts)
+	return response, modelUsed, routeMeta, err
 }
 
 func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.ResolvedRoute, *AgentInstance, error) {
@@ -919,7 +971,12 @@ func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.Resolv
 				MatchedBy:  "explicit",
 			}, agent, nil
 		}
-		// Unknown agent_id — fall through to normal config-based routing.
+		return routing.ResolvedRoute{}, nil, &RequestError{
+			Code:            ErrCodeAgentNotFound,
+			Message:         fmt.Sprintf("requested agent_id %q was not found", requestedID),
+			ResolvedAgentID: requestedID,
+			RouteMatchedBy:  "explicit",
+		}
 	}
 
 	route := registry.ResolveRoute(routing.RouteInput{
@@ -1468,20 +1525,20 @@ func (al *AgentLoop) runLLMIteration(
 				"iteration": iteration,
 			})
 
-		if agent.StatusUpdates {
-			names := make([]string, len(normalizedToolCalls))
-			for i, tc := range normalizedToolCalls {
-				names[i] = tc.Name
-			}
-			al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
-				Kind:      bus.StatusKindToolStart,
-				ToolNames: names,
-				StepName:  "Tool execution",
-				Iteration: iteration,
-				MaxIter:   agent.MaxIterations,
-				Text:      fmt.Sprintf("🔧 %s", strings.Join(names, ", ")),
-			})
+		names := make([]string, len(normalizedToolCalls))
+		for i, tc := range normalizedToolCalls {
+			names[i] = tc.Name
 		}
+		// Always emit a tool execution status event when tools are invoked so
+		// clients and stress tests can deterministically observe tool usage.
+		al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
+			Kind:      bus.StatusKindToolStart,
+			ToolNames: names,
+			StepName:  "Tool execution",
+			Iteration: iteration,
+			MaxIter:   agent.MaxIterations,
+			Text:      fmt.Sprintf("🔧 %s", strings.Join(names, ", ")),
+		})
 
 		// Build assistant message with tool calls
 		assistantMsg := providers.Message{
@@ -2270,4 +2327,18 @@ func extractProvider(registry *AgentRegistry) (providers.LLMProvider, bool) {
 		return nil, false
 	}
 	return defaultAgent.Provider, true
+}
+
+func routeMetaValue(meta *routeMetadata, pick func(routeMetadata) string) string {
+	if meta == nil {
+		return ""
+	}
+	return pick(*meta)
+}
+
+func sameProvider(a, b providers.LLMProvider) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return fmt.Sprintf("%p", a) == fmt.Sprintf("%p", b)
 }

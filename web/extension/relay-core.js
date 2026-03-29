@@ -13,7 +13,11 @@ export function normalizeRelayURL(input) {
   }
 
   const parsed = new URL(url);
-  if (!parsed.pathname || parsed.pathname === "/") {
+  const legacyPrefix = "/browser-relay";
+  if (parsed.pathname === legacyPrefix || parsed.pathname.startsWith(`${legacyPrefix}/`)) {
+    parsed.pathname = parsed.pathname.replace(/^\/browser-relay(?=\/|$)/, "/agent-browser");
+  }
+  if (!parsed.pathname || parsed.pathname === "/" || parsed.pathname === "/agent-browser") {
     parsed.pathname = "/agent-browser/extension";
   }
   return parsed.toString();

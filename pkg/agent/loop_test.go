@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,6 +51,53 @@ func (r *recordingProvider) Chat(
 
 func (r *recordingProvider) GetDefaultModel() string {
 	return "mock-model"
+}
+
+type toolCallThenFinalProvider struct {
+	callCount int
+}
+
+func (p *toolCallThenFinalProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	p.callCount++
+	if p.callCount == 1 {
+		return &providers.LLMResponse{
+			ToolCalls: []providers.ToolCall{
+				{
+					ID:   "tc-1",
+					Name: "noop_tool",
+					Arguments: map[string]any{
+						"value": "x",
+					},
+				},
+			},
+		}, nil
+	}
+	return &providers.LLMResponse{
+		Content:   "done",
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (p *toolCallThenFinalProvider) GetDefaultModel() string { return "mock-model" }
+
+type noopTool struct{}
+
+func (t *noopTool) Name() string        { return "noop_tool" }
+func (t *noopTool) Description() string { return "no-op test tool" }
+func (t *noopTool) Parameters() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	}
+}
+func (t *noopTool) Execute(ctx context.Context, args map[string]any) *tools.ToolResult {
+	return tools.NewToolResult("ok")
 }
 
 func newTestAgentLoop(
@@ -134,6 +182,105 @@ func TestProcessMessage_IncludesCurrentSenderInDynamicContext(t *testing.T) {
 	lastMessage := provider.lastMessages[len(provider.lastMessages)-1]
 	if lastMessage.Role != "user" || lastMessage.Content != "hello" {
 		t.Fatalf("last provider message = %+v, want unchanged user message", lastMessage)
+	}
+}
+
+func TestProcessMessage_ExplicitUnknownAgentReturnsTypedError(t *testing.T) {
+	al, _, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	_, _, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:test",
+		Content:  "hello",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "missing-agent",
+		},
+	})
+
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("error type = %T, want *RequestError", err)
+	}
+	if reqErr.Code != ErrCodeAgentNotFound {
+		t.Fatalf("request error code = %q, want %q", reqErr.Code, ErrCodeAgentNotFound)
+	}
+}
+
+func TestProcessMessage_ExplicitAgentRouteIsPreserved(t *testing.T) {
+	al, _, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	_, _, routeMeta, err := al.processMessageDetailed(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:test",
+		Content:  "hello",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processMessageDetailed() error = %v", err)
+	}
+	if routeMeta == nil {
+		t.Fatal("route metadata is nil")
+	}
+	if routeMeta.ResolvedAgentID != "main" {
+		t.Fatalf("resolved agent = %q, want %q", routeMeta.ResolvedAgentID, "main")
+	}
+	if routeMeta.RouteMatchedBy != "explicit" {
+		t.Fatalf("matched by = %q, want %q", routeMeta.RouteMatchedBy, "explicit")
+	}
+}
+
+func TestProcessMessage_ToolStatusEmitsEvenWhenStatusUpdatesDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 4,
+				StatusUpdates:     false,
+			},
+		},
+	}
+	msgBus := bus.NewMessageBus()
+	provider := &toolCallThenFinalProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.StatusUpdates = false
+	defaultAgent.Tools.Register(&noopTool{})
+
+	response, _, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:test",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "done" {
+		t.Fatalf("response = %q, want %q", response, "done")
+	}
+
+	select {
+	case status := <-msgBus.OutboundStatusChan():
+		if status.Kind != bus.StatusKindToolStart {
+			t.Fatalf("status kind = %q, want %q", status.Kind, bus.StatusKindToolStart)
+		}
+		if len(status.ToolNames) == 0 || status.ToolNames[0] != "noop_tool" {
+			t.Fatalf("tool names = %v, expected noop_tool", status.ToolNames)
+		}
+	default:
+		t.Fatal("expected tool status update to be published")
 	}
 }
 

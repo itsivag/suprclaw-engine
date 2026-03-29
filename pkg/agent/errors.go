@@ -5,6 +5,7 @@ const (
 	ErrCodeModelUnavailable         = "MODEL_UNAVAILABLE"
 	ErrCodeModelModalityUnsupported = "MODEL_MODALITY_UNSUPPORTED"
 	ErrCodeContextBudgetUnfit       = "CONTEXT_BUDGET_UNFIT"
+	ErrCodeAgentNotFound            = "AGENT_NOT_FOUND"
 )
 
 // RequestError is a typed, client-visible error for per-request validation failures.
@@ -12,6 +13,9 @@ const (
 type RequestError struct {
 	Code    string
 	Message string
+	// Optional observability fields for downstream clients/logging.
+	ResolvedAgentID string
+	RouteMatchedBy  string
 }
 
 func (e *RequestError) Error() string { return e.Code + ": " + e.Message }

@@ -160,13 +160,29 @@ func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 
 	// Typed error — send as error event, not message.create
 	if msg.ErrorCode != "" {
-		errMsg := newError(msg.ErrorCode, msg.ErrorMessage)
+		errPayload := map[string]any{
+			"code":    msg.ErrorCode,
+			"message": msg.ErrorMessage,
+		}
+		if msg.ResolvedAgentID != "" {
+			errPayload["resolved_agent_id"] = msg.ResolvedAgentID
+		}
+		if msg.RouteMatchedBy != "" {
+			errPayload["route_matched_by"] = msg.RouteMatchedBy
+		}
+		errMsg := newMessage(TypeError, errPayload)
 		return c.broadcastToSession(msg.ChatID, errMsg)
 	}
 
 	payload := map[string]any{"content": msg.Content}
 	if msg.ModelUsed != "" {
 		payload["model_used"] = msg.ModelUsed
+	}
+	if msg.ResolvedAgentID != "" {
+		payload["resolved_agent_id"] = msg.ResolvedAgentID
+	}
+	if msg.RouteMatchedBy != "" {
+		payload["route_matched_by"] = msg.RouteMatchedBy
 	}
 	outMsg := newMessage(TypeMessageCreate, payload)
 	return c.broadcastToSession(msg.ChatID, outMsg)

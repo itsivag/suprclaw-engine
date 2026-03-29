@@ -16,6 +16,7 @@ type Server struct {
 	mu        sync.RWMutex
 	ready     bool
 	checks    map[string]Check
+	checkFns  map[string]func() (bool, string)
 	startTime time.Time
 }
 
@@ -38,6 +39,7 @@ func NewServer(host string, port int) *Server {
 	s := &Server{
 		ready:     false,
 		checks:    make(map[string]Check),
+		checkFns:  make(map[string]func() (bool, string)),
 		startTime: time.Now(),
 	}
 
@@ -97,13 +99,8 @@ func (s *Server) RegisterCheck(name string, checkFn func() (bool, string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	status, msg := checkFn()
-	s.checks[name] = Check{
-		Name:      name,
-		Status:    statusString(status),
-		Message:   msg,
-		Timestamp: time.Now(),
-	}
+	s.checkFns[name] = checkFn
+	s.checks[name] = evaluateCheck(name, checkFn)
 }
 
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -125,9 +122,8 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.RLock()
 	ready := s.ready
-	checks := make(map[string]Check)
-	maps.Copy(checks, s.checks)
 	s.mu.RUnlock()
+	checks := s.evaluateChecks()
 
 	if !ready {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -158,6 +154,18 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) evaluateChecks() map[string]Check {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for name, checkFn := range s.checkFns {
+		s.checks[name] = evaluateCheck(name, checkFn)
+	}
+	out := make(map[string]Check)
+	maps.Copy(out, s.checks)
+	return out
+}
+
 // RegisterOnMux registers /health and /ready handlers onto the given mux.
 // This allows the health endpoints to be served by a shared HTTP server.
 func (s *Server) RegisterOnMux(mux *http.ServeMux) {
@@ -170,4 +178,14 @@ func statusString(ok bool) string {
 		return "ok"
 	}
 	return "fail"
+}
+
+func evaluateCheck(name string, checkFn func() (bool, string)) Check {
+	status, msg := checkFn()
+	return Check{
+		Name:      name,
+		Status:    statusString(status),
+		Message:   msg,
+		Timestamp: time.Now(),
+	}
 }

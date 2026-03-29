@@ -39,6 +39,9 @@ type OutboundMessage struct {
 	ErrorMessage string `json:"error_message,omitempty"`
 	// Resolved model for this turn — echoed in message.create payload
 	ModelUsed string `json:"model_used,omitempty"`
+	// Optional routing metadata for observability.
+	ResolvedAgentID string `json:"resolved_agent_id,omitempty"`
+	RouteMatchedBy  string `json:"route_matched_by,omitempty"`
 }
 
 // MediaPart describes a single media attachment to send.
@@ -71,9 +74,9 @@ type OutboundStatusUpdate struct {
 	Channel   string
 	ChatID    string
 	Kind      StatusKind
-	Text      string     // pre-formatted display string
-	ToolNames []string   // e.g. ["web_search", "read_file"] — populated for tool_start
-	StepName  string     // human-readable step label
-	Iteration int        // 1-based iteration number
-	MaxIter   int        // max iterations configured
+	Text      string   // pre-formatted display string
+	ToolNames []string // e.g. ["web_search", "read_file"] — populated for tool_start
+	StepName  string   // human-readable step label
+	Iteration int      // 1-based iteration number
+	MaxIter   int      // max iterations configured
 }
