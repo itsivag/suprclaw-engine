@@ -43,6 +43,8 @@ const (
 	runStatusUnknown    = "unknown"
 )
 
+const reasoningUsage = "off|low|medium|high|xhigh|adaptive"
+
 type sessionRunState struct {
 	latestRunID string
 	runs        map[string]string
@@ -735,6 +737,11 @@ func (c *SuprChannel) handleMessageSend(pc *suprConn, msg SuprMessage) {
 		pc.writeJSON(errMsg)
 		return
 	}
+	reasoningOverride, err := parseReasoningOverride(msg.Payload)
+	if err != nil {
+		pc.writeJSON(newError("invalid_reasoning", err.Error()))
+		return
+	}
 
 	sessionID := msg.SessionID
 	if sessionID == "" {
@@ -758,6 +765,9 @@ func (c *SuprChannel) handleMessageSend(pc *suprConn, msg SuprMessage) {
 
 	if model, _ := msg.Payload["model"].(string); model != "" {
 		metadata["model_override"] = model
+	}
+	if reasoningOverride != "" {
+		metadata["reasoning_override"] = reasoningOverride
 	}
 
 	logger.DebugCF("supr", "Received message", map[string]any{
@@ -910,6 +920,11 @@ func (c *SuprChannel) handleMediaSend(pc *suprConn, msg SuprMessage) {
 		pc.writeJSON(newError("media_store_unavailable", "media store is not configured"))
 		return
 	}
+	reasoningOverride, err := parseReasoningOverride(msg.Payload)
+	if err != nil {
+		pc.writeJSON(newError("invalid_reasoning", err.Error()))
+		return
+	}
 
 	items, err := parseMediaItems(msg.Payload)
 	if err != nil {
@@ -995,6 +1010,9 @@ func (c *SuprChannel) handleMediaSend(pc *suprConn, msg SuprMessage) {
 	if model, _ := msg.Payload["model"].(string); model != "" {
 		metadata["model_override"] = model
 	}
+	if reasoningOverride != "" {
+		metadata["reasoning_override"] = reasoningOverride
+	}
 
 	sender := bus.SenderInfo{
 		Platform:    "supr",
@@ -1012,6 +1030,27 @@ func (c *SuprChannel) handleMediaSend(pc *suprConn, msg SuprMessage) {
 	})
 
 	c.HandleMessage(c.ctx, peer, messageID, senderID, chatID, content, refs, metadata, sender)
+}
+
+func parseReasoningOverride(payload map[string]any) (string, error) {
+	if payload == nil {
+		return "", nil
+	}
+	raw, exists := payload["reasoning"]
+	if !exists {
+		return "", nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("reasoning must be a string (%s)", reasoningUsage)
+	}
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "off", "low", "medium", "high", "xhigh", "adaptive":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid reasoning %q. Allowed: %s", value, reasoningUsage)
+	}
 }
 
 // SendMedia implements channels.MediaSender — sends media.create frames to clients.

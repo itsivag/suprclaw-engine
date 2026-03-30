@@ -122,6 +122,100 @@ func TestSwitchModel_NilDep(t *testing.T) {
 	}
 }
 
+func TestSwitchReasoning_Success(t *testing.T) {
+	rt := &Runtime{
+		SwitchReasoning: func(value string) (string, error) {
+			if value != "high" {
+				t.Fatalf("unexpected value=%q", value)
+			}
+			return "off", nil
+		},
+	}
+	ex := NewExecutor(NewRegistry(BuiltinDefinitions()), rt)
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/switch reasoning to high",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if reply != "Switched reasoning from off to high" {
+		t.Fatalf("reply=%q, want success message", reply)
+	}
+}
+
+func TestSwitchReasoning_MissingToKeyword(t *testing.T) {
+	rt := &Runtime{
+		SwitchReasoning: func(value string) (string, error) {
+			return "off", nil
+		},
+	}
+	ex := NewExecutor(NewRegistry(BuiltinDefinitions()), rt)
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/switch reasoning high",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if reply != "Usage: /switch reasoning to <off|low|medium|high|xhigh|adaptive>" {
+		t.Fatalf("reply=%q, want usage message", reply)
+	}
+}
+
+func TestSwitchReasoning_Error(t *testing.T) {
+	rt := &Runtime{
+		SwitchReasoning: func(value string) (string, error) {
+			return "", fmt.Errorf("invalid reasoning level")
+		},
+	}
+	ex := NewExecutor(NewRegistry(BuiltinDefinitions()), rt)
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/switch reasoning to invalid",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if reply != "invalid reasoning level" {
+		t.Fatalf("reply=%q, want error message", reply)
+	}
+}
+
+func TestSwitchReasoning_NilDep(t *testing.T) {
+	ex := NewExecutor(NewRegistry(BuiltinDefinitions()), &Runtime{})
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/switch reasoning to high",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if reply != "Command unavailable in current context." {
+		t.Fatalf("reply=%q, want unavailable message", reply)
+	}
+}
+
 func TestSwitchChannel_Redirect(t *testing.T) {
 	ex := NewExecutor(NewRegistry(BuiltinDefinitions()), &Runtime{})
 

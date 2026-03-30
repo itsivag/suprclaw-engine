@@ -22,18 +22,29 @@ const (
 // Case-insensitive and whitespace-tolerant for user-facing config values.
 // Returns ThinkingOff for unknown or empty values.
 func parseThinkingLevel(level string) ThinkingLevel {
+	if parsed, ok := parseThinkingLevelStrict(level); ok {
+		return parsed
+	}
+	return ThinkingOff
+}
+
+// parseThinkingLevelStrict normalizes a config string to a ThinkingLevel and
+// reports whether the input is a known value.
+func parseThinkingLevelStrict(level string) (ThinkingLevel, bool) {
 	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "off":
+		return ThinkingOff, true
 	case "adaptive":
-		return ThinkingAdaptive
+		return ThinkingAdaptive, true
 	case "low":
-		return ThinkingLow
+		return ThinkingLow, true
 	case "medium":
-		return ThinkingMedium
+		return ThinkingMedium, true
 	case "high":
-		return ThinkingHigh
+		return ThinkingHigh, true
 	case "xhigh":
-		return ThinkingXHigh
+		return ThinkingXHigh, true
 	default:
-		return ThinkingOff
+		return ThinkingOff, false
 	}
 }

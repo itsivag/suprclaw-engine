@@ -1066,6 +1066,41 @@ func (m *countingMockProvider) GetDefaultModel() string {
 	return "counting-mock-model"
 }
 
+type thinkingCaptureProvider struct {
+	response         string
+	calls            int
+	lastModel        string
+	lastOpts         map[string]any
+	supportsThinking bool
+}
+
+func (m *thinkingCaptureProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	m.calls++
+	m.lastModel = model
+	m.lastOpts = make(map[string]any, len(opts))
+	for k, v := range opts {
+		m.lastOpts[k] = v
+	}
+	return &providers.LLMResponse{
+		Content:   m.response,
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (m *thinkingCaptureProvider) GetDefaultModel() string {
+	return "thinking-capture-model"
+}
+
+func (m *thinkingCaptureProvider) SupportsThinking() bool {
+	return m.supportsThinking
+}
+
 // mockCustomTool is a simple mock tool for registration testing
 type mockCustomTool struct{}
 
@@ -1361,6 +1396,200 @@ func TestProcessMessage_SwitchModelShowModelConsistency(t *testing.T) {
 
 	if provider.calls != 0 {
 		t.Fatalf("LLM should not be called for /switch and /show, calls=%d", provider.calls)
+	}
+}
+
+func TestProcessMessage_ReasoningOverrideAppliesPerTurn(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "base-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &thinkingCaptureProvider{response: "LLM reply", supportsThinking: true}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	helper := testHelper{al: al}
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("No default agent found")
+	}
+	defaultAgent.ThinkingLevel = ThinkingHigh
+
+	resp := helper.executeAndGetResponse(t, context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "hello",
+		Peer: bus.Peer{
+			Kind: "direct",
+			ID:   "user1",
+		},
+		Metadata: map[string]string{
+			metadataKeyReasoningOverride: "low",
+		},
+	})
+	if resp != "LLM reply" {
+		t.Fatalf("unexpected response: %q", resp)
+	}
+	if got, ok := provider.lastOpts["thinking_level"].(string); !ok || got != "low" {
+		t.Fatalf("thinking_level override not applied, got=%v", provider.lastOpts["thinking_level"])
+	}
+	if defaultAgent.ThinkingLevel != ThinkingHigh {
+		t.Fatalf("agent thinking level mutated unexpectedly: got=%q want=%q", defaultAgent.ThinkingLevel, ThinkingHigh)
+	}
+}
+
+func TestProcessMessage_ModelAndReasoningOverrideApplyTogether(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "base-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &thinkingCaptureProvider{response: "LLM reply", supportsThinking: true}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	helper := testHelper{al: al}
+
+	_ = helper.executeAndGetResponse(t, context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "hello",
+		Peer: bus.Peer{
+			Kind: "direct",
+			ID:   "user1",
+		},
+		Metadata: map[string]string{
+			metadataKeyModelOverride:     "override-model",
+			metadataKeyReasoningOverride: "xhigh",
+		},
+	})
+	if provider.lastModel != "override-model" {
+		t.Fatalf("model override not applied, got=%q", provider.lastModel)
+	}
+	if got, ok := provider.lastOpts["thinking_level"].(string); !ok || got != "xhigh" {
+		t.Fatalf("thinking_level override not applied, got=%v", provider.lastOpts["thinking_level"])
+	}
+}
+
+func TestProcessMessage_SwitchReasoningPersistsOnAgent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "base-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &thinkingCaptureProvider{response: "LLM reply", supportsThinking: true}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	helper := testHelper{al: al}
+
+	switchResp := helper.executeAndGetResponse(t, context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "/switch reasoning to high",
+		Peer: bus.Peer{
+			Kind: "direct",
+			ID:   "user1",
+		},
+	})
+	if !strings.Contains(switchResp, "Switched reasoning from off to high") {
+		t.Fatalf("unexpected /switch reasoning reply: %q", switchResp)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("LLM should not be called for /switch reasoning, calls=%d", provider.calls)
+	}
+
+	_ = helper.executeAndGetResponse(t, context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "hello",
+		Peer: bus.Peer{
+			Kind: "direct",
+			ID:   "user1",
+		},
+	})
+	if got, ok := provider.lastOpts["thinking_level"].(string); !ok || got != "high" {
+		t.Fatalf("thinking_level after /switch reasoning = %v, want high", provider.lastOpts["thinking_level"])
+	}
+}
+
+func TestProcessMessage_SwitchReasoningRejectsInvalidValue(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "base-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &thinkingCaptureProvider{response: "LLM reply", supportsThinking: true}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	helper := testHelper{al: al}
+
+	reply := helper.executeAndGetResponse(t, context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "/switch reasoning to invalid",
+		Peer: bus.Peer{
+			Kind: "direct",
+			ID:   "user1",
+		},
+	})
+	if !strings.Contains(reply, "invalid reasoning level") {
+		t.Fatalf("unexpected /switch reasoning error reply: %q", reply)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("LLM should not be called for invalid /switch reasoning, calls=%d", provider.calls)
 	}
 }
 

@@ -80,21 +80,23 @@ type processOptions struct {
 	SendResponse      bool     // Whether to send response via bus
 	MaxTokensOverride int      // If > 0, overrides agent.MaxTokens for this run (heartbeat token budget)
 	ModelOverride     string   // If non-empty, overrides the agent's model for this turn only
+	ThinkingOverride  string   // If non-empty, overrides the agent's thinking level for this turn only
 	ResolvedAgentID   string   // Route metadata for this request (if available)
 	RouteMatchedBy    string   // Route metadata for this request (if available)
 }
 
 const (
-	defaultResponse             = "I've completed processing but have no response to give. Increase `max_tool_iterations` in config.json."
-	thinkingStatusText          = "🧠 thinking"
-	sessionKeyAgentPrefix       = "agent:"
-	metadataKeyAccountID        = "account_id"
-	metadataKeyGuildID          = "guild_id"
-	metadataKeyTeamID           = "team_id"
-	metadataKeyParentPeerKind   = "parent_peer_kind"
-	metadataKeyParentPeerID     = "parent_peer_id"
-	metadataKeyRequestedAgentID = "requested_agent_id"
-	metadataKeyModelOverride    = "model_override"
+	defaultResponse              = "I've completed processing but have no response to give. Increase `max_tool_iterations` in config.json."
+	thinkingStatusText           = "🧠 thinking"
+	sessionKeyAgentPrefix        = "agent:"
+	metadataKeyAccountID         = "account_id"
+	metadataKeyGuildID           = "guild_id"
+	metadataKeyTeamID            = "team_id"
+	metadataKeyParentPeerKind    = "parent_peer_kind"
+	metadataKeyParentPeerID      = "parent_peer_id"
+	metadataKeyRequestedAgentID  = "requested_agent_id"
+	metadataKeyModelOverride     = "model_override"
+	metadataKeyReasoningOverride = "reasoning_override"
 )
 
 func NewAgentLoop(
@@ -988,6 +990,7 @@ func (al *AgentLoop) processMessageDetailed(
 		EnableSummary:     true,
 		SendResponse:      true,
 		ModelOverride:     inboundMetadata(msg, metadataKeyModelOverride),
+		ThinkingOverride:  inboundMetadata(msg, metadataKeyReasoningOverride),
 		ResolvedAgentID:   routeMeta.ResolvedAgentID,
 		RouteMatchedBy:    routeMeta.RouteMatchedBy,
 	}
@@ -1386,11 +1389,11 @@ func (al *AgentLoop) runLLMIteration(
 				"title":   stepName,
 				"status":  "in_progress",
 			})
-				activity.emit("reasoning.summary", map[string]any{
-					"step_id": iterationStepID,
-					"style":   "concise",
-					"text":    thinkingStatusText,
-				})
+			activity.emit("reasoning.summary", map[string]any{
+				"step_id": iterationStepID,
+				"style":   "concise",
+				"text":    thinkingStatusText,
+			})
 			activity.emit("step.updated", map[string]any{
 				"step_id":  iterationStepID,
 				"headline": "Preparing model request",
@@ -1405,15 +1408,15 @@ func (al *AgentLoop) runLLMIteration(
 				"max":       agent.MaxIterations,
 			})
 
-			if agent.StatusUpdates {
-				al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
-					Kind:      bus.StatusKindIteration,
-					StepName:  stepName,
-					Iteration: iteration,
-					MaxIter:   agent.MaxIterations,
-					Text:      thinkingStatusText,
-				})
-			}
+		if agent.StatusUpdates {
+			al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
+				Kind:      bus.StatusKindIteration,
+				StepName:  stepName,
+				Iteration: iteration,
+				MaxIter:   agent.MaxIterations,
+				Text:      thinkingStatusText,
+			})
+		}
 
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()
@@ -1453,14 +1456,18 @@ func (al *AgentLoop) runLLMIteration(
 			"temperature":      agent.Temperature,
 			"prompt_cache_key": agent.ID,
 		}
+		effectiveThinking := agent.ThinkingLevel
+		if opts.ThinkingOverride != "" {
+			effectiveThinking = parseThinkingLevel(opts.ThinkingOverride)
+		}
 		// parseThinkingLevel guarantees ThinkingOff for empty/unknown values,
 		// so checking != ThinkingOff is sufficient.
-		if agent.ThinkingLevel != ThinkingOff {
+		if effectiveThinking != ThinkingOff {
 			if tc, ok := agent.Provider.(providers.ThinkingCapable); ok && tc.SupportsThinking() {
-				llmOpts["thinking_level"] = string(agent.ThinkingLevel)
+				llmOpts["thinking_level"] = string(effectiveThinking)
 			} else {
 				logger.WarnCF("agent", "thinking_level is set but current provider does not support it, ignoring",
-					map[string]any{"agent_id": agent.ID, "thinking_level": string(agent.ThinkingLevel)})
+					map[string]any{"agent_id": agent.ID, "thinking_level": string(effectiveThinking)})
 			}
 		}
 
@@ -2554,6 +2561,15 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			oldModel := agent.Model
 			agent.Model = value
 			return oldModel, nil
+		}
+		rt.SwitchReasoning = func(value string) (string, error) {
+			next, ok := parseThinkingLevelStrict(value)
+			if !ok {
+				return "", fmt.Errorf("invalid reasoning level %q. Allowed: off|low|medium|high|xhigh|adaptive", value)
+			}
+			oldReasoning := string(agent.ThinkingLevel)
+			agent.ThinkingLevel = next
+			return oldReasoning, nil
 		}
 
 		rt.ClearHistory = func() error {

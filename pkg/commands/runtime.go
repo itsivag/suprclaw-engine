@@ -12,6 +12,7 @@ type Runtime struct {
 	ListDefinitions    func() []Definition
 	GetEnabledChannels func() []string
 	SwitchModel        func(value string) (oldModel string, err error)
+	SwitchReasoning    func(value string) (oldReasoning string, err error)
 	SwitchChannel      func(value string) error
 	ClearHistory       func() error
 	NewSession         func() error

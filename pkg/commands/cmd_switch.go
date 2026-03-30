@@ -8,7 +8,7 @@ import (
 func switchCommand() Definition {
 	return Definition{
 		Name:        "switch",
-		Description: "Switch model",
+		Description: "Switch runtime settings",
 		SubCommands: []SubCommand{
 			{
 				Name:        "model",
@@ -28,6 +28,25 @@ func switchCommand() Definition {
 						return req.Reply(err.Error())
 					}
 					return req.Reply(fmt.Sprintf("Switched model from %s to %s", oldModel, value))
+				},
+			},
+			{
+				Name:        "reasoning",
+				Description: "Switch reasoning level",
+				ArgsUsage:   "to <off|low|medium|high|xhigh|adaptive>",
+				Handler: func(_ context.Context, req Request, rt *Runtime) error {
+					if rt == nil || rt.SwitchReasoning == nil {
+						return req.Reply(unavailableMsg)
+					}
+					value := nthToken(req.Text, 3) // tokens: [/switch, reasoning, to, <value>]
+					if nthToken(req.Text, 2) != "to" || value == "" {
+						return req.Reply("Usage: /switch reasoning to <off|low|medium|high|xhigh|adaptive>")
+					}
+					oldReasoning, err := rt.SwitchReasoning(value)
+					if err != nil {
+						return req.Reply(err.Error())
+					}
+					return req.Reply(fmt.Sprintf("Switched reasoning from %s to %s", oldReasoning, value))
 				},
 			},
 			{
