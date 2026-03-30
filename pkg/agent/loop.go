@@ -258,8 +258,8 @@ func registerSharedTools(
 
 		// Spawn and spawn_status tools share a SubagentManager.
 		// Construct it when either tool is enabled (both require subagent).
-		spawnEnabled := cfg.Tools.IsToolEnabled("spawn")
-		spawnStatusEnabled := cfg.Tools.IsToolEnabled("spawn_status")
+		spawnEnabled := isSpawnEnabledForAgent(cfg, agentID)
+		spawnStatusEnabled := isSpawnStatusEnabledForAgent(cfg, agentID)
 		if (spawnEnabled || spawnStatusEnabled) && cfg.Tools.IsToolEnabled("subagent") {
 			subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
 			subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
@@ -278,6 +278,42 @@ func registerSharedTools(
 			logger.WarnCF("agent", "spawn/spawn_status tools require subagent to be enabled", nil)
 		}
 	}
+}
+
+func isSpawnEnabledForAgent(cfg *config.Config, agentID string) bool {
+	globalEnabled := cfg.Tools.IsToolEnabled("spawn")
+	normalizedAgentID := routing.NormalizeAgentID(agentID)
+
+	for i := range cfg.Agents.List {
+		agentCfg := &cfg.Agents.List[i]
+		if routing.NormalizeAgentID(agentCfg.ID) != normalizedAgentID {
+			continue
+		}
+		if agentCfg.Tools != nil && agentCfg.Tools.Spawn != nil {
+			return *agentCfg.Tools.Spawn
+		}
+		return globalEnabled
+	}
+
+	return globalEnabled
+}
+
+func isSpawnStatusEnabledForAgent(cfg *config.Config, agentID string) bool {
+	globalEnabled := cfg.Tools.IsToolEnabled("spawn_status")
+	normalizedAgentID := routing.NormalizeAgentID(agentID)
+
+	for i := range cfg.Agents.List {
+		agentCfg := &cfg.Agents.List[i]
+		if routing.NormalizeAgentID(agentCfg.ID) != normalizedAgentID {
+			continue
+		}
+		if agentCfg.Tools != nil && agentCfg.Tools.SpawnStatus != nil {
+			return *agentCfg.Tools.SpawnStatus
+		}
+		return globalEnabled
+	}
+
+	return globalEnabled
 }
 
 func (al *AgentLoop) Run(ctx context.Context) error {

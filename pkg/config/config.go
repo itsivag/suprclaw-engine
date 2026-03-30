@@ -201,7 +201,13 @@ type AgentConfig struct {
 	Workspace string            `json:"workspace,omitempty"`
 	Model     *AgentModelConfig `json:"model,omitempty"`
 	Skills    []string          `json:"skills,omitempty"`
+	Tools     *AgentToolsConfig `json:"tools,omitempty"`
 	Subagents *SubagentsConfig  `json:"subagents,omitempty"`
+}
+
+type AgentToolsConfig struct {
+	Spawn       *bool `json:"spawn,omitempty"`
+	SpawnStatus *bool `json:"spawn_status,omitempty"`
 }
 
 type SubagentsConfig struct {

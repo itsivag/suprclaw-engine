@@ -821,6 +821,168 @@ func TestAgentLoop_GetStartupInfo(t *testing.T) {
 	}
 }
 
+func TestRegisterSharedTools_SpawnPerAgentOverrideDisablesGlobalSpawn(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Tools.Spawn.Enabled = true
+	cfg.Tools.Subagent.Enabled = true
+	cfg.Agents.List = []config.AgentConfig{
+		{
+			ID:      "alpha",
+			Default: true,
+			Tools: &config.AgentToolsConfig{
+				Spawn: boolPtr(false),
+			},
+		},
+		{
+			ID: "beta",
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	registry := al.GetRegistry()
+
+	alpha, ok := registry.GetAgent("alpha")
+	if !ok {
+		t.Fatal("expected alpha agent")
+	}
+	if _, exists := alpha.Tools.Get("spawn"); exists {
+		t.Fatal("expected spawn tool to be disabled for alpha via per-agent override")
+	}
+
+	beta, ok := registry.GetAgent("beta")
+	if !ok {
+		t.Fatal("expected beta agent")
+	}
+	if _, exists := beta.Tools.Get("spawn"); !exists {
+		t.Fatal("expected spawn tool to remain enabled for beta via global config fallback")
+	}
+}
+
+func TestRegisterSharedTools_SpawnPerAgentOverrideEnablesWhenGlobalDisabled(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Tools.Spawn.Enabled = false
+	cfg.Tools.Subagent.Enabled = true
+	cfg.Agents.List = []config.AgentConfig{
+		{
+			ID:      "alpha",
+			Default: true,
+			Tools: &config.AgentToolsConfig{
+				Spawn: boolPtr(true),
+			},
+		},
+		{
+			ID: "beta",
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	registry := al.GetRegistry()
+
+	alpha, ok := registry.GetAgent("alpha")
+	if !ok {
+		t.Fatal("expected alpha agent")
+	}
+	if _, exists := alpha.Tools.Get("spawn"); !exists {
+		t.Fatal("expected spawn tool to be enabled for alpha via per-agent override")
+	}
+
+	beta, ok := registry.GetAgent("beta")
+	if !ok {
+		t.Fatal("expected beta agent")
+	}
+	if _, exists := beta.Tools.Get("spawn"); exists {
+		t.Fatal("expected spawn tool to remain disabled for beta via global config")
+	}
+}
+
+func TestRegisterSharedTools_SpawnStatusPerAgentOverrideDisablesGlobalSpawnStatus(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Tools.Spawn.Enabled = false
+	cfg.Tools.SpawnStatus.Enabled = true
+	cfg.Tools.Subagent.Enabled = true
+	cfg.Agents.List = []config.AgentConfig{
+		{
+			ID:      "alpha",
+			Default: true,
+			Tools: &config.AgentToolsConfig{
+				SpawnStatus: boolPtr(false),
+			},
+		},
+		{
+			ID: "beta",
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	registry := al.GetRegistry()
+
+	alpha, ok := registry.GetAgent("alpha")
+	if !ok {
+		t.Fatal("expected alpha agent")
+	}
+	if _, exists := alpha.Tools.Get("spawn_status"); exists {
+		t.Fatal("expected spawn_status tool to be disabled for alpha via per-agent override")
+	}
+
+	beta, ok := registry.GetAgent("beta")
+	if !ok {
+		t.Fatal("expected beta agent")
+	}
+	if _, exists := beta.Tools.Get("spawn_status"); !exists {
+		t.Fatal("expected spawn_status tool to remain enabled for beta via global config fallback")
+	}
+}
+
+func TestRegisterSharedTools_SpawnStatusPerAgentOverrideEnablesWhenGlobalDisabled(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Tools.Spawn.Enabled = false
+	cfg.Tools.SpawnStatus.Enabled = false
+	cfg.Tools.Subagent.Enabled = true
+	cfg.Agents.List = []config.AgentConfig{
+		{
+			ID:      "alpha",
+			Default: true,
+			Tools: &config.AgentToolsConfig{
+				SpawnStatus: boolPtr(true),
+			},
+		},
+		{
+			ID: "beta",
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	registry := al.GetRegistry()
+
+	alpha, ok := registry.GetAgent("alpha")
+	if !ok {
+		t.Fatal("expected alpha agent")
+	}
+	if _, exists := alpha.Tools.Get("spawn_status"); !exists {
+		t.Fatal("expected spawn_status tool to be enabled for alpha via per-agent override")
+	}
+
+	beta, ok := registry.GetAgent("beta")
+	if !ok {
+		t.Fatal("expected beta agent")
+	}
+	if _, exists := beta.Tools.Get("spawn_status"); exists {
+		t.Fatal("expected spawn_status tool to remain disabled for beta via global config")
+	}
+}
+
 // TestAgentLoop_Stop verifies Stop() sets running to false
 func TestAgentLoop_Stop(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")

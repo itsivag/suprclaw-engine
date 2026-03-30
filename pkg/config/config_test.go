@@ -93,18 +93,22 @@ func TestAgentConfig_FullParse(t *testing.T) {
 					"name": "Sales Bot",
 					"model": "gpt-4"
 				},
-				{
-					"id": "support",
-					"name": "Support Bot",
-					"model": {
-						"primary": "claude-opus",
-						"fallbacks": ["haiku"]
-					},
-					"subagents": {
-						"allow_agents": ["sales"]
+					{
+						"id": "support",
+						"name": "Support Bot",
+						"model": {
+							"primary": "claude-opus",
+							"fallbacks": ["haiku"]
+						},
+						"tools": {
+							"spawn": false,
+							"spawn_status": false
+						},
+						"subagents": {
+							"allow_agents": ["sales"]
+						}
 					}
-				}
-			]
+				]
 		},
 		"bindings": [
 			{
@@ -153,6 +157,12 @@ func TestAgentConfig_FullParse(t *testing.T) {
 	}
 	if support.Subagents == nil || len(support.Subagents.AllowAgents) != 1 {
 		t.Errorf("support.Subagents = %+v", support.Subagents)
+	}
+	if support.Tools == nil || support.Tools.Spawn == nil || *support.Tools.Spawn != false {
+		t.Errorf("support.Tools.Spawn = %+v", support.Tools)
+	}
+	if support.Tools == nil || support.Tools.SpawnStatus == nil || *support.Tools.SpawnStatus != false {
+		t.Errorf("support.Tools.SpawnStatus = %+v", support.Tools)
 	}
 
 	if len(cfg.Bindings) != 1 {
