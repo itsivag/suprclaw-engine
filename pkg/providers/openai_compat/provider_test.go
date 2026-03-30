@@ -591,6 +591,91 @@ func TestProviderChat_AcceptsNumericOptionTypes(t *testing.T) {
 	}
 }
 
+func TestProviderChat_MapsThinkingLevelToReasoningEffort(t *testing.T) {
+	var requestBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{
+					"message":       map[string]any{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "", WithReasoningEffortFromThinking(true))
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"test-model",
+		map[string]any{"thinking_level": "xhigh"},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if got := requestBody["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning_effort = %v, want %q", got, "high")
+	}
+
+	rawAllowed, ok := requestBody["allowed_openai_params"].([]any)
+	if !ok {
+		t.Fatalf("allowed_openai_params type = %T, want []any", requestBody["allowed_openai_params"])
+	}
+	if len(rawAllowed) != 1 || rawAllowed[0] != "reasoning_effort" {
+		t.Fatalf("allowed_openai_params = %v, want [reasoning_effort]", rawAllowed)
+	}
+}
+
+func TestProviderChat_DoesNotSendReasoningEffortWhenOff(t *testing.T) {
+	var requestBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{
+					"message":       map[string]any{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "", WithReasoningEffortFromThinking(true))
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"test-model",
+		map[string]any{"thinking_level": "off"},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if _, ok := requestBody["reasoning_effort"]; ok {
+		t.Fatalf("reasoning_effort should not be set when thinking_level=off")
+	}
+	if _, ok := requestBody["allowed_openai_params"]; ok {
+		t.Fatalf("allowed_openai_params should not be set when no reasoning_effort is sent")
+	}
+}
+
 func TestNormalizeModel_UsesAPIBase(t *testing.T) {
 	if got := normalizeModel("deepseek/deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek-chat" {
 		t.Fatalf("normalizeModel(deepseek) = %q, want %q", got, "deepseek-chat")
@@ -851,6 +936,30 @@ func TestSupportsPromptCacheKey(t *testing.T) {
 	for _, tt := range tests {
 		if got := supportsPromptCacheKey(tt.apiBase); got != tt.want {
 			t.Errorf("supportsPromptCacheKey(%q) = %v, want %v", tt.apiBase, got, tt.want)
+		}
+	}
+}
+
+func TestMapThinkingLevelToReasoningEffort(t *testing.T) {
+	tests := []struct {
+		in     string
+		want   string
+		wantOK bool
+	}{
+		{in: "off", want: "", wantOK: false},
+		{in: "low", want: "low", wantOK: true},
+		{in: "medium", want: "medium", wantOK: true},
+		{in: "high", want: "high", wantOK: true},
+		{in: "xhigh", want: "high", wantOK: true},
+		{in: "adaptive", want: "medium", wantOK: true},
+		{in: "unknown", want: "", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		got, ok := mapThinkingLevelToReasoningEffort(tt.in)
+		if ok != tt.wantOK || got != tt.want {
+			t.Fatalf("mapThinkingLevelToReasoningEffort(%q) = (%q, %v), want (%q, %v)",
+				tt.in, got, ok, tt.want, tt.wantOK)
 		}
 	}
 }

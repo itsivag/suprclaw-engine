@@ -14,7 +14,8 @@ import (
 )
 
 type HTTPProvider struct {
-	delegate *openai_compat.Provider
+	delegate         *openai_compat.Provider
+	supportsThinking bool
 }
 
 func NewHTTPProvider(apiKey, apiBase, proxy string) *HTTPProvider {
@@ -42,6 +43,25 @@ func NewHTTPProviderWithMaxTokensFieldAndRequestTimeout(
 	}
 }
 
+// NewHTTPProviderWithReasoningEffortSupport creates an OpenAI-compatible provider
+// that maps thinking_level to reasoning_effort for LiteLLM-compatible endpoints.
+func NewHTTPProviderWithReasoningEffortSupport(
+	apiKey, apiBase, proxy, maxTokensField string,
+	requestTimeoutSeconds int,
+) *HTTPProvider {
+	return &HTTPProvider{
+		delegate: openai_compat.NewProvider(
+			apiKey,
+			apiBase,
+			proxy,
+			openai_compat.WithMaxTokensField(maxTokensField),
+			openai_compat.WithRequestTimeout(time.Duration(requestTimeoutSeconds)*time.Second),
+			openai_compat.WithReasoningEffortFromThinking(true),
+		),
+		supportsThinking: true,
+	}
+}
+
 func (p *HTTPProvider) Chat(
 	ctx context.Context,
 	messages []Message,
@@ -64,4 +84,9 @@ func (p *HTTPProvider) CountTokens(
 
 func (p *HTTPProvider) GetDefaultModel() string {
 	return ""
+}
+
+// SupportsThinking implements providers.ThinkingCapable.
+func (p *HTTPProvider) SupportsThinking() bool {
+	return p.supportsThinking
 }

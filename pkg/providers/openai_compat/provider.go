@@ -28,10 +28,11 @@ type (
 )
 
 type Provider struct {
-	apiKey         string
-	apiBase        string
-	maxTokensField string // Field name for max tokens (e.g., "max_completion_tokens" for o1/glm models)
-	httpClient     *http.Client
+	apiKey                      string
+	apiBase                     string
+	maxTokensField              string // Field name for max tokens (e.g., "max_completion_tokens" for o1/glm models)
+	httpClient                  *http.Client
+	reasoningEffortFromThinking bool
 }
 
 type Option func(*Provider)
@@ -49,6 +50,14 @@ func WithRequestTimeout(timeout time.Duration) Option {
 		if timeout > 0 {
 			p.httpClient.Timeout = timeout
 		}
+	}
+}
+
+// WithReasoningEffortFromThinking enables mapping internal thinking_level
+// option to LiteLLM/OpenAI-compatible reasoning_effort request fields.
+func WithReasoningEffortFromThinking(enabled bool) Option {
+	return func(p *Provider) {
+		p.reasoningEffortFromThinking = enabled
 	}
 }
 
@@ -131,6 +140,17 @@ func (p *Provider) Chat(
 			requestBody["temperature"] = 1.0
 		} else {
 			requestBody["temperature"] = temperature
+		}
+	}
+
+	if p.reasoningEffortFromThinking {
+		if thinkingLevel, ok := options["thinking_level"].(string); ok {
+			if effort, ok := mapThinkingLevelToReasoningEffort(thinkingLevel); ok {
+				requestBody["reasoning_effort"] = effort
+				// LiteLLM can reject unknown OpenAI-compatible params unless explicitly allowed.
+				// Allow this param on a per-request basis for proxy compatibility.
+				requestBody["allowed_openai_params"] = []string{"reasoning_effort"}
+			}
 		}
 	}
 
@@ -219,4 +239,23 @@ func supportsPromptCacheKey(apiBase string) bool {
 	}
 	host := u.Hostname()
 	return host == "api.openai.com" || strings.HasSuffix(host, ".openai.azure.com")
+}
+
+func mapThinkingLevelToReasoningEffort(level string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "", "off":
+		return "", false
+	case "low":
+		return "low", true
+	case "medium":
+		return "medium", true
+	case "high", "xhigh":
+		// OpenAI-compatible reasoning effort typically tops out at "high".
+		return "high", true
+	case "adaptive":
+		// Adaptive does not exist in OpenAI-compatible effort; use balanced default.
+		return "medium", true
+	default:
+		return "", false
+	}
 }

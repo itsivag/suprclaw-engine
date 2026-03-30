@@ -168,6 +168,13 @@ func TestCreateProviderFromConfig_LiteLLM(t *testing.T) {
 	if modelID != "my-proxy-alias" {
 		t.Errorf("modelID = %q, want %q", modelID, "my-proxy-alias")
 	}
+	tc, ok := provider.(ThinkingCapable)
+	if !ok {
+		t.Fatalf("provider should implement ThinkingCapable for litellm, got %T", provider)
+	}
+	if !tc.SupportsThinking() {
+		t.Fatalf("litellm provider SupportsThinking() = false, want true")
+	}
 }
 
 func TestCreateProviderFromConfig_LongCat(t *testing.T) {
