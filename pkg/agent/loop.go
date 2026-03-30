@@ -1333,15 +1333,16 @@ func (al *AgentLoop) runLLMIteration(
 
 	for iteration < agent.MaxIterations {
 		iteration++
-		stepName := "Planning"
+		stepName := "Thinking"
 		stepKind := "planning"
 		if iteration > 1 {
-			stepName = "Reasoning"
 			stepKind = "reasoning"
 		}
 		iterationStepID := ""
+		iterationStepStartedAt := time.Time{}
 		if activity != nil {
 			iterationStepID = activity.nextStepID()
+			iterationStepStartedAt = time.Now().UTC()
 			activity.emit("step.started", map[string]any{
 				"step_id": iterationStepID,
 				"kind":    stepKind,
@@ -1622,11 +1623,16 @@ func (al *AgentLoop) runLLMIteration(
 				finalContent = response.ReasoningContent
 			}
 			if activity != nil && iterationStepID != "" {
+				durationMS := int64(0)
+				if !iterationStepStartedAt.IsZero() {
+					durationMS = time.Since(iterationStepStartedAt).Milliseconds()
+				}
 				activity.emit("step.completed", map[string]any{
-					"step_id":  iterationStepID,
-					"status":   "completed",
-					"summary":  "Drafted assistant response",
-					"duration": 0,
+					"step_id":     iterationStepID,
+					"status":      "completed",
+					"summary":     "Drafted assistant response",
+					"duration":    durationMS,
+					"duration_ms": durationMS,
 				})
 			}
 			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
@@ -1873,10 +1879,11 @@ func (al *AgentLoop) runLLMIteration(
 						"retryable":    false,
 					})
 					activity.emit("step.failed", map[string]any{
-						"step_id":    toolStepIDs[idx],
-						"status":     "failed",
-						"error_code": "TOOL_ERROR",
-						"message":    toolResultPreview(r.result),
+						"step_id":     toolStepIDs[idx],
+						"status":      "failed",
+						"error_code":  "TOOL_ERROR",
+						"message":     toolResultPreview(r.result),
+						"duration_ms": durationMS,
 					})
 				} else {
 					activity.emit("tool.completed", map[string]any{
@@ -1888,10 +1895,11 @@ func (al *AgentLoop) runLLMIteration(
 						"result_preview": toolResultPreview(r.result),
 					})
 					activity.emit("step.completed", map[string]any{
-						"step_id":  toolStepIDs[idx],
-						"status":   "completed",
-						"summary":  fmt.Sprintf("Finished %s", r.tc.Name),
-						"duration": durationMS,
+						"step_id":     toolStepIDs[idx],
+						"status":      "completed",
+						"summary":     fmt.Sprintf("Finished %s", r.tc.Name),
+						"duration":    durationMS,
+						"duration_ms": durationMS,
 					})
 				}
 			}
@@ -1950,10 +1958,15 @@ func (al *AgentLoop) runLLMIteration(
 		}
 
 		if activity != nil && iterationStepID != "" {
+			durationMS := int64(0)
+			if !iterationStepStartedAt.IsZero() {
+				durationMS = time.Since(iterationStepStartedAt).Milliseconds()
+			}
 			activity.emit("step.completed", map[string]any{
-				"step_id": iterationStepID,
-				"status":  "completed",
-				"summary": fmt.Sprintf("Completed %d tool call(s)", len(agentResults)),
+				"step_id":     iterationStepID,
+				"status":      "completed",
+				"summary":     fmt.Sprintf("Completed %d tool call(s)", len(agentResults)),
+				"duration_ms": durationMS,
 			})
 		}
 
