@@ -57,6 +57,27 @@ func NewHTTPProviderWithReasoningEffortSupport(
 			openai_compat.WithMaxTokensField(maxTokensField),
 			openai_compat.WithRequestTimeout(time.Duration(requestTimeoutSeconds)*time.Second),
 			openai_compat.WithReasoningEffortFromThinking(true),
+			openai_compat.WithAllowedOpenAIParamsForReasoningEffort(true),
+		),
+		supportsThinking: true,
+	}
+}
+
+// NewHTTPProviderWithOpenAIReasoningEffortSupport creates an OpenAI-compatible
+// provider that maps thinking_level to reasoning_effort for direct OpenAI
+// chat-completions calls. It does not include LiteLLM-specific allowlist fields.
+func NewHTTPProviderWithOpenAIReasoningEffortSupport(
+	apiKey, apiBase, proxy, maxTokensField string,
+	requestTimeoutSeconds int,
+) *HTTPProvider {
+	return &HTTPProvider{
+		delegate: openai_compat.NewProvider(
+			apiKey,
+			apiBase,
+			proxy,
+			openai_compat.WithMaxTokensField(maxTokensField),
+			openai_compat.WithRequestTimeout(time.Duration(requestTimeoutSeconds)*time.Second),
+			openai_compat.WithReasoningEffortFromThinking(true),
 		),
 		supportsThinking: true,
 	}

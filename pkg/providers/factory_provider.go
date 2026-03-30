@@ -87,7 +87,7 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		if apiBase == "" {
 			apiBase = getDefaultAPIBase(protocol)
 		}
-		return NewHTTPProviderWithMaxTokensFieldAndRequestTimeout(
+		return NewHTTPProviderWithOpenAIReasoningEffortSupport(
 			cfg.APIKey,
 			apiBase,
 			cfg.Proxy,

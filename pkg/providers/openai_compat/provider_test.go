@@ -612,7 +612,13 @@ func TestProviderChat_MapsThinkingLevelToReasoningEffort(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := NewProvider("key", server.URL, "", WithReasoningEffortFromThinking(true))
+	p := NewProvider(
+		"key",
+		server.URL,
+		"",
+		WithReasoningEffortFromThinking(true),
+		WithAllowedOpenAIParamsForReasoningEffort(true),
+	)
 	_, err := p.Chat(
 		t.Context(),
 		[]Message{{Role: "user", Content: "hi"}},
@@ -633,6 +639,46 @@ func TestProviderChat_MapsThinkingLevelToReasoningEffort(t *testing.T) {
 	}
 	if len(rawAllowed) != 1 || rawAllowed[0] != "reasoning_effort" {
 		t.Fatalf("allowed_openai_params = %v, want [reasoning_effort]", rawAllowed)
+	}
+}
+
+func TestProviderChat_ReasoningEffortWithoutAllowedOpenAIParams(t *testing.T) {
+	var requestBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{
+					"message":       map[string]any{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "", WithReasoningEffortFromThinking(true))
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-5.4",
+		map[string]any{"thinking_level": "high"},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if got := requestBody["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning_effort = %v, want %q", got, "high")
+	}
+	if _, ok := requestBody["allowed_openai_params"]; ok {
+		t.Fatalf("allowed_openai_params should not be sent unless explicitly enabled")
 	}
 }
 

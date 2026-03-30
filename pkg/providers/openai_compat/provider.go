@@ -33,6 +33,7 @@ type Provider struct {
 	maxTokensField              string // Field name for max tokens (e.g., "max_completion_tokens" for o1/glm models)
 	httpClient                  *http.Client
 	reasoningEffortFromThinking bool
+	includeAllowedOpenAIParams  bool
 }
 
 type Option func(*Provider)
@@ -58,6 +59,15 @@ func WithRequestTimeout(timeout time.Duration) Option {
 func WithReasoningEffortFromThinking(enabled bool) Option {
 	return func(p *Provider) {
 		p.reasoningEffortFromThinking = enabled
+	}
+}
+
+// WithAllowedOpenAIParamsForReasoningEffort enables adding
+// allowed_openai_params=["reasoning_effort"] to the request.
+// This is mainly needed for LiteLLM proxy compatibility.
+func WithAllowedOpenAIParamsForReasoningEffort(enabled bool) Option {
+	return func(p *Provider) {
+		p.includeAllowedOpenAIParams = enabled
 	}
 }
 
@@ -147,9 +157,11 @@ func (p *Provider) Chat(
 		if thinkingLevel, ok := options["thinking_level"].(string); ok {
 			if effort, ok := mapThinkingLevelToReasoningEffort(thinkingLevel); ok {
 				requestBody["reasoning_effort"] = effort
-				// LiteLLM can reject unknown OpenAI-compatible params unless explicitly allowed.
-				// Allow this param on a per-request basis for proxy compatibility.
-				requestBody["allowed_openai_params"] = []string{"reasoning_effort"}
+				if p.includeAllowedOpenAIParams {
+					// LiteLLM can reject unknown OpenAI-compatible params unless explicitly allowed.
+					// Allow this param on a per-request basis for proxy compatibility.
+					requestBody["allowed_openai_params"] = []string{"reasoning_effort"}
+				}
 			}
 		}
 	}

@@ -103,6 +103,13 @@ func TestCreateProviderFromConfig_OpenAI(t *testing.T) {
 	if modelID != "gpt-4o" {
 		t.Errorf("modelID = %q, want %q", modelID, "gpt-4o")
 	}
+	tc, ok := provider.(ThinkingCapable)
+	if !ok {
+		t.Fatalf("provider should implement ThinkingCapable for openai, got %T", provider)
+	}
+	if !tc.SupportsThinking() {
+		t.Fatalf("openai provider SupportsThinking() = false, want true")
+	}
 }
 
 func TestCreateProviderFromConfig_DefaultAPIBase(t *testing.T) {
