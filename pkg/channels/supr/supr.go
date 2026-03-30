@@ -36,6 +36,18 @@ type sessionRouteMetadata struct {
 	routeMatchedBy  string
 }
 
+const (
+	runStatusInProgress = "in_progress"
+	runStatusCompleted  = "completed"
+	runStatusFailed     = "failed"
+	runStatusUnknown    = "unknown"
+)
+
+type sessionRunState struct {
+	latestRunID string
+	runs        map[string]string
+}
+
 // suprConn represents a single WebSocket connection.
 type suprConn struct {
 	id        string
@@ -75,6 +87,8 @@ type SuprChannel struct {
 	agents       []agentSummary
 	defaultAgent string
 	routeMeta    sync.Map // sessionID -> sessionRouteMetadata
+	runStateMu   sync.RWMutex
+	runState     map[string]sessionRunState // sessionID -> run state
 }
 
 // NewSuprChannel creates a new Supr WebSocket channel.
@@ -104,6 +118,7 @@ func NewSuprChannel(cfg config.SuprConfig, messageBus *bus.MessageBus, agents []
 		config:       cfg,
 		agents:       agents,
 		defaultAgent: defaultAgent,
+		runState:     make(map[string]sessionRunState),
 		upgrader: websocket.Upgrader{
 			CheckOrigin:     checkOrigin,
 			ReadBufferSize:  1024,
@@ -138,6 +153,9 @@ func (c *SuprChannel) Stop(ctx context.Context) error {
 	if c.cancel != nil {
 		c.cancel()
 	}
+	c.runStateMu.Lock()
+	c.runState = make(map[string]sessionRunState)
+	c.runStateMu.Unlock()
 
 	logger.InfoC("supr", "Supr WebSocket channel stopped")
 	return nil
@@ -268,7 +286,87 @@ func (c *SuprChannel) BroadcastActivityEvent(ctx context.Context, chatID string,
 	if event.SessionID == "" {
 		event.SessionID = strings.TrimPrefix(chatID, "supr:")
 	}
+	c.rememberRunStatus(chatID, event)
 	return c.broadcastRawToSession(chatID, event)
+}
+
+func (c *SuprChannel) rememberRunStatus(chatID string, event bus.ActivityEventEnvelope) {
+	status, ok := runStatusForEvent(event.EventType)
+	if !ok {
+		return
+	}
+	runID := strings.TrimSpace(event.RunID)
+	if runID == "" {
+		return
+	}
+	sessionID := strings.TrimSpace(event.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimPrefix(chatID, "supr:")
+	}
+	if sessionID == "" {
+		return
+	}
+
+	c.runStateMu.Lock()
+	defer c.runStateMu.Unlock()
+
+	state := c.runState[sessionID]
+	if state.runs == nil {
+		state.runs = make(map[string]string)
+	}
+	state.runs[runID] = status
+	state.latestRunID = runID
+	c.runState[sessionID] = state
+}
+
+func runStatusForEvent(eventType string) (string, bool) {
+	switch eventType {
+	case "run.started":
+		return runStatusInProgress, true
+	case "run.completed":
+		return runStatusCompleted, true
+	case "run.failed":
+		return runStatusFailed, true
+	default:
+		return "", false
+	}
+}
+
+func (c *SuprChannel) resolveRunStatus(sessionID, requestedRunID string) (string, string) {
+	sessionID = strings.TrimSpace(sessionID)
+	requestedRunID = strings.TrimSpace(requestedRunID)
+	if sessionID == "" {
+		return requestedRunID, runStatusUnknown
+	}
+
+	c.runStateMu.RLock()
+	defer c.runStateMu.RUnlock()
+
+	state, hasState := c.runState[sessionID]
+	if requestedRunID != "" {
+		if hasState {
+			if status, ok := state.runs[requestedRunID]; ok {
+				return requestedRunID, status
+			}
+		}
+		return requestedRunID, runStatusUnknown
+	}
+
+	if !hasState || len(state.runs) == 0 {
+		return "", runStatusUnknown
+	}
+
+	if latest := strings.TrimSpace(state.latestRunID); latest != "" {
+		if status, ok := state.runs[latest]; ok {
+			return latest, status
+		}
+	}
+
+	for runID, status := range state.runs {
+		return runID, status
+	}
+
+	return "", runStatusUnknown
 }
 
 func (c *SuprChannel) rememberRouteMetadata(chatID, resolvedAgentID, routeMatchedBy string) {
@@ -596,9 +694,36 @@ func (c *SuprChannel) handleMessage(pc *suprConn, msg SuprMessage) {
 	case TypeMediaSend:
 		c.handleMediaSend(pc, msg)
 
+	case TypeRunStatusGet:
+		c.handleRunStatusGet(pc, msg)
+
 	default:
 		errMsg := newError("unknown_type", fmt.Sprintf("unknown message type: %s", msg.Type))
 		pc.writeJSON(errMsg)
+	}
+}
+
+func (c *SuprChannel) handleRunStatusGet(pc *suprConn, msg SuprMessage) {
+	sessionID := strings.TrimSpace(msg.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(pc.sessionID)
+	}
+	requestedRunID, _ := msg.Payload["run_id"].(string)
+	runID, status := c.resolveRunStatus(sessionID, requestedRunID)
+
+	response := newMessage(TypeRunStatus, map[string]any{
+		"run_id": runID,
+		"status": status,
+	})
+	response.ID = msg.ID
+	response.SessionID = sessionID
+	if err := pc.writeJSON(response); err != nil {
+		logger.DebugCF("supr", "Failed to write run status response", map[string]any{
+			"conn_id":    pc.id,
+			"session_id": sessionID,
+			"run_id":     runID,
+			"error":      err.Error(),
+		})
 	}
 }
 

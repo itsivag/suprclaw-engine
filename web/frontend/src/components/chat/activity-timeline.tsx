@@ -10,6 +10,10 @@ interface TimelineStep {
   details: string[]
 }
 
+function toolKey(runId: string, toolCallId: string): string {
+  return `${runId}:${toolCallId}`
+}
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
@@ -37,13 +41,15 @@ function getOrCreateStep(
   return created
 }
 
-function buildTimelineSteps(events: ActivityEventEnvelope[]): TimelineStep[] {
+export function buildTimelineSteps(events: ActivityEventEnvelope[]): TimelineStep[] {
   const stepMap = new Map<string, TimelineStep>()
   const order: string[] = []
+  const toolStepByToolCall = new Map<string, string>()
 
   for (const event of events) {
     const eventData = event.data || {}
     const stepId = asString(eventData.step_id)
+    const toolCallId = asString(eventData.tool_call_id)
 
     switch (event.event_type) {
       case "step.started": {
@@ -99,6 +105,13 @@ function buildTimelineSteps(events: ActivityEventEnvelope[]): TimelineStep[] {
         if (text) step.details.push(text)
         break
       }
+      case "step.updated": {
+        if (!stepId) break
+        const step = getOrCreateStep(stepMap, order, stepId, "Step", "execution")
+        const headline = asString(eventData.headline)
+        if (headline) step.details.push(headline)
+        break
+      }
       case "tool.called": {
         if (!stepId) break
         const step = getOrCreateStep(
@@ -109,13 +122,29 @@ function buildTimelineSteps(events: ActivityEventEnvelope[]): TimelineStep[] {
             `Using ${asString(eventData.tool_name)}`,
           "tool",
         )
+        if (toolCallId) {
+          toolStepByToolCall.set(toolKey(event.run_id, toolCallId), step.id)
+        }
         const preview = asString(eventData.arg_preview)
         if (preview) step.details.push(`args: ${preview}`)
+        break
+      }
+      case "tool.progress": {
+        if (!stepId) break
+        const step = getOrCreateStep(stepMap, order, stepId, "Tool", "tool")
+        if (toolCallId) {
+          toolStepByToolCall.set(toolKey(event.run_id, toolCallId), step.id)
+        }
+        const message = asString(eventData.message)
+        if (message) step.details.push(message)
         break
       }
       case "tool.completed": {
         if (!stepId) break
         const step = getOrCreateStep(stepMap, order, stepId, "Tool", "tool")
+        if (toolCallId) {
+          toolStepByToolCall.set(toolKey(event.run_id, toolCallId), step.id)
+        }
         const preview = asString(eventData.result_preview)
         if (preview) step.details.push(`result: ${preview}`)
         break
@@ -123,12 +152,27 @@ function buildTimelineSteps(events: ActivityEventEnvelope[]): TimelineStep[] {
       case "tool.failed": {
         if (!stepId) break
         const step = getOrCreateStep(stepMap, order, stepId, "Tool", "tool")
+        if (toolCallId) {
+          toolStepByToolCall.set(toolKey(event.run_id, toolCallId), step.id)
+        }
         step.status = "failed"
         const message = asString(eventData.message)
         if (message) step.details.push(`error: ${message}`)
         break
       }
       case "error.raised": {
+        const scope = asString(eventData.scope)
+        const mappedToolStepId =
+          scope === "tool" && toolCallId
+            ? toolStepByToolCall.get(toolKey(event.run_id, toolCallId))
+            : undefined
+        if (mappedToolStepId) {
+          const step = getOrCreateStep(stepMap, order, mappedToolStepId, "Tool", "tool")
+          step.status = "failed"
+          const message = asString(eventData.message)
+          if (message) step.details.push(`error: ${message}`)
+          break
+        }
         const syntheticID = `err-${event.event_id}`
         const step = getOrCreateStep(
           stepMap,
@@ -159,6 +203,13 @@ function statusLabel(status: StepStatus): string {
   return "working"
 }
 
+function runStatusLabel(status: ActivityRunState["status"]): string {
+  if (status === "stale") return "stale"
+  if (status === "completed") return "done"
+  if (status === "failed") return "failed"
+  return "working"
+}
+
 export function ActivityTimeline({ run }: { run?: ActivityRunState }) {
   if (!run || run.events.length === 0) {
     return null
@@ -169,7 +220,7 @@ export function ActivityTimeline({ run }: { run?: ActivityRunState }) {
   return (
     <details open className="bg-card w-full rounded-xl border px-4 py-3">
       <summary className="text-muted-foreground cursor-pointer text-xs font-medium">
-        Activity timeline
+        Activity timeline ({runStatusLabel(run.status)})
       </summary>
       <div className="mt-3 flex flex-col gap-3">
         {steps.map((step) => (

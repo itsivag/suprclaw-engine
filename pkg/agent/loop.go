@@ -1353,6 +1353,11 @@ func (al *AgentLoop) runLLMIteration(
 				"style":   "concise",
 				"text":    fmt.Sprintf("%s for iteration %d.", stepName, iteration),
 			})
+			activity.emit("step.updated", map[string]any{
+				"step_id":  iterationStepID,
+				"headline": "Preparing model request",
+				"progress": 0.1,
+			})
 		}
 
 		logger.DebugCF("agent", "LLM iteration",
@@ -1460,6 +1465,13 @@ func (al *AgentLoop) runLLMIteration(
 		}
 		for retry := 0; retry <= maxRetries; retry++ {
 			if guard.Enabled {
+				if activity != nil && iterationStepID != "" {
+					activity.emit("step.updated", map[string]any{
+						"step_id":  iterationStepID,
+						"headline": "Checking context budget",
+						"progress": 0.2,
+					})
+				}
 				if compactionCycles >= maxCompactionCycles {
 					al.contextBudgetUnfitTotal.Add(1)
 					return "", iteration, activeModel, &RequestError{
@@ -1519,6 +1531,13 @@ func (al *AgentLoop) runLLMIteration(
 
 			if isTimeoutError && retry < maxRetries {
 				backoff := time.Duration(retry+1) * 5 * time.Second
+				if activity != nil && iterationStepID != "" {
+					activity.emit("step.updated", map[string]any{
+						"step_id":  iterationStepID,
+						"headline": "Provider timeout, retrying",
+						"progress": 0.3,
+					})
+				}
 				logger.WarnCF("agent", "Timeout error, retrying after backoff", map[string]any{
 					"error":   err.Error(),
 					"retry":   retry,
@@ -1530,6 +1549,13 @@ func (al *AgentLoop) runLLMIteration(
 
 			if isContextError && retry < maxRetries {
 				al.providerContext400Total.Add(1)
+				if activity != nil && iterationStepID != "" {
+					activity.emit("step.updated", map[string]any{
+						"step_id":  iterationStepID,
+						"headline": "Compacting context and retrying",
+						"progress": 0.35,
+					})
+				}
 				logger.WarnCF(
 					"agent",
 					"Context window error detected, attempting compression",
@@ -1584,6 +1610,13 @@ func (al *AgentLoop) runLLMIteration(
 			})
 		// Check if no tool calls - then check reasoning content if any
 		if len(response.ToolCalls) == 0 {
+			if activity != nil && iterationStepID != "" {
+				activity.emit("step.updated", map[string]any{
+					"step_id":  iterationStepID,
+					"headline": "Drafting final response",
+					"progress": 0.8,
+				})
+			}
 			finalContent = response.Content
 			if finalContent == "" && response.ReasoningContent != "" {
 				finalContent = response.ReasoningContent
@@ -1631,6 +1664,13 @@ func (al *AgentLoop) runLLMIteration(
 		toolCallIDs := make([]string, len(normalizedToolCalls))
 		toolStartedAt := make([]time.Time, len(normalizedToolCalls))
 		if activity != nil {
+			if iterationStepID != "" {
+				activity.emit("step.updated", map[string]any{
+					"step_id":  iterationStepID,
+					"headline": fmt.Sprintf("Executing %d tool call(s)", len(normalizedToolCalls)),
+					"progress": 0.55,
+				})
+			}
 			for i, tc := range normalizedToolCalls {
 				toolStepIDs[i] = activity.nextStepID()
 				toolCallIDs[i] = toolCallID(tc.ID, iteration, i)
@@ -1648,6 +1688,12 @@ func (al *AgentLoop) runLLMIteration(
 					"display_name": fmt.Sprintf("Using %s", tc.Name),
 					"arg_preview":  sanitizeToolArgPreview(tc.Arguments),
 					"status":       "in_progress",
+				})
+				activity.emit("tool.progress", map[string]any{
+					"step_id":      toolStepIDs[i],
+					"tool_call_id": toolCallIDs[i],
+					"message":      "Tool execution started",
+					"progress":     0.1,
 				})
 			}
 		}
@@ -1777,6 +1823,13 @@ func (al *AgentLoop) runLLMIteration(
 			}(i, tc)
 		}
 		wg.Wait()
+		if activity != nil && iterationStepID != "" {
+			activity.emit("step.updated", map[string]any{
+				"step_id":  iterationStepID,
+				"headline": "Processing tool results",
+				"progress": 0.8,
+			})
+		}
 
 		if agent.StatusUpdates {
 			al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
@@ -1796,12 +1849,26 @@ func (al *AgentLoop) runLLMIteration(
 				if idx < len(toolStartedAt) && !toolStartedAt[idx].IsZero() {
 					durationMS = time.Since(toolStartedAt[idx]).Milliseconds()
 				}
+				activity.emit("tool.progress", map[string]any{
+					"step_id":      toolStepIDs[idx],
+					"tool_call_id": toolCallIDs[idx],
+					"message":      "Processing tool result",
+					"progress":     0.9,
+				})
 				if r.result.Err != nil || r.result.IsError {
 					activity.emit("tool.failed", map[string]any{
 						"step_id":      toolStepIDs[idx],
 						"tool_call_id": toolCallIDs[idx],
 						"tool_name":    r.tc.Name,
 						"error_code":   "TOOL_ERROR",
+						"message":      toolResultPreview(r.result),
+						"retryable":    false,
+					})
+					activity.emit("error.raised", map[string]any{
+						"scope":        "tool",
+						"step_id":      toolStepIDs[idx],
+						"tool_call_id": toolCallIDs[idx],
+						"code":         "TOOL_ERROR",
 						"message":      toolResultPreview(r.result),
 						"retryable":    false,
 					})

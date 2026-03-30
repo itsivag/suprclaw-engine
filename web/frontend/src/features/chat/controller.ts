@@ -35,12 +35,101 @@ let connectionGeneration = 0
 let reconnectTimer: number | null = null
 let reconnectAttempts = 0
 let shouldMaintainConnection = false
+let runStatusWatchdogTimer: number | null = null
+let lastRunStatusProbeAt = 0
+let lastRunStatusProbeKey = ""
+
+const RUN_STATUS_INACTIVITY_MS = 10_000
+const RUN_STATUS_WATCHDOG_INTERVAL_MS = 1_000
+const RUN_STATUS_PROBE_COOLDOWN_MS = 5_000
 
 function clearReconnectTimer() {
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
+}
+
+function clearRunStatusWatchdog() {
+  if (runStatusWatchdogTimer !== null) {
+    window.clearInterval(runStatusWatchdogTimer)
+    runStatusWatchdogTimer = null
+  }
+}
+
+function sendRunStatusGet(
+  socket: WebSocket,
+  sessionId: string,
+  runId?: string,
+): void {
+  if (socket.readyState !== WebSocket.OPEN) {
+    return
+  }
+  const payload: Record<string, unknown> = {}
+  if (runId) {
+    payload.run_id = runId
+  }
+  socket.send(
+    JSON.stringify({
+      type: "run.status.get",
+      id: `run-status-${Date.now()}`,
+      session_id: sessionId,
+      payload,
+    }),
+  )
+}
+
+function startRunStatusWatchdog({
+  socket,
+  generation,
+  sessionId,
+}: {
+  socket: WebSocket
+  generation: number
+  sessionId: string
+}) {
+  clearRunStatusWatchdog()
+  runStatusWatchdogTimer = window.setInterval(() => {
+    if (
+      !isCurrentSocket({
+        socket,
+        currentSocket: wsRef,
+        generation,
+        currentGeneration: connectionGeneration,
+        sessionId,
+        currentSessionId: activeSessionIdRef,
+      })
+    ) {
+      clearRunStatusWatchdog()
+      return
+    }
+
+    const state = getChatState()
+    const activeRunId = state.activeRunId
+    if (!activeRunId) {
+      lastRunStatusProbeAt = 0
+      lastRunStatusProbeKey = ""
+      return
+    }
+    const run = state.activityRuns[activeRunId]
+    if (!run || run.status !== "in_progress") {
+      return
+    }
+    const now = Date.now()
+    if (now - run.lastEventAt < RUN_STATUS_INACTIVITY_MS) {
+      return
+    }
+    const probeKey = `${sessionId}:${activeRunId}`
+    if (
+      probeKey === lastRunStatusProbeKey &&
+      now-lastRunStatusProbeAt < RUN_STATUS_PROBE_COOLDOWN_MS
+    ) {
+      return
+    }
+    sendRunStatusGet(socket, sessionId, activeRunId)
+    lastRunStatusProbeKey = probeKey
+    lastRunStatusProbeAt = now
+  }, RUN_STATUS_WATCHDOG_INTERVAL_MS)
 }
 
 function shouldReconnectFor(generation: number, sessionId: string): boolean {
@@ -96,6 +185,9 @@ function disconnectChatInternal({
 }) {
   connectionGeneration += 1
   clearReconnectTimer()
+  clearRunStatusWatchdog()
+  lastRunStatusProbeAt = 0
+  lastRunStatusProbeKey = ""
 
   if (clearDesiredConnection) {
     shouldMaintainConnection = false
@@ -182,6 +274,9 @@ export async function connectChat() {
       updateChatStore({ connectionState: "connected" })
       isConnecting = false
       reconnectAttempts = 0
+      const activeRunId = getChatState().activeRunId
+      sendRunStatusGet(socket, sessionId, activeRunId || undefined)
+      startRunStatusWatchdog({ socket, generation, sessionId })
     }
 
     socket.onmessage = (event) => {
@@ -221,12 +316,11 @@ export async function connectChat() {
       }
       wsRef = null
       isConnecting = false
+      clearRunStatusWatchdog()
       updateChatStore({
         connectionState: "disconnected",
         isTyping: false,
         typingStatus: "",
-        activeRunId: "",
-        activityRuns: {},
       })
       scheduleReconnect(generation, sessionId)
     }
@@ -245,6 +339,7 @@ export async function connectChat() {
         return
       }
       isConnecting = false
+      clearRunStatusWatchdog()
       updateChatStore({ connectionState: "error" })
       scheduleReconnect(generation, sessionId)
     }
@@ -359,6 +454,11 @@ export function sendChatMessage(content: string) {
       { id, role: "user", content, timestamp: Date.now() },
     ],
     isTyping: true,
+    activeRunId:
+      prev.activeRunId &&
+      prev.activityRuns[prev.activeRunId]?.status === "in_progress"
+        ? prev.activeRunId
+        : "",
   }))
 
   try {

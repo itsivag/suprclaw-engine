@@ -40,12 +40,20 @@ export interface ActivityEventEnvelope {
   data: Record<string, unknown>
 }
 
-export type ActivityRunStatus = "in_progress" | "completed" | "failed"
+export type ActivityRunStatus =
+  | "in_progress"
+  | "completed"
+  | "failed"
+  | "stale"
+
+export type ToolLifecycleStatus = "in_progress" | "completed" | "failed"
 
 export interface ActivityRunState {
   runId: string
   status: ActivityRunStatus
   events: ActivityEventEnvelope[]
+  lastEventAt: number
+  toolStates: Record<string, ToolLifecycleStatus>
 }
 
 export interface ChatStoreState {
@@ -63,20 +71,22 @@ export interface ChatStoreState {
 
 type ChatStorePatch = Partial<ChatStoreState>
 
-const DEFAULT_CHAT_STATE: ChatStoreState = {
-  messages: [],
-  connectionState: "disconnected",
-  isTyping: false,
-  typingStatus: "",
-  activeSessionId: getInitialActiveSessionId(),
-  hasHydratedActiveSession: false,
-  agents: [],
-  activeAgentId: "",
-  activityRuns: {},
-  activeRunId: "",
+export function createDefaultChatState(): ChatStoreState {
+  return {
+    messages: [],
+    connectionState: "disconnected",
+    isTyping: false,
+    typingStatus: "",
+    activeSessionId: getInitialActiveSessionId(),
+    hasHydratedActiveSession: false,
+    agents: [],
+    activeAgentId: "",
+    activityRuns: {},
+    activeRunId: "",
+  }
 }
 
-export const chatAtom = atom<ChatStoreState>(DEFAULT_CHAT_STATE)
+export const chatAtom = atom<ChatStoreState>(createDefaultChatState())
 
 const store = getDefaultStore()
 
@@ -99,4 +109,8 @@ export function updateChatStore(
 
     return next
   })
+}
+
+export function resetChatStoreForTests() {
+  store.set(chatAtom, createDefaultChatState())
 }

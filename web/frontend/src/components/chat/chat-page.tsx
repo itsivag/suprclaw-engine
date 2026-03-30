@@ -41,6 +41,8 @@ export function ChatPage() {
   const { state: gwState } = useGateway()
   const isGatewayRunning = gwState === "running"
   const isChatConnected = connectionState === "connected"
+  const shouldShowTimeline =
+    Boolean(activeRun) && (isTyping || activeRun?.status === "stale")
 
   const {
     defaultModelName,
@@ -173,7 +175,7 @@ export function ChatPage() {
             </div>
           ))}
 
-          {isTyping && <ActivityTimeline run={activeRun} />}
+          {shouldShowTimeline && <ActivityTimeline run={activeRun} />}
         </div>
       </div>
 

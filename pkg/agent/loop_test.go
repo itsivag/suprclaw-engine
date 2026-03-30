@@ -100,6 +100,20 @@ func (t *noopTool) Execute(ctx context.Context, args map[string]any) *tools.Tool
 	return tools.NewToolResult("ok")
 }
 
+type failingTool struct{}
+
+func (t *failingTool) Name() string        { return "noop_tool" }
+func (t *failingTool) Description() string { return "failing test tool" }
+func (t *failingTool) Parameters() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	}
+}
+func (t *failingTool) Execute(ctx context.Context, args map[string]any) *tools.ToolResult {
+	return tools.ErrorResult("tool exploded")
+}
+
 type alwaysFailProvider struct {
 	err error
 }
@@ -426,8 +440,10 @@ func TestProcessMessage_SuprPublishesStructuredActivityEvents(t *testing.T) {
 	for _, name := range []string{
 		"run.started",
 		"step.started",
+		"step.updated",
 		"reasoning.summary",
 		"tool.called",
+		"tool.progress",
 		"tool.completed",
 		"message.started",
 		"message.completed",
@@ -442,13 +458,31 @@ func TestProcessMessage_SuprPublishesStructuredActivityEvents(t *testing.T) {
 	var foundMessageCompleted bool
 	for _, evt := range events {
 		switch evt.Event.EventType {
+		case "reasoning.summary":
+			if stepID, _ := evt.Event.Data["step_id"].(string); stepID == "" {
+				t.Fatalf("reasoning.summary missing step_id")
+			}
 		case "tool.called":
 			foundToolCalled = true
+			if stepID, _ := evt.Event.Data["step_id"].(string); stepID == "" {
+				t.Fatalf("tool.called missing step_id")
+			}
 			if preview, _ := evt.Event.Data["arg_preview"].(string); preview == "" {
 				t.Fatalf("tool.called missing arg_preview")
 			}
 			if _, hasArgs := evt.Event.Data["args"]; hasArgs {
 				t.Fatalf("tool.called should not expose raw args in UI payload")
+			}
+		case "tool.progress":
+			if stepID, _ := evt.Event.Data["step_id"].(string); stepID == "" {
+				t.Fatalf("tool.progress missing step_id")
+			}
+			if callID, _ := evt.Event.Data["tool_call_id"].(string); callID == "" {
+				t.Fatalf("tool.progress missing tool_call_id")
+			}
+		case "tool.completed":
+			if stepID, _ := evt.Event.Data["step_id"].(string); stepID == "" {
+				t.Fatalf("tool.completed missing step_id")
 			}
 		case "message.completed":
 			foundMessageCompleted = true
@@ -507,6 +541,75 @@ func TestProcessMessage_SuprPublishesRunFailedOnProviderError(t *testing.T) {
 	}
 	if seen["run.completed"] {
 		t.Fatal("run.completed should not be emitted on failure")
+	}
+}
+
+func TestProcessMessage_SuprPublishesToolScopedErrorRaised(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 4,
+			},
+		},
+	}
+	msgBus := bus.NewMessageBus()
+	provider := &toolCallThenFinalProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.Tools.Register(&failingTool{})
+
+	response, _, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:test",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "done" {
+		t.Fatalf("response = %q, want %q", response, "done")
+	}
+
+	events := collectActivityEventsUntilTerminal(t, msgBus, 2*time.Second)
+	var foundToolFailed bool
+	var foundErrorRaised bool
+	for _, evt := range events {
+		if evt.Event.EventType == "tool.failed" {
+			foundToolFailed = true
+			if stepID, _ := evt.Event.Data["step_id"].(string); stepID == "" {
+				t.Fatal("tool.failed missing step_id")
+			}
+			if toolCallID, _ := evt.Event.Data["tool_call_id"].(string); toolCallID == "" {
+				t.Fatal("tool.failed missing tool_call_id")
+			}
+		}
+		if evt.Event.EventType == "error.raised" {
+			scope, _ := evt.Event.Data["scope"].(string)
+			if scope == "tool" {
+				foundErrorRaised = true
+				if stepID, _ := evt.Event.Data["step_id"].(string); stepID == "" {
+					t.Fatal("tool-scoped error.raised missing step_id")
+				}
+				if toolCallID, _ := evt.Event.Data["tool_call_id"].(string); toolCallID == "" {
+					t.Fatal("tool-scoped error.raised missing tool_call_id")
+				}
+			}
+		}
+	}
+	if !foundToolFailed {
+		t.Fatal("expected tool.failed event")
+	}
+	if !foundErrorRaised {
+		t.Fatal("expected tool-scoped error.raised event")
 	}
 }
 
