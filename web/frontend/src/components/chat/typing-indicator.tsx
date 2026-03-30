@@ -40,7 +40,7 @@ export function TypingIndicator({ statusText }: { statusText?: string }) {
 
         <p
           key={displayKey}
-          className="text-muted-foreground animate-[fadeSlideIn_0.4s_ease-out] text-xs"
+          className="emoji-exec-text text-muted-foreground animate-[fadeSlideIn_0.4s_ease-out] text-xs"
         >
           {displayText}
         </p>

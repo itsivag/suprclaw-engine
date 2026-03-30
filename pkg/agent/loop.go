@@ -86,6 +86,7 @@ type processOptions struct {
 
 const (
 	defaultResponse             = "I've completed processing but have no response to give. Increase `max_tool_iterations` in config.json."
+	thinkingStatusText          = "🧠 thinking"
 	sessionKeyAgentPrefix       = "agent:"
 	metadataKeyAccountID        = "account_id"
 	metadataKeyGuildID          = "guild_id"
@@ -1385,11 +1386,11 @@ func (al *AgentLoop) runLLMIteration(
 				"title":   stepName,
 				"status":  "in_progress",
 			})
-			activity.emit("reasoning.summary", map[string]any{
-				"step_id": iterationStepID,
-				"style":   "concise",
-				"text":    fmt.Sprintf("%s for iteration %d.", stepName, iteration),
-			})
+				activity.emit("reasoning.summary", map[string]any{
+					"step_id": iterationStepID,
+					"style":   "concise",
+					"text":    thinkingStatusText,
+				})
 			activity.emit("step.updated", map[string]any{
 				"step_id":  iterationStepID,
 				"headline": "Preparing model request",
@@ -1404,15 +1405,15 @@ func (al *AgentLoop) runLLMIteration(
 				"max":       agent.MaxIterations,
 			})
 
-		if agent.StatusUpdates {
-			al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
-				Kind:      bus.StatusKindIteration,
-				StepName:  stepName,
-				Iteration: iteration,
-				MaxIter:   agent.MaxIterations,
-				Text:      fmt.Sprintf("%s (step %d/%d)...", stepName, iteration, agent.MaxIterations),
-			})
-		}
+			if agent.StatusUpdates {
+				al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
+					Kind:      bus.StatusKindIteration,
+					StepName:  stepName,
+					Iteration: iteration,
+					MaxIter:   agent.MaxIterations,
+					Text:      thinkingStatusText,
+				})
+			}
 
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()

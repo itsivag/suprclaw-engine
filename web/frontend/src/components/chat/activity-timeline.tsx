@@ -226,13 +226,13 @@ export function ActivityTimeline({ run }: { run?: ActivityRunState }) {
         {steps.map((step) => (
           <div key={step.id} className="rounded-md border px-3 py-2">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">{step.title}</div>
+              <div className="emoji-exec-text text-sm font-medium">{step.title}</div>
               <div className="text-muted-foreground text-xs">
                 {statusLabel(step.status)}
               </div>
             </div>
             {step.details.length > 0 && (
-              <div className="text-muted-foreground mt-2 flex flex-col gap-1 text-xs">
+              <div className="emoji-exec-text text-muted-foreground mt-2 flex flex-col gap-1 text-xs">
                 {step.details.map((detail, idx) => (
                   <p key={`${step.id}-${idx}`}>{detail}</p>
                 ))}

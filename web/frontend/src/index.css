@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
+@import url("https://fonts.googleapis.com/css2?family=Noto+Emoji&display=swap");
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
@@ -178,4 +179,15 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.emoji-exec-text {
+  font-family:
+    "Inter Variable",
+    "Inter",
+    "Noto Emoji",
+    "Apple Color Emoji",
+    "Segoe UI Emoji",
+    "Noto Color Emoji",
+    sans-serif;
 }

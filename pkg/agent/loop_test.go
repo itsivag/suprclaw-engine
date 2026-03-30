@@ -462,6 +462,9 @@ func TestProcessMessage_SuprPublishesStructuredActivityEvents(t *testing.T) {
 			if stepID, _ := evt.Event.Data["step_id"].(string); stepID == "" {
 				t.Fatalf("reasoning.summary missing step_id")
 			}
+			if text, _ := evt.Event.Data["text"].(string); text != "🧠 thinking" {
+				t.Fatalf("reasoning.summary text = %q, want %q", text, "🧠 thinking")
+			}
 		case "tool.called":
 			foundToolCalled = true
 			if stepID, _ := evt.Event.Data["step_id"].(string); stepID == "" {
