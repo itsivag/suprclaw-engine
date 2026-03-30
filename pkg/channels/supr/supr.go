@@ -344,6 +344,30 @@ func (c *SuprChannel) broadcastToSession(chatID string, msg SuprMessage) error {
 	return nil
 }
 
+func (c *SuprChannel) closeReplacedSessionConnection(pc *suprConn) {
+	if _, loaded := c.connections.LoadAndDelete(pc.id); loaded {
+		c.connCount.Add(-1)
+	}
+	pc.close()
+	logger.InfoCF("supr", "WebSocket client replaced", map[string]any{
+		"conn_id":    pc.id,
+		"session_id": pc.sessionID,
+	})
+}
+
+func (c *SuprChannel) closeSessionDuplicates(sessionID string) {
+	c.connections.Range(func(key, value any) bool {
+		pc, ok := value.(*suprConn)
+		if !ok {
+			return true
+		}
+		if pc.sessionID == sessionID {
+			c.closeReplacedSessionConnection(pc)
+		}
+		return true
+	})
+}
+
 // handleWebSocket upgrades the HTTP connection and manages the WebSocket lifecycle.
 func (c *SuprChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if !c.IsRunning() {
@@ -393,6 +417,8 @@ func (c *SuprChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		sessionID: sessionID,
 	}
 
+	// Enforce one active websocket connection per Supr session_id.
+	c.closeSessionDuplicates(sessionID)
 	c.connections.Store(pc.id, pc)
 	c.connCount.Add(1)
 
@@ -460,8 +486,9 @@ func (c *SuprChannel) matchedSubprotocol(r *http.Request) string {
 func (c *SuprChannel) readLoop(pc *suprConn) {
 	defer func() {
 		pc.close()
-		c.connections.Delete(pc.id)
-		c.connCount.Add(-1)
+		if _, loaded := c.connections.LoadAndDelete(pc.id); loaded {
+			c.connCount.Add(-1)
+		}
 		logger.InfoCF("supr", "WebSocket client disconnected", map[string]any{
 			"conn_id":    pc.id,
 			"session_id": pc.sessionID,
