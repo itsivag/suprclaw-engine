@@ -224,6 +224,41 @@ func TestDecodeToolCallArguments_StringJSON(t *testing.T) {
 	}
 }
 
+func TestEstimateTokenCount_IsDeterministic(t *testing.T) {
+	messages := []Message{
+		{Role: "system", Content: "You are helpful"},
+		{Role: "user", Content: "Count this payload"},
+	}
+	tools := []ToolDefinition{
+		{
+			Type: "function",
+			Function: ToolFunctionDefinition{
+				Name:        "search",
+				Description: "Search docs",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"query": map[string]any{"type": "string"},
+					},
+				},
+			},
+		},
+	}
+	options := map[string]any{
+		"max_tokens":  512,
+		"temperature": 0.2,
+	}
+
+	first := EstimateTokenCount(messages, tools, "gpt-5", options)
+	second := EstimateTokenCount(messages, tools, "gpt-5", options)
+	if first <= 0 {
+		t.Fatalf("EstimateTokenCount() = %d, want > 0", first)
+	}
+	if first != second {
+		t.Fatalf("EstimateTokenCount() not deterministic: first=%d second=%d", first, second)
+	}
+}
+
 func TestDecodeToolCallArguments_EmptyInput(t *testing.T) {
 	args := DecodeToolCallArguments(nil, "test")
 	if len(args) != 0 {

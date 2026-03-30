@@ -144,6 +144,19 @@ func (p *Provider) Chat(
 	return common.ReadAndParseResponse(resp, p.apiBase)
 }
 
+// CountTokens implements providers.TokenCountCapable with a deterministic
+// request-shape estimate for Azure OpenAI.
+func (p *Provider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return common.EstimateTokenCount(messages, tools, model, options), nil
+}
+
 // GetDefaultModel returns an empty string as Azure deployments are user-configured.
 func (p *Provider) GetDefaultModel() string {
 	return ""

@@ -107,6 +107,39 @@ func (p *Provider) Chat(
 	return parseResponse(resp), nil
 }
 
+// CountTokens implements providers.TokenCountCapable using Anthropic's native
+// /v1/messages/count_tokens endpoint.
+func (p *Provider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	var opts []option.RequestOption
+	if p.tokenSource != nil {
+		tok, err := p.tokenSource()
+		if err != nil {
+			return 0, fmt.Errorf("refreshing token: %w", err)
+		}
+		opts = append(opts,
+			option.WithAuthToken(tok),
+			option.WithHeader("anthropic-beta", anthropicBetaHeader),
+		)
+	}
+
+	params, err := buildCountTokensParams(messages, tools, model, options)
+	if err != nil {
+		return 0, err
+	}
+
+	resp, err := p.client.Messages.CountTokens(ctx, params, opts...)
+	if err != nil {
+		return 0, fmt.Errorf("claude token count API call: %w", err)
+	}
+	return int(resp.InputTokens), nil
+}
+
 func (p *Provider) chatStreaming(
 	ctx context.Context,
 	params anthropic.MessageNewParams,
@@ -240,6 +273,29 @@ func buildParams(
 	}
 
 	return params, nil
+}
+
+func buildCountTokensParams(
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (anthropic.MessageCountTokensParams, error) {
+	params, err := buildParams(messages, tools, model, options)
+	if err != nil {
+		return anthropic.MessageCountTokensParams{}, err
+	}
+
+	// Convert via JSON to avoid manual field-by-field mapping between SDK param types.
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return anthropic.MessageCountTokensParams{}, fmt.Errorf("marshal count params: %w", err)
+	}
+	var countParams anthropic.MessageCountTokensParams
+	if err := json.Unmarshal(raw, &countParams); err != nil {
+		return anthropic.MessageCountTokensParams{}, fmt.Errorf("unmarshal count params: %w", err)
+	}
+	return countParams, nil
 }
 
 // applyThinkingConfig sets thinking parameters based on the level value.

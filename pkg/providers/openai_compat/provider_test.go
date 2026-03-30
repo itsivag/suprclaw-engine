@@ -61,6 +61,37 @@ func TestProviderChat_UsesMaxCompletionTokensForGLM(t *testing.T) {
 	}
 }
 
+func TestProviderCountTokens_DeterministicPositive(t *testing.T) {
+	p := NewProvider("key", "https://api.openai.com/v1", "")
+	tokens, err := p.CountTokens(
+		t.Context(),
+		[]Message{
+			{Role: "system", Content: "You are helpful"},
+			{Role: "user", Content: "Count this prompt"},
+		},
+		[]ToolDefinition{
+			{
+				Type: "function",
+				Function: ToolFunctionDefinition{
+					Name:        "search",
+					Description: "Search docs",
+					Parameters: map[string]any{
+						"type": "object",
+					},
+				},
+			},
+		},
+		"gpt-5",
+		map[string]any{"max_tokens": 512},
+	)
+	if err != nil {
+		t.Fatalf("CountTokens() error = %v", err)
+	}
+	if tokens <= 0 {
+		t.Fatalf("CountTokens() = %d, want > 0", tokens)
+	}
+}
+
 func TestProviderChat_ParsesToolCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{

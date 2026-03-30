@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/itsivag/suprclaw/pkg/providers/protocoltypes"
 )
@@ -37,6 +38,11 @@ type (
 )
 
 const DefaultRequestTimeout = 120 * time.Second
+
+const (
+	defaultTokenCharsPerToken = 4
+	defaultTokenReserve       = 256
+)
 
 // NewHTTPClient creates an *http.Client with an optional proxy and the default timeout.
 func NewHTTPClient(proxy string) *http.Client {
@@ -377,4 +383,53 @@ func AsFloat(v any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// EstimateTokenCount provides a deterministic, provider-side token estimate for
+// OpenAI-compatible requests where an exact token-count endpoint may be unavailable.
+func EstimateTokenCount(
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) int {
+	payload := map[string]any{
+		"model":    model,
+		"messages": SerializeMessages(messages),
+	}
+	if len(tools) > 0 {
+		payload["tools"] = tools
+	}
+	if maxTokens, ok := AsInt(options["max_tokens"]); ok && maxTokens > 0 {
+		payload["max_tokens"] = maxTokens
+	}
+	if temperature, ok := AsFloat(options["temperature"]); ok {
+		payload["temperature"] = temperature
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		// Fallback to content-only approximation when serialization fails.
+		charCount := 0
+		for _, msg := range messages {
+			charCount += utf8.RuneCountInString(msg.Content)
+			charCount += len(msg.Media) * 64
+		}
+		tokens := charCount / defaultTokenCharsPerToken
+		tokens += tokens / 20
+		tokens += defaultTokenReserve
+		if tokens < defaultTokenReserve {
+			return defaultTokenReserve
+		}
+		return tokens
+	}
+
+	charCount := utf8.RuneCount(raw)
+	tokens := charCount / defaultTokenCharsPerToken
+	tokens += tokens / 20
+	tokens += defaultTokenReserve
+	if tokens < defaultTokenReserve {
+		return defaultTokenReserve
+	}
+	return tokens
 }

@@ -143,6 +143,68 @@ func (p *Provider) Chat(
 	return parseResponseBody(body)
 }
 
+// CountTokens implements providers.TokenCountCapable using Anthropic Messages
+// /messages/count_tokens endpoint.
+func (p *Provider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	if p.apiKey == "" {
+		return 0, fmt.Errorf("API key not configured")
+	}
+
+	requestBody, err := buildCountTokensRequestBody(messages, tools, model, options)
+	if err != nil {
+		return 0, fmt.Errorf("building count request body: %w", err)
+	}
+
+	jsonBody, err := json.Marshal(requestBody)
+	if err != nil {
+		return 0, fmt.Errorf("serializing count request body: %w", err)
+	}
+
+	endpointURL, err := url.JoinPath(p.apiBase, "messages", "count_tokens")
+	if err != nil {
+		return 0, fmt.Errorf("building count endpoint URL: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return 0, fmt.Errorf("creating count HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", p.apiKey) //nolint:canonicalheader // Anthropic API requires exact header name
+	req.Header.Set("Anthropic-Version", defaultAPIVersion)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("executing count HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("reading count response body: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("token count API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var parsed struct {
+		InputTokens int `json:"input_tokens"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return 0, fmt.Errorf("parsing token count response: %w", err)
+	}
+	if parsed.InputTokens <= 0 {
+		return 0, fmt.Errorf("token count response missing input_tokens")
+	}
+	return parsed.InputTokens, nil
+}
+
 // GetDefaultModel returns the default model for this provider.
 func (p *Provider) GetDefaultModel() string {
 	return "claude-sonnet-4.6"
@@ -270,6 +332,29 @@ func buildRequestBody(
 	}
 
 	return result, nil
+}
+
+func buildCountTokensRequestBody(
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (map[string]any, error) {
+	opts := map[string]any{}
+	for key, value := range options {
+		opts[key] = value
+	}
+	if _, ok := opts["max_tokens"]; !ok {
+		opts["max_tokens"] = 1
+	}
+
+	body, err := buildRequestBody(messages, tools, model, opts)
+	if err != nil {
+		return nil, err
+	}
+	delete(body, "max_tokens")
+	delete(body, "temperature")
+	return body, nil
 }
 
 // buildTools converts tool definitions to Anthropic format.

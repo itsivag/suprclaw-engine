@@ -230,3 +230,20 @@ func TestProviderChat_AzureDeploymentNameEscaped(t *testing.T) {
 		t.Fatal("deployment name was interpolated without escaping — path injection possible")
 	}
 }
+
+func TestProviderCountTokens_DeterministicPositive(t *testing.T) {
+	p := NewProvider("test-key", "https://example.openai.azure.com", "")
+	tokens, err := p.CountTokens(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hello from azure"}},
+		nil,
+		"deployment",
+		map[string]any{"max_tokens": 256},
+	)
+	if err != nil {
+		t.Fatalf("CountTokens() error = %v", err)
+	}
+	if tokens <= 0 {
+		t.Fatalf("CountTokens() = %d, want > 0", tokens)
+	}
+}

@@ -8,6 +8,8 @@ package anthropicmessages
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -369,6 +371,37 @@ func TestParseResponseBody(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProvider_CountTokens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages/count_tokens" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if got := r.Header.Get("X-API-Key"); got != "test-key" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"input_tokens":77}`))
+	}))
+	defer server.Close()
+
+	p := NewProvider("test-key", server.URL)
+	count, err := p.CountTokens(
+		context.Background(),
+		[]Message{{Role: "user", Content: "count this"}},
+		nil,
+		"claude-sonnet-4.6",
+		map[string]any{"max_tokens": 512},
+	)
+	if err != nil {
+		t.Fatalf("CountTokens() error = %v", err)
+	}
+	if count != 77 {
+		t.Fatalf("CountTokens() = %d, want 77", count)
 	}
 }
 

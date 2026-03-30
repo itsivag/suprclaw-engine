@@ -175,6 +175,19 @@ func (p *Provider) Chat(
 	return common.ReadAndParseResponse(resp, p.apiBase)
 }
 
+// CountTokens implements providers.TokenCountCapable with a deterministic
+// provider-side estimate for OpenAI-compatible endpoints.
+func (p *Provider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return common.EstimateTokenCount(messages, tools, normalizeModel(model, p.apiBase), options), nil
+}
+
 func normalizeModel(model, apiBase string) string {
 	before, after, ok := strings.Cut(model, "/")
 	if !ok {

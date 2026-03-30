@@ -52,6 +52,16 @@ func (p *HTTPProvider) Chat(
 	return p.delegate.Chat(ctx, messages, tools, model, options)
 }
 
+func (p *HTTPProvider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	return p.delegate.CountTokens(ctx, messages, tools, model, options)
+}
+
 func (p *HTTPProvider) GetDefaultModel() string {
 	return ""
 }

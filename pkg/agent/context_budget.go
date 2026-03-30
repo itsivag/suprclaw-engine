@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/itsivag/suprclaw/pkg/config"
@@ -18,6 +21,7 @@ const (
 	defaultContextGuardEmergencyInputRatio    = 0.60
 	defaultContextGuardMaxCompactionPasses    = 3
 	defaultContextGuardPreserveRecentMessages = 6
+	contextBudgetProviderThresholdRatio       = 0.80
 
 	estimatorFixedReserveTokens = 512
 )
@@ -96,6 +100,16 @@ func computeContextBudget(contextWindow, requestedOutput int, guard config.Conte
 	}
 }
 
+func (al *AgentLoop) estimateInputTokens(messages []providers.Message) int {
+	est := al.estimateTokens(messages)
+	// Conservative fallback: estimator + 10% overhead + fixed reserve.
+	est = est + est/10 + estimatorFixedReserveTokens
+	if est < estimatorFixedReserveTokens {
+		return estimatorFixedReserveTokens
+	}
+	return est
+}
+
 func (al *AgentLoop) countInputTokens(
 	ctx context.Context,
 	provider providers.LLMProvider,
@@ -103,7 +117,13 @@ func (al *AgentLoop) countInputTokens(
 	messages []providers.Message,
 	tools []providers.ToolDefinition,
 	options map[string]any,
+	allowProvider bool,
 ) (int, string) {
+	estimate := al.estimateInputTokens(messages)
+	if !allowProvider {
+		return estimate, "estimator"
+	}
+
 	if counter, ok := provider.(providers.TokenCountCapable); ok {
 		tokens, err := counter.CountTokens(ctx, messages, tools, model, options)
 		if err == nil && tokens > 0 {
@@ -114,16 +134,90 @@ func (al *AgentLoop) countInputTokens(
 				"model": model,
 				"error": err.Error(),
 			})
+			return estimate, "estimator_fallback"
+		}
+	}
+	return estimate, "estimator"
+}
+
+func providerCountThreshold(effectiveLimit int) int {
+	if effectiveLimit <= 0 {
+		return 0
+	}
+	threshold := int(float64(effectiveLimit) * contextBudgetProviderThresholdRatio)
+	if threshold <= 0 {
+		return effectiveLimit
+	}
+	if threshold > effectiveLimit {
+		return effectiveLimit
+	}
+	return threshold
+}
+
+func (al *AgentLoop) selectInputTokensForBudget(
+	ctx context.Context,
+	provider providers.LLMProvider,
+	model string,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	options map[string]any,
+	effectiveLimit int,
+) (int, string) {
+	estimate, _ := al.countInputTokens(ctx, provider, model, messages, tools, options, false)
+	if estimate <= providerCountThreshold(effectiveLimit) {
+		return estimate, "estimator_fast"
+	}
+	return al.countInputTokens(ctx, provider, model, messages, tools, options, true)
+}
+
+func budgetCheckSignature(
+	messages []providers.Message,
+	model string,
+	tools []providers.ToolDefinition,
+	llmOpts map[string]any,
+	forceEmergency bool,
+) string {
+	h := fnv.New64a()
+	write := func(parts ...string) {
+		for _, part := range parts {
+			_, _ = h.Write([]byte(part))
+			_, _ = h.Write([]byte{0})
 		}
 	}
 
-	est := al.estimateTokens(messages)
-	// Conservative fallback: estimator + 10% overhead + fixed reserve.
-	est = est + est/10 + estimatorFixedReserveTokens
-	if est < estimatorFixedReserveTokens {
-		est = estimatorFixedReserveTokens
+	write("force_emergency", strconv.FormatBool(forceEmergency))
+	write("model", model)
+	if maxTokens := getRequestedOutputTokens(llmOpts, 0); maxTokens > 0 {
+		write("max_tokens", strconv.Itoa(maxTokens))
 	}
-	return est, "estimator"
+
+	for _, msg := range messages {
+		write("role", msg.Role, "content", msg.Content, "tool_call_id", msg.ToolCallID, "reasoning", msg.ReasoningContent)
+		write("media_count", strconv.Itoa(len(msg.Media)))
+		for _, media := range msg.Media {
+			write("media", media)
+		}
+		for _, tc := range msg.ToolCalls {
+			write("tool_call", tc.ID, tc.Name)
+			if tc.Function != nil {
+				write("func_name", tc.Function.Name, "func_args", tc.Function.Arguments)
+			}
+			if len(tc.Arguments) > 0 {
+				if raw, err := json.Marshal(tc.Arguments); err == nil {
+					write("args_json", string(raw))
+				}
+			}
+		}
+	}
+
+	for _, td := range tools {
+		write("tool_def", td.Type, td.Function.Name, td.Function.Description)
+		if raw, err := json.Marshal(td.Function.Parameters); err == nil {
+			write("tool_params", string(raw))
+		}
+	}
+
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 func getRequestedOutputTokens(llmOpts map[string]any, defaultValue int) int {
@@ -232,7 +326,15 @@ func (al *AgentLoop) compactToBudget(
 	contextWindow := al.resolveContextWindowForTurn(agent, candidates, guard, requestedOutput)
 	budget := computeContextBudget(contextWindow, requestedOutput, guard)
 
-	predicted, countSource := al.countInputTokens(ctx, agent.Provider, model, messages, tools, llmOpts)
+	predicted, countSource := al.selectInputTokensForBudget(
+		ctx,
+		agent.Provider,
+		model,
+		messages,
+		tools,
+		llmOpts,
+		budget.EffectiveInputLimit,
+	)
 	al.logBudgetDecision(agent, opts, budget, compactionStageNone, predicted, countSource)
 
 	if predicted <= budget.EffectiveInputLimit && !forceEmergency {
@@ -273,7 +375,15 @@ func (al *AgentLoop) compactToBudget(
 			working = next
 		}
 
-		predicted, countSource = al.countInputTokens(ctx, agent.Provider, model, working, tools, llmOpts)
+		predicted, countSource = al.selectInputTokensForBudget(
+			ctx,
+			agent.Provider,
+			model,
+			working,
+			tools,
+			llmOpts,
+			budget.EffectiveInputLimit,
+		)
 		al.logBudgetDecision(agent, opts, budget, stage, predicted, countSource)
 
 		if !changed {

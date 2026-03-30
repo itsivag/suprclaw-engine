@@ -321,6 +321,37 @@ func TestProvider_ChatStreamingRoundTrip(t *testing.T) {
 	}
 }
 
+func TestProvider_CountTokens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages/count_tokens" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"input_tokens":123}`))
+	}))
+	defer server.Close()
+
+	p := NewProviderWithClient(createAnthropicTestClient(server.URL, "test-token"))
+	count, err := p.CountTokens(
+		t.Context(),
+		[]Message{{Role: "user", Content: "count me"}},
+		nil,
+		"claude-sonnet-4.6",
+		map[string]any{"max_tokens": 1024},
+	)
+	if err != nil {
+		t.Fatalf("CountTokens() error = %v", err)
+	}
+	if count != 123 {
+		t.Fatalf("CountTokens() = %d, want 123", count)
+	}
+}
+
 func createAnthropicTestClient(baseURL, token string) *anthropic.Client {
 	c := anthropic.NewClient(
 		anthropicoption.WithAuthToken(token),

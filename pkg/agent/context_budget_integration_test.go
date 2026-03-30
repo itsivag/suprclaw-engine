@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/itsivag/suprclaw/pkg/bus"
@@ -45,6 +46,14 @@ type requiresNonSystemProvider struct {
 	calls int
 }
 
+type budgetCountAwareProvider struct {
+	chatCalls           int32
+	countCalls          int32
+	timeoutOnFirstChat  bool
+	contextOnFirstChat  bool
+	providerTokenResult int
+}
+
 func (p *requiresNonSystemProvider) Chat(
 	ctx context.Context,
 	messages []providers.Message,
@@ -63,6 +72,46 @@ func (p *requiresNonSystemProvider) Chat(
 
 func (p *requiresNonSystemProvider) GetDefaultModel() string {
 	return "mock-nonsystem-model"
+}
+
+func (p *budgetCountAwareProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	call := atomic.AddInt32(&p.chatCalls, 1)
+	if p.timeoutOnFirstChat && call == 1 {
+		return nil, context.DeadlineExceeded
+	}
+	if p.contextOnFirstChat && call == 1 {
+		return nil, fmt.Errorf("context_length_exceeded: mock")
+	}
+	return &providers.LLMResponse{Content: "ok"}, nil
+}
+
+func (p *budgetCountAwareProvider) GetDefaultModel() string {
+	return "mock-count-aware-model"
+}
+
+func (p *budgetCountAwareProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	_ = messages
+	_ = tools
+	_ = model
+	_ = opts
+	atomic.AddInt32(&p.countCalls, 1)
+	if p.providerTokenResult > 0 {
+		return p.providerTokenResult, nil
+	}
+	return 1000, nil
 }
 
 func estimateMessageTokens(messages []providers.Message) int {
@@ -241,5 +290,88 @@ func TestAgentLoop_InjectsNonSystemMessageWhenCompactionProducesSystemOnly(t *te
 	}
 	if provider.calls != 1 {
 		t.Fatalf("provider calls = %d, want 1", provider.calls)
+	}
+}
+
+func TestAgentLoop_BudgetCheckSkipsProviderCountInSafeZone(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	provider := &budgetCountAwareProvider{providerTokenResult: 100}
+	al := NewAgentLoop(newBudgetTestConfig(tmpDir), bus.NewMessageBus(), provider)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.ContextWindow = 4096
+
+	_, err = al.ProcessDirectWithChannel(context.Background(), "short message", "budget-safe-zone", "cli", "direct")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&provider.countCalls); got != 0 {
+		t.Fatalf("provider count calls = %d, want 0 (safe-zone estimator path)", got)
+	}
+}
+
+func TestAgentLoop_BudgetCheckDedupeOnTimeoutRetry(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	provider := &budgetCountAwareProvider{
+		timeoutOnFirstChat:  true,
+		providerTokenResult: 1000,
+	}
+	al := NewAgentLoop(newBudgetTestConfig(tmpDir), bus.NewMessageBus(), provider)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.ContextWindow = 4096
+
+	longInput := strings.Repeat("X", 9000)
+	_, err = al.ProcessDirectWithChannel(context.Background(), longInput, "budget-timeout-dedupe", "cli", "direct")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&provider.countCalls); got != 1 {
+		t.Fatalf("provider count calls = %d, want 1 (deduped across unchanged timeout retry)", got)
+	}
+}
+
+func TestAgentLoop_BudgetRechecksAfterContextOverflow(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	provider := &budgetCountAwareProvider{
+		contextOnFirstChat:  true,
+		providerTokenResult: 1000,
+	}
+	al := NewAgentLoop(newBudgetTestConfig(tmpDir), bus.NewMessageBus(), provider)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.ContextWindow = 4096
+
+	longInput := strings.Repeat("Y", 9000)
+	_, err = al.ProcessDirectWithChannel(context.Background(), longInput, "budget-context-recheck", "cli", "direct")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&provider.countCalls); got < 2 {
+		t.Fatalf("provider count calls = %d, want >= 2 after context overflow emergency recheck", got)
 	}
 }
