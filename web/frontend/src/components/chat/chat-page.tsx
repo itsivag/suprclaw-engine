@@ -2,13 +2,13 @@ import { IconPlus } from "@tabler/icons-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { ActivityTimeline } from "@/components/chat/activity-timeline"
 import { AgentSelector } from "@/components/chat/agent-selector"
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import { ChatComposer } from "@/components/chat/chat-composer"
 import { ChatEmptyState } from "@/components/chat/chat-empty-state"
 import { ModelSelector } from "@/components/chat/model-selector"
 import { SessionHistoryMenu } from "@/components/chat/session-history-menu"
-import { TypingIndicator } from "@/components/chat/typing-indicator"
 import { UserMessage } from "@/components/chat/user-message"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
@@ -28,7 +28,7 @@ export function ChatPage() {
     messages,
     connectionState,
     isTyping,
-    typingStatus,
+    activeRun,
     activeSessionId,
     agents,
     activeAgentId,
@@ -173,7 +173,7 @@ export function ChatPage() {
             </div>
           ))}
 
-          {isTyping && <TypingIndicator statusText={typingStatus} />}
+          {isTyping && <ActivityTimeline run={activeRun} />}
         </div>
       </div>
 

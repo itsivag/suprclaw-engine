@@ -19,6 +19,7 @@ type MessageBus struct {
 	outbound       chan OutboundMessage
 	outboundMedia  chan OutboundMediaMessage
 	outboundStatus chan OutboundStatusUpdate
+	outboundEvents chan OutboundActivityEvent
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -32,6 +33,7 @@ func NewMessageBus() *MessageBus {
 		outbound:       make(chan OutboundMessage, defaultBusBufferSize),
 		outboundMedia:  make(chan OutboundMediaMessage, defaultBusBufferSize),
 		outboundStatus: make(chan OutboundStatusUpdate, defaultBusBufferSize),
+		outboundEvents: make(chan OutboundActivityEvent, defaultBusBufferSize),
 		done:           make(chan struct{}),
 	}
 }
@@ -96,6 +98,14 @@ func (mb *MessageBus) OutboundStatusChan() <-chan OutboundStatusUpdate {
 	return mb.outboundStatus
 }
 
+func (mb *MessageBus) PublishOutboundActivity(ctx context.Context, msg OutboundActivityEvent) error {
+	return publish(ctx, mb, mb.outboundEvents, msg)
+}
+
+func (mb *MessageBus) OutboundActivityChan() <-chan OutboundActivityEvent {
+	return mb.outboundEvents
+}
+
 func (mb *MessageBus) Close() {
 	mb.closeOnce.Do(func() {
 		// notify all blocked publishers to exit
@@ -113,6 +123,7 @@ func (mb *MessageBus) Close() {
 		close(mb.outbound)
 		close(mb.outboundMedia)
 		close(mb.outboundStatus)
+		close(mb.outboundEvents)
 
 		// clean up any remaining messages in channels
 		drained := 0
@@ -126,6 +137,9 @@ func (mb *MessageBus) Close() {
 			drained++
 		}
 		for range mb.outboundStatus {
+			drained++
+		}
+		for range mb.outboundEvents {
 			drained++
 		}
 

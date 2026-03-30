@@ -352,20 +352,29 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				}
 
 				if !alreadySent {
-					al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-						Channel:         msg.Channel,
-						ChatID:          msg.ChatID,
-						Content:         response,
-						ModelUsed:       modelUsed,
-						ResolvedAgentID: routeMetaValue(routeMeta, func(m routeMetadata) string { return m.ResolvedAgentID }),
-						RouteMatchedBy:  routeMetaValue(routeMeta, func(m routeMetadata) string { return m.RouteMatchedBy }),
-					})
-					logger.InfoCF("agent", "Published outbound response",
-						map[string]any{
-							"channel":     msg.Channel,
-							"chat_id":     msg.ChatID,
-							"content_len": len(response),
+					if msg.Channel == "supr" {
+						logger.InfoCF("agent", "Skipped legacy outbound response for supr (message.completed event is authoritative)",
+							map[string]any{
+								"channel":     msg.Channel,
+								"chat_id":     msg.ChatID,
+								"content_len": len(response),
+							})
+					} else {
+						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
+							Channel:         msg.Channel,
+							ChatID:          msg.ChatID,
+							Content:         response,
+							ModelUsed:       modelUsed,
+							ResolvedAgentID: routeMetaValue(routeMeta, func(m routeMetadata) string { return m.ResolvedAgentID }),
+							RouteMatchedBy:  routeMetaValue(routeMeta, func(m routeMetadata) string { return m.RouteMatchedBy }),
 						})
+						logger.InfoCF("agent", "Published outbound response",
+							map[string]any{
+								"channel":     msg.Channel,
+								"chat_id":     msg.ChatID,
+								"content_len": len(response),
+							})
+					}
 				} else {
 					logger.DebugCF(
 						"agent",
@@ -1133,9 +1142,35 @@ func (al *AgentLoop) runAgentLoop(
 	// 2. Save user message to session
 	agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
 
+	activity := newActivityRunEmitter(ctx, al, agent.ID, opts)
+	if activity != nil {
+		activity.emit("run.started", map[string]any{
+			"title":         utils.Truncate(strings.TrimSpace(opts.UserMessage), 100),
+			"goal":          utils.Truncate(strings.TrimSpace(opts.UserMessage), 200),
+			"initiator":     "user",
+			"mode":          "interactive",
+			"capabilities":  []string{"tools", "chat"},
+			"input_summary": utils.Truncate(strings.TrimSpace(opts.UserMessage), 180),
+		})
+	}
+
 	// 3. Run LLM iteration loop
-	finalContent, iteration, modelUsed, err := al.runLLMIteration(ctx, agent, messages, opts)
+	finalContent, iteration, modelUsed, err := al.runLLMIteration(ctx, agent, messages, opts, activity)
 	if err != nil {
+		if activity != nil {
+			activity.emit("error.raised", map[string]any{
+				"scope":     "run",
+				"code":      "LLM_ERROR",
+				"message":   err.Error(),
+				"retryable": false,
+			})
+			activity.emit("run.failed", map[string]any{
+				"status":     "failed",
+				"error_code": "LLM_ERROR",
+				"message":    err.Error(),
+				"retryable":  false,
+			})
+		}
 		return "", "", err
 	}
 
@@ -1145,6 +1180,28 @@ func (al *AgentLoop) runAgentLoop(
 	// 4. Handle empty response
 	if finalContent == "" {
 		finalContent = opts.DefaultResponse
+	}
+
+	alreadySentInRound := false
+	if tool, ok := agent.Tools.Get("message"); ok {
+		if mt, ok := tool.(*tools.MessageTool); ok {
+			alreadySentInRound = mt.HasSentInRound()
+		}
+	}
+
+	finalMessageID := ""
+	if activity != nil && !alreadySentInRound {
+		finalMessageID = activity.nextMessageID()
+		activity.emit("message.started", map[string]any{
+			"message_id": finalMessageID,
+			"role":       "assistant",
+			"channel":    "final",
+		})
+		activity.emit("message.completed", map[string]any{
+			"message_id": finalMessageID,
+			"text":       finalContent,
+			"format":     "markdown",
+		})
 	}
 
 	// 5. Save final assistant message to session
@@ -1165,6 +1222,15 @@ func (al *AgentLoop) runAgentLoop(
 			"iterations":   iteration,
 			"final_length": len(finalContent),
 		})
+
+	if activity != nil {
+		activity.emit("run.completed", map[string]any{
+			"status":           "completed",
+			"outcome":          "success",
+			"duration_ms":      time.Since(activity.startedAt).Milliseconds(),
+			"final_message_id": finalMessageID,
+		})
+	}
 
 	return finalContent, modelUsed, nil
 }
@@ -1231,6 +1297,7 @@ func (al *AgentLoop) runLLMIteration(
 	agent *AgentInstance,
 	messages []providers.Message,
 	opts processOptions,
+	activity *activityRunEmitter,
 ) (string, int, string, error) {
 	iteration := 0
 	var finalContent string
@@ -1266,6 +1333,27 @@ func (al *AgentLoop) runLLMIteration(
 
 	for iteration < agent.MaxIterations {
 		iteration++
+		stepName := "Planning"
+		stepKind := "planning"
+		if iteration > 1 {
+			stepName = "Reasoning"
+			stepKind = "reasoning"
+		}
+		iterationStepID := ""
+		if activity != nil {
+			iterationStepID = activity.nextStepID()
+			activity.emit("step.started", map[string]any{
+				"step_id": iterationStepID,
+				"kind":    stepKind,
+				"title":   stepName,
+				"status":  "in_progress",
+			})
+			activity.emit("reasoning.summary", map[string]any{
+				"step_id": iterationStepID,
+				"style":   "concise",
+				"text":    fmt.Sprintf("%s for iteration %d.", stepName, iteration),
+			})
+		}
 
 		logger.DebugCF("agent", "LLM iteration",
 			map[string]any{
@@ -1275,10 +1363,6 @@ func (al *AgentLoop) runLLMIteration(
 			})
 
 		if agent.StatusUpdates {
-			stepName := "Planning"
-			if iteration > 1 {
-				stepName = "Reasoning"
-			}
 			al.publishStatus(ctx, opts, bus.OutboundStatusUpdate{
 				Kind:      bus.StatusKindIteration,
 				StepName:  stepName,
@@ -1504,6 +1588,14 @@ func (al *AgentLoop) runLLMIteration(
 			if finalContent == "" && response.ReasoningContent != "" {
 				finalContent = response.ReasoningContent
 			}
+			if activity != nil && iterationStepID != "" {
+				activity.emit("step.completed", map[string]any{
+					"step_id":  iterationStepID,
+					"status":   "completed",
+					"summary":  "Drafted assistant response",
+					"duration": 0,
+				})
+			}
 			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
 				map[string]any{
 					"agent_id":      agent.ID,
@@ -1534,6 +1626,30 @@ func (al *AgentLoop) runLLMIteration(
 		names := make([]string, len(normalizedToolCalls))
 		for i, tc := range normalizedToolCalls {
 			names[i] = tc.Name
+		}
+		toolStepIDs := make([]string, len(normalizedToolCalls))
+		toolCallIDs := make([]string, len(normalizedToolCalls))
+		toolStartedAt := make([]time.Time, len(normalizedToolCalls))
+		if activity != nil {
+			for i, tc := range normalizedToolCalls {
+				toolStepIDs[i] = activity.nextStepID()
+				toolCallIDs[i] = toolCallID(tc.ID, iteration, i)
+				toolStartedAt[i] = time.Now().UTC()
+				activity.emit("step.started", map[string]any{
+					"step_id": toolStepIDs[i],
+					"kind":    "tool",
+					"title":   fmt.Sprintf("Using %s", tc.Name),
+					"status":  "in_progress",
+				})
+				activity.emit("tool.called", map[string]any{
+					"step_id":      toolStepIDs[i],
+					"tool_call_id": toolCallIDs[i],
+					"tool_name":    tc.Name,
+					"display_name": fmt.Sprintf("Using %s", tc.Name),
+					"arg_preview":  sanitizeToolArgPreview(tc.Arguments),
+					"status":       "in_progress",
+				})
+			}
 		}
 		// Always emit a tool execution status event when tools are invoked so
 		// clients and stress tests can deterministically observe tool usage.
@@ -1671,7 +1787,47 @@ func (al *AgentLoop) runLLMIteration(
 		}
 
 		// Process results in original order (send to user, save to session)
-		for _, r := range agentResults {
+		for idx, r := range agentResults {
+			if r.result == nil {
+				r.result = tools.ErrorResult("tool returned nil result")
+			}
+			if activity != nil && idx < len(toolStepIDs) && idx < len(toolCallIDs) {
+				durationMS := int64(0)
+				if idx < len(toolStartedAt) && !toolStartedAt[idx].IsZero() {
+					durationMS = time.Since(toolStartedAt[idx]).Milliseconds()
+				}
+				if r.result.Err != nil || r.result.IsError {
+					activity.emit("tool.failed", map[string]any{
+						"step_id":      toolStepIDs[idx],
+						"tool_call_id": toolCallIDs[idx],
+						"tool_name":    r.tc.Name,
+						"error_code":   "TOOL_ERROR",
+						"message":      toolResultPreview(r.result),
+						"retryable":    false,
+					})
+					activity.emit("step.failed", map[string]any{
+						"step_id":    toolStepIDs[idx],
+						"status":     "failed",
+						"error_code": "TOOL_ERROR",
+						"message":    toolResultPreview(r.result),
+					})
+				} else {
+					activity.emit("tool.completed", map[string]any{
+						"step_id":        toolStepIDs[idx],
+						"tool_call_id":   toolCallIDs[idx],
+						"tool_name":      r.tc.Name,
+						"duration_ms":    durationMS,
+						"status":         "completed",
+						"result_preview": toolResultPreview(r.result),
+					})
+					activity.emit("step.completed", map[string]any{
+						"step_id":  toolStepIDs[idx],
+						"status":   "completed",
+						"summary":  fmt.Sprintf("Finished %s", r.tc.Name),
+						"duration": durationMS,
+					})
+				}
+			}
 			// Send ForUser content to user immediately if not Silent
 			if !r.result.Silent && r.result.ForUser != "" && opts.SendResponse {
 				al.bus.PublishOutbound(ctx, bus.OutboundMessage{
@@ -1724,6 +1880,14 @@ func (al *AgentLoop) runLLMIteration(
 
 			// Save tool result message to session
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
+		}
+
+		if activity != nil && iterationStepID != "" {
+			activity.emit("step.completed", map[string]any{
+				"step_id": iterationStepID,
+				"status":  "completed",
+				"summary": fmt.Sprintf("Completed %d tool call(s)", len(agentResults)),
+			})
 		}
 
 		// Tick down TTL of discovered tools after processing tool results.

@@ -356,6 +356,7 @@ func (m *Manager) StartAll(ctx context.Context) error {
 	go m.dispatchOutbound(dispatchCtx)
 	go m.dispatchOutboundMedia(dispatchCtx)
 	go m.dispatchOutboundStatus(dispatchCtx)
+	go m.dispatchOutboundActivity(dispatchCtx)
 
 	// Start the TTL janitor that cleans up stale typing/placeholder entries
 	go m.runTTLJanitor(dispatchCtx)
@@ -713,6 +714,57 @@ func (m *Manager) dispatchOutboundStatus(ctx context.Context) {
 				continue
 			}
 			m.handleStatusUpdate(ctx, msg.Channel, msg)
+		}
+	}
+}
+
+// handleActivityEvent delivers a structured activity envelope to channels that
+// implement ActivityEventBroadcaster (e.g. Supr websocket clients).
+func (m *Manager) handleActivityEvent(ctx context.Context, channelName string, msg bus.OutboundActivityEvent) {
+	m.mu.RLock()
+	ch, ok := m.channels[channelName]
+	m.mu.RUnlock()
+	if !ok {
+		logger.WarnCF("channels", "Activity event dropped: channel not found", map[string]any{
+			"channel": channelName,
+			"chat_id": msg.ChatID,
+			"event":   msg.Event.EventType,
+		})
+		return
+	}
+
+	ab, ok := ch.(ActivityEventBroadcaster)
+	if !ok {
+		return
+	}
+	if err := ab.BroadcastActivityEvent(ctx, msg.ChatID, msg.Event); err != nil {
+		logger.WarnCF("channels", "BroadcastActivityEvent failed", map[string]any{
+			"channel": channelName,
+			"chat_id": msg.ChatID,
+			"event":   msg.Event.EventType,
+			"error":   err.Error(),
+		})
+	}
+}
+
+// dispatchOutboundActivity reads structured activity envelopes from the bus and
+// routes them to channel broadcasters.
+func (m *Manager) dispatchOutboundActivity(ctx context.Context) {
+	logger.InfoC("channels", "Outbound activity dispatcher started")
+	for {
+		select {
+		case <-ctx.Done():
+			logger.InfoC("channels", "Outbound activity dispatcher stopped")
+			return
+		case msg, ok := <-m.bus.OutboundActivityChan():
+			if !ok {
+				logger.InfoC("channels", "Outbound activity dispatcher stopped")
+				return
+			}
+			if constants.IsInternalChannel(msg.Channel) {
+				continue
+			}
+			m.handleActivityEvent(ctx, msg.Channel, msg)
 		}
 	}
 }

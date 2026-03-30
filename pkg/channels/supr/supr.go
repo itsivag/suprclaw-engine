@@ -262,6 +262,15 @@ func (c *SuprChannel) BroadcastStatus(ctx context.Context, chatID, text string) 
 	return c.broadcastToSession(chatID, msg)
 }
 
+// BroadcastActivityEvent implements channels.ActivityEventBroadcaster.
+// It sends the canonical event envelope directly (without legacy type/payload wrapper).
+func (c *SuprChannel) BroadcastActivityEvent(ctx context.Context, chatID string, event bus.ActivityEventEnvelope) error {
+	if event.SessionID == "" {
+		event.SessionID = strings.TrimPrefix(chatID, "supr:")
+	}
+	return c.broadcastRawToSession(chatID, event)
+}
+
 func (c *SuprChannel) rememberRouteMetadata(chatID, resolvedAgentID, routeMatchedBy string) {
 	sessionID := strings.TrimPrefix(chatID, "supr:")
 	if sessionID == "" {
@@ -318,7 +327,13 @@ func (c *SuprChannel) broadcastToSession(chatID string, msg SuprMessage) error {
 	// chatID format: "supr:<sessionID>"
 	sessionID := strings.TrimPrefix(chatID, "supr:")
 	msg.SessionID = sessionID
+	return c.broadcastRawToSession(chatID, msg)
+}
 
+// broadcastRawToSession sends a JSON payload as-is to all session connections.
+func (c *SuprChannel) broadcastRawToSession(chatID string, payload any) error {
+	// chatID format: "supr:<sessionID>"
+	sessionID := strings.TrimPrefix(chatID, "supr:")
 	var sent bool
 	c.connections.Range(func(key, value any) bool {
 		pc, ok := value.(*suprConn)
@@ -326,7 +341,7 @@ func (c *SuprChannel) broadcastToSession(chatID string, msg SuprMessage) error {
 			return true
 		}
 		if pc.sessionID == sessionID {
-			if err := pc.writeJSON(msg); err != nil {
+			if err := pc.writeJSON(payload); err != nil {
 				logger.DebugCF("supr", "Write to connection failed", map[string]any{
 					"conn_id": pc.id,
 					"error":   err.Error(),

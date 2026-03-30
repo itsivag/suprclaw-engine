@@ -3,6 +3,7 @@ package channels
 import (
 	"context"
 
+	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/commands"
 )
 
@@ -55,4 +56,10 @@ type CommandRegistrarCapable interface {
 // typing indicator area (separate from placeholder editing).
 type StatusBroadcaster interface {
 	BroadcastStatus(ctx context.Context, chatID, text string) error
+}
+
+// ActivityEventBroadcaster pushes structured run/step/tool/message events
+// to websocket-capable channels.
+type ActivityEventBroadcaster interface {
+	BroadcastActivityEvent(ctx context.Context, chatID string, event bus.ActivityEventEnvelope) error
 }

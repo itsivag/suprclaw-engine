@@ -100,6 +100,44 @@ func (t *noopTool) Execute(ctx context.Context, args map[string]any) *tools.Tool
 	return tools.NewToolResult("ok")
 }
 
+type alwaysFailProvider struct {
+	err error
+}
+
+func (p *alwaysFailProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	return nil, p.err
+}
+
+func (p *alwaysFailProvider) GetDefaultModel() string { return "mock-model" }
+
+func collectActivityEventsUntilTerminal(t *testing.T, msgBus *bus.MessageBus, timeout time.Duration) []bus.OutboundActivityEvent {
+	t.Helper()
+
+	deadline := time.After(timeout)
+	events := make([]bus.OutboundActivityEvent, 0, 16)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for terminal activity event, collected=%d", len(events))
+		case evt, ok := <-msgBus.OutboundActivityChan():
+			if !ok {
+				t.Fatalf("outbound activity channel closed unexpectedly")
+			}
+			events = append(events, evt)
+			switch evt.Event.EventType {
+			case "run.completed", "run.failed":
+				return events
+			}
+		}
+	}
+}
+
 func newTestAgentLoop(
 	t *testing.T,
 ) (al *AgentLoop, cfg *config.Config, msgBus *bus.MessageBus, provider *mockProvider, cleanup func()) {
@@ -305,6 +343,170 @@ func TestProcessMessage_ToolStatusEmitsEvenWhenStatusUpdatesDisabled(t *testing.
 		}
 	default:
 		t.Fatal("expected tool status update to be published")
+	}
+}
+
+func TestProcessMessage_SuprPublishesStructuredActivityEvents(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 4,
+			},
+		},
+	}
+	msgBus := bus.NewMessageBus()
+	provider := &toolCallThenFinalProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.Tools.Register(&noopTool{})
+
+	response, _, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:test",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "done" {
+		t.Fatalf("response = %q, want %q", response, "done")
+	}
+
+	events := collectActivityEventsUntilTerminal(t, msgBus, 2*time.Second)
+	if len(events) == 0 {
+		t.Fatal("expected activity events")
+	}
+
+	runID := events[0].Event.RunID
+	if runID == "" {
+		t.Fatal("run_id should not be empty")
+	}
+
+	lastSeq := 0
+	seen := map[string]bool{}
+	for _, evt := range events {
+		e := evt.Event
+		if e.V != "1.0" {
+			t.Fatalf("schema version = %q, want 1.0", e.V)
+		}
+		if e.EventID == "" {
+			t.Fatalf("event_id is empty for event %q", e.EventType)
+		}
+		if e.EventType == "" {
+			t.Fatal("event_type should not be empty")
+		}
+		if e.Timestamp == "" {
+			t.Fatalf("timestamp is empty for event %q", e.EventType)
+		}
+		if e.Sequence <= lastSeq {
+			t.Fatalf("sequence not strictly increasing: prev=%d current=%d", lastSeq, e.Sequence)
+		}
+		lastSeq = e.Sequence
+		if e.SessionID != "test" {
+			t.Fatalf("session_id = %q, want %q", e.SessionID, "test")
+		}
+		if e.RunID != runID {
+			t.Fatalf("run_id mismatch: got=%q want=%q", e.RunID, runID)
+		}
+		if e.IdempotencyKey == "" {
+			t.Fatalf("idempotency_key is empty for event %q", e.EventType)
+		}
+		seen[e.EventType] = true
+	}
+
+	for _, name := range []string{
+		"run.started",
+		"step.started",
+		"reasoning.summary",
+		"tool.called",
+		"tool.completed",
+		"message.started",
+		"message.completed",
+		"run.completed",
+	} {
+		if !seen[name] {
+			t.Fatalf("expected event_type %q to be emitted", name)
+		}
+	}
+
+	var foundToolCalled bool
+	var foundMessageCompleted bool
+	for _, evt := range events {
+		switch evt.Event.EventType {
+		case "tool.called":
+			foundToolCalled = true
+			if preview, _ := evt.Event.Data["arg_preview"].(string); preview == "" {
+				t.Fatalf("tool.called missing arg_preview")
+			}
+			if _, hasArgs := evt.Event.Data["args"]; hasArgs {
+				t.Fatalf("tool.called should not expose raw args in UI payload")
+			}
+		case "message.completed":
+			foundMessageCompleted = true
+			if text, _ := evt.Event.Data["text"].(string); text != "done" {
+				t.Fatalf("message.completed text = %q, want %q", text, "done")
+			}
+		}
+	}
+	if !foundToolCalled {
+		t.Fatal("missing tool.called event")
+	}
+	if !foundMessageCompleted {
+		t.Fatal("missing message.completed event")
+	}
+}
+
+func TestProcessMessage_SuprPublishesRunFailedOnProviderError(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 4,
+			},
+		},
+	}
+	msgBus := bus.NewMessageBus()
+	provider := &alwaysFailProvider{err: errors.New("provider exploded")}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	_, _, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:test",
+		Content:  "hello",
+	})
+	if err == nil {
+		t.Fatal("expected processMessage error")
+	}
+
+	events := collectActivityEventsUntilTerminal(t, msgBus, 2*time.Second)
+	seen := map[string]bool{}
+	for _, evt := range events {
+		seen[evt.Event.EventType] = true
+	}
+	if !seen["run.started"] {
+		t.Fatal("expected run.started event")
+	}
+	if !seen["error.raised"] {
+		t.Fatal("expected error.raised event")
+	}
+	if !seen["run.failed"] {
+		t.Fatal("expected run.failed event")
+	}
+	if seen["run.completed"] {
+		t.Fatal("run.completed should not be emitted on failure")
 	}
 }
 

@@ -110,6 +110,9 @@ function disconnectChatInternal({
   updateChatStore({
     connectionState: "disconnected",
     isTyping: false,
+    typingStatus: "",
+    activeRunId: "",
+    activityRuns: {},
   })
 }
 
@@ -221,6 +224,9 @@ export async function connectChat() {
       updateChatStore({
         connectionState: "disconnected",
         isTyping: false,
+        typingStatus: "",
+        activeRunId: "",
+        activityRuns: {},
       })
       scheduleReconnect(generation, sessionId)
     }
@@ -293,6 +299,8 @@ export async function hydrateActiveSession() {
             currentState.messages,
           ),
           hasHydratedActiveSession: true,
+          activeRunId: "",
+          activityRuns: {},
         })
         return
       }
@@ -301,6 +309,9 @@ export async function hydrateActiveSession() {
         messages: historyMessages,
         isTyping: false,
         hasHydratedActiveSession: true,
+        typingStatus: "",
+        activeRunId: "",
+        activityRuns: {},
       })
     })
     .catch((error) => {
@@ -321,6 +332,9 @@ export async function hydrateActiveSession() {
         messages: [],
         isTyping: false,
         hasHydratedActiveSession: true,
+        typingStatus: "",
+        activeRunId: "",
+        activityRuns: {},
       })
     })
     .finally(() => {
@@ -363,6 +377,9 @@ export function sendChatMessage(content: string) {
     updateChatStore((prev) => ({
       messages: prev.messages.filter((message) => message.id !== id),
       isTyping: false,
+      typingStatus: "",
+      activeRunId: "",
+      activityRuns: {},
     }))
     return false
   }
@@ -382,6 +399,9 @@ export async function switchChatSession(sessionId: string) {
       messages: historyMessages,
       isTyping: false,
       hasHydratedActiveSession: true,
+      typingStatus: "",
+      activeRunId: "",
+      activityRuns: {},
     })
 
     if (store.get(gatewayAtom).status === "running") {
@@ -407,6 +427,9 @@ export async function newChatSession() {
     isTyping: false,
     hasHydratedActiveSession: true,
     activeAgentId: "",
+    typingStatus: "",
+    activeRunId: "",
+    activityRuns: {},
   })
 
   if (store.get(gatewayAtom).status === "running") {

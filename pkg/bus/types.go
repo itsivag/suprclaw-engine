@@ -80,3 +80,30 @@ type OutboundStatusUpdate struct {
 	Iteration int      // 1-based iteration number
 	MaxIter   int      // max iterations configured
 }
+
+// ActivityEventEnvelope is the canonical run/step/tool/message event shape
+// delivered to rich clients (e.g. Supr web).
+type ActivityEventEnvelope struct {
+	V              string         `json:"v"`
+	EventID        string         `json:"event_id"`
+	EventType      string         `json:"event_type"`
+	Timestamp      string         `json:"timestamp"`
+	Sequence       int            `json:"sequence"`
+	SessionID      string         `json:"session_id"`
+	RunID          string         `json:"run_id"`
+	ParentRunID    *string        `json:"parent_run_id"`
+	AgentID        string         `json:"agent_id,omitempty"`
+	TraceID        string         `json:"trace_id,omitempty"`
+	SpanID         string         `json:"span_id,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	Replay         bool           `json:"replay"`
+	Data           map[string]any `json:"data"`
+}
+
+// OutboundActivityEvent carries a canonical activity envelope to be routed
+// to channels for websocket delivery.
+type OutboundActivityEvent struct {
+	Channel string
+	ChatID  string
+	Event   ActivityEventEnvelope
+}
