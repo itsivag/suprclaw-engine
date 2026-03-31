@@ -37,6 +37,8 @@ type sessionRouteMetadata struct {
 }
 
 const (
+	eventSchemaVersion = "1.0"
+
 	runStatusInProgress = "in_progress"
 	runStatusCompleted  = "completed"
 	runStatusFailed     = "failed"
@@ -46,8 +48,10 @@ const (
 const reasoningUsage = "off|low|medium|high|xhigh|adaptive"
 
 type sessionRunState struct {
-	latestRunID string
-	runs        map[string]string
+	latestRunID    string
+	syntheticRunID string
+	runs           map[string]string
+	sequences      map[string]int
 }
 
 // suprConn represents a single WebSocket connection.
@@ -184,24 +188,38 @@ func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 		return channels.ErrNotRunning
 	}
 	c.rememberRouteMetadata(msg.ChatID, msg.ResolvedAgentID, msg.RouteMatchedBy)
+	sessionID := strings.TrimPrefix(msg.ChatID, "supr:")
+	if sessionID == "" {
+		return fmt.Errorf("invalid supr chat id: %q", msg.ChatID)
+	}
+	runID := c.resolveOrCreateRunID(sessionID)
 
-	// Typed error — send as error event, not message.create
+	// Emit canonical error envelope instead of legacy typed error frame.
 	if msg.ErrorCode != "" {
-		errPayload := map[string]any{
-			"code":    msg.ErrorCode,
-			"message": msg.ErrorMessage,
+		errData := map[string]any{
+			"scope":     "run",
+			"code":      msg.ErrorCode,
+			"message":   msg.ErrorMessage,
+			"retryable": false,
 		}
 		if msg.ResolvedAgentID != "" {
-			errPayload["resolved_agent_id"] = msg.ResolvedAgentID
+			errData["resolved_agent_id"] = msg.ResolvedAgentID
 		}
 		if msg.RouteMatchedBy != "" {
-			errPayload["route_matched_by"] = msg.RouteMatchedBy
+			errData["route_matched_by"] = msg.RouteMatchedBy
 		}
-		errMsg := newMessage(TypeError, errPayload)
-		return c.broadcastToSession(msg.ChatID, errMsg)
+		return c.broadcastRawToSession(msg.ChatID, c.newDerivedEventEnvelope(sessionID, runID, "error.raised", errData))
 	}
 
-	payload := map[string]any{"content": msg.Content}
+	if strings.TrimSpace(msg.Content) == "" {
+		return nil
+	}
+
+	payload := map[string]any{
+		"message_id": "msg_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		"text":       msg.Content,
+		"format":     "markdown",
+	}
 	if msg.ModelUsed != "" {
 		payload["model_used"] = msg.ModelUsed
 	}
@@ -211,75 +229,31 @@ func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if msg.RouteMatchedBy != "" {
 		payload["route_matched_by"] = msg.RouteMatchedBy
 	}
-	outMsg := newMessage(TypeMessageCreate, payload)
-	return c.broadcastToSession(msg.ChatID, outMsg)
+	return c.broadcastRawToSession(msg.ChatID, c.newDerivedEventEnvelope(sessionID, runID, "message.completed", payload))
 }
 
 // EditMessage implements channels.MessageEditor.
 func (c *SuprChannel) EditMessage(ctx context.Context, chatID string, messageID string, content string) error {
-	outMsg := newMessage(TypeMessageUpdate, c.messageUpdatePayload(chatID, messageID, content))
-	return c.broadcastToSession(chatID, outMsg)
-}
-
-func (c *SuprChannel) messageUpdatePayload(chatID, messageID, content string) map[string]any {
-	payload := map[string]any{
-		"message_id": messageID,
-		"content":    content,
-	}
-	for key, value := range c.routeMetadataPayload(chatID) {
-		payload[key] = value
-	}
-	return payload
+	return nil
 }
 
 // StartTyping implements channels.TypingCapable.
 func (c *SuprChannel) StartTyping(ctx context.Context, chatID string) (func(), error) {
-	startMsg := newMessage(TypeTypingStart, nil)
-	if err := c.broadcastToSession(chatID, startMsg); err != nil {
-		return func() {}, err
-	}
-	return func() {
-		stopMsg := newMessage(TypeTypingStop, c.routeMetadataPayload(chatID))
-		c.broadcastToSession(chatID, stopMsg)
-	}, nil
+	return func() {}, nil
 }
 
 // SendPlaceholder implements channels.PlaceholderCapable.
 // It sends a placeholder message via the Supr WebSocket that will later be
 // edited to the actual response via EditMessage (channels.MessageEditor).
 func (c *SuprChannel) SendPlaceholder(ctx context.Context, chatID string) (string, error) {
-	if !c.config.Placeholder.Enabled {
-		return "", nil
-	}
-
-	text := c.config.Placeholder.Text
-	if text == "" {
-		text = "Thinking... 💭"
-	}
-
-	msgID := uuid.New().String()
-	outMsg := newMessage(TypeMessageCreate, map[string]any{
-		"content":    text,
-		"message_id": msgID,
-	})
-
-	if err := c.broadcastToSession(chatID, outMsg); err != nil {
-		return "", err
-	}
-
-	return msgID, nil
+	return "", nil
 }
 
 // BroadcastStatus implements channels.StatusBroadcaster.
 // It sends a typing.status WebSocket event to all connected clients for the session,
 // giving the browser instant feedback about the current agent operation.
 func (c *SuprChannel) BroadcastStatus(ctx context.Context, chatID, text string) error {
-	payload := map[string]any{"text": text}
-	for key, value := range c.routeMetadataPayload(chatID) {
-		payload[key] = value
-	}
-	msg := newMessage(TypeTypingStatus, payload)
-	return c.broadcastToSession(chatID, msg)
+	return nil
 }
 
 // BroadcastActivityEvent implements channels.ActivityEventBroadcaster.
@@ -316,7 +290,13 @@ func (c *SuprChannel) rememberRunStatus(chatID string, event bus.ActivityEventEn
 	if state.runs == nil {
 		state.runs = make(map[string]string)
 	}
+	if state.sequences == nil {
+		state.sequences = make(map[string]int)
+	}
 	state.runs[runID] = status
+	if event.Sequence > state.sequences[runID] {
+		state.sequences[runID] = event.Sequence
+	}
 	state.latestRunID = runID
 	c.runState[sessionID] = state
 }
@@ -331,6 +311,77 @@ func runStatusForEvent(eventType string) (string, bool) {
 		return runStatusFailed, true
 	default:
 		return "", false
+	}
+}
+
+func (c *SuprChannel) resolveOrCreateRunID(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+
+	c.runStateMu.Lock()
+	defer c.runStateMu.Unlock()
+
+	state := c.runState[sessionID]
+	if latest := strings.TrimSpace(state.latestRunID); latest != "" {
+		c.runState[sessionID] = state
+		return latest
+	}
+	if strings.TrimSpace(state.syntheticRunID) == "" {
+		state.syntheticRunID = "run_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	}
+	if state.runs == nil {
+		state.runs = make(map[string]string)
+	}
+	if state.sequences == nil {
+		state.sequences = make(map[string]int)
+	}
+	state.latestRunID = state.syntheticRunID
+	if _, ok := state.runs[state.syntheticRunID]; !ok {
+		state.runs[state.syntheticRunID] = runStatusInProgress
+	}
+	c.runState[sessionID] = state
+	return state.syntheticRunID
+}
+
+func (c *SuprChannel) nextDerivedEventSequence(sessionID, runID string) int {
+	sessionID = strings.TrimSpace(sessionID)
+	runID = strings.TrimSpace(runID)
+	if sessionID == "" || runID == "" {
+		return 1
+	}
+
+	c.runStateMu.Lock()
+	defer c.runStateMu.Unlock()
+
+	state := c.runState[sessionID]
+	if state.sequences == nil {
+		state.sequences = make(map[string]int)
+	}
+	seq := state.sequences[runID] + 1
+	if seq < 1 {
+		seq = 1
+	}
+	state.sequences[runID] = seq
+	c.runState[sessionID] = state
+	return seq
+}
+
+func (c *SuprChannel) newDerivedEventEnvelope(sessionID, runID, eventType string, data map[string]any) bus.ActivityEventEnvelope {
+	seq := c.nextDerivedEventSequence(sessionID, runID)
+	return bus.ActivityEventEnvelope{
+		V:              eventSchemaVersion,
+		EventID:        "evt_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		EventType:      eventType,
+		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
+		Sequence:       seq,
+		SessionID:      sessionID,
+		RunID:          runID,
+		ParentRunID:    nil,
+		IdempotencyKey: fmt.Sprintf("%s_%d", runID, seq),
+		Replay:         false,
+		Data:           data,
 	}
 }
 
@@ -696,36 +747,9 @@ func (c *SuprChannel) handleMessage(pc *suprConn, msg SuprMessage) {
 	case TypeMediaSend:
 		c.handleMediaSend(pc, msg)
 
-	case TypeRunStatusGet:
-		c.handleRunStatusGet(pc, msg)
-
 	default:
 		errMsg := newError("unknown_type", fmt.Sprintf("unknown message type: %s", msg.Type))
 		pc.writeJSON(errMsg)
-	}
-}
-
-func (c *SuprChannel) handleRunStatusGet(pc *suprConn, msg SuprMessage) {
-	sessionID := strings.TrimSpace(msg.SessionID)
-	if sessionID == "" {
-		sessionID = strings.TrimSpace(pc.sessionID)
-	}
-	requestedRunID, _ := msg.Payload["run_id"].(string)
-	runID, status := c.resolveRunStatus(sessionID, requestedRunID)
-
-	response := newMessage(TypeRunStatus, map[string]any{
-		"run_id": runID,
-		"status": status,
-	})
-	response.ID = msg.ID
-	response.SessionID = sessionID
-	if err := pc.writeJSON(response); err != nil {
-		logger.DebugCF("supr", "Failed to write run status response", map[string]any{
-			"conn_id":    pc.id,
-			"session_id": sessionID,
-			"run_id":     runID,
-			"error":      err.Error(),
-		})
 	}
 }
 

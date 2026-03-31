@@ -1,4 +1,3 @@
-import { normalizeUnixTimestamp } from "@/features/chat/state"
 import {
   type ActivityEventEnvelope,
   type AgentInfo,
@@ -20,8 +19,6 @@ export interface PicoMessage {
   data?: Record<string, unknown>
   v?: string
 }
-
-type RunStatusValue = "in_progress" | "completed" | "failed" | "unknown"
 
 function isActivityEventEnvelope(
   message: PicoMessage,
@@ -72,15 +69,6 @@ function withToolState(
     ...toolStates,
     [key]: status,
   }
-}
-
-function isRunStatusValue(value: unknown): value is RunStatusValue {
-  return (
-    value === "in_progress" ||
-    value === "completed" ||
-    value === "failed" ||
-    value === "unknown"
-  )
 }
 
 function appendAssistantMessage(
@@ -179,7 +167,7 @@ function applyActivityEvent(event: ActivityEventEnvelope) {
         break
       case "error.raised": {
         const scope = asString(eventData.scope)
-        if (scope === "run" && prev.activeRunId === event.run_id) {
+        if (scope === "run") {
           nextIsTyping = false
         }
         break
@@ -207,67 +195,6 @@ function applyActivityEvent(event: ActivityEventEnvelope) {
   })
 }
 
-function applyRunStatus(payload: Record<string, unknown>) {
-  const status = payload.status
-  if (!isRunStatusValue(status)) {
-    return
-  }
-  const payloadRunID = asString(payload.run_id)
-
-  updateChatStore((prev) => {
-    const targetRunID = payloadRunID || prev.activeRunId
-    const nextRuns = { ...prev.activityRuns }
-    if (targetRunID) {
-      const existing = nextRuns[targetRunID] || buildDefaultRunState(targetRunID)
-      let nextStatus = existing.status
-      if (status === "unknown") {
-        nextStatus = "stale"
-      } else if (status === "in_progress") {
-        nextStatus = "in_progress"
-      } else if (status === "completed") {
-        nextStatus = "completed"
-      } else if (status === "failed") {
-        nextStatus = "failed"
-      }
-      nextRuns[targetRunID] = {
-        ...existing,
-        status: nextStatus,
-      }
-    }
-
-    let nextActiveRunID = prev.activeRunId
-    let nextIsTyping = prev.isTyping
-    switch (status) {
-      case "in_progress":
-        if (targetRunID) {
-          nextActiveRunID = targetRunID
-          nextIsTyping = true
-        }
-        break
-      case "completed":
-      case "failed":
-        nextIsTyping = false
-        if (!targetRunID || prev.activeRunId === targetRunID) {
-          nextActiveRunID = ""
-        }
-        break
-      case "unknown":
-        nextIsTyping = false
-        nextActiveRunID = targetRunID
-        break
-      default:
-        break
-    }
-
-    return {
-      activityRuns: nextRuns,
-      activeRunId: nextActiveRunID,
-      isTyping: nextIsTyping,
-      typingStatus: "",
-    }
-  })
-}
-
 export function handlePicoMessage(
   message: PicoMessage,
   expectedSessionId: string,
@@ -287,59 +214,12 @@ export function handlePicoMessage(
   const payload = message.payload || {}
 
   switch (message.type) {
-    case "message.create": {
-      const content = (payload.content as string) || ""
-      const messageId = (payload.message_id as string) || `pico-${Date.now()}`
-      const timestamp =
-        message.timestamp !== undefined &&
-        Number.isFinite(Number(message.timestamp))
-          ? normalizeUnixTimestamp(Number(message.timestamp))
-          : Date.now()
-
-      updateChatStore((prev) => ({
-        messages: [
-          ...prev.messages,
-          {
-            id: messageId,
-            role: "assistant",
-            content,
-            timestamp,
-          },
-        ],
-      }))
-      break
-    }
-
-    case "message.update": {
-      const content = (payload.content as string) || ""
-      const messageId = payload.message_id as string
-      if (!messageId) {
-        break
-      }
-
-      updateChatStore((prev) => ({
-        messages: prev.messages.map((msg) =>
-          msg.id === messageId ? { ...msg, content } : msg,
-        ),
-      }))
-      break
-    }
-
-    case "typing.start":
-    case "typing.status":
-    case "typing.stop":
-      break
-
     case "error":
       console.error("Pico error:", payload)
       updateChatStore({ isTyping: false })
       break
 
     case "pong":
-      break
-
-    case "run.status":
-      applyRunStatus(payload)
       break
 
     case "agent.list": {

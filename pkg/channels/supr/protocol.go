@@ -5,22 +5,15 @@ import "time"
 // Protocol message types.
 const (
 	// TypeMessageSend is sent from client to server.
-	TypeMessageSend  = "message.send"
-	TypeMediaSend    = "media.send"
-	TypePing         = "ping"
-	TypeRunStatusGet = "run.status.get"
+	TypeMessageSend = "message.send"
+	TypeMediaSend   = "media.send"
+	TypePing        = "ping"
 
-	// TypeMessageCreate is sent from server to client.
-	TypeMessageCreate = "message.create"
-	TypeMessageUpdate = "message.update"
-	TypeMediaCreate   = "media.create"
-	TypeTypingStart   = "typing.start"
-	TypeTypingStop    = "typing.stop"
-	TypeTypingStatus  = "typing.status"
-	TypeError         = "error"
-	TypePong          = "pong"
-	TypeAgentList     = "agent.list"
-	TypeRunStatus     = "run.status"
+	// Legacy typed control frames still used for handshake/errors/media transport.
+	TypeMediaCreate = "media.create"
+	TypeError       = "error"
+	TypePong        = "pong"
+	TypeAgentList   = "agent.list"
 )
 
 // SuprMessage is the wire format for all Supr WebSocket messages.

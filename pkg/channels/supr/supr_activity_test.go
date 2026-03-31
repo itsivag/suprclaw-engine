@@ -105,36 +105,7 @@ func TestSuprBroadcastActivityEvent_EmitsCanonicalEnvelope(t *testing.T) {
 	}
 }
 
-func TestSuprRunStatusGet_UnknownWhenNoRunState(t *testing.T) {
-	_, conn, cleanup := openSuprTestSocket(t)
-	defer cleanup()
-
-	req := SuprMessage{
-		Type:      TypeRunStatusGet,
-		ID:        "req-1",
-		SessionID: "sess-1",
-	}
-	if err := conn.WriteJSON(req); err != nil {
-		t.Fatalf("WriteJSON(run.status.get) error = %v", err)
-	}
-
-	var frame map[string]any
-	if err := conn.ReadJSON(&frame); err != nil {
-		t.Fatalf("ReadJSON(run.status) error = %v", err)
-	}
-	if got, _ := frame["type"].(string); got != TypeRunStatus {
-		t.Fatalf("type = %q, want %q", got, TypeRunStatus)
-	}
-	payload, _ := frame["payload"].(map[string]any)
-	if got, _ := payload["status"].(string); got != runStatusUnknown {
-		t.Fatalf("status = %q, want %q", got, runStatusUnknown)
-	}
-	if got, _ := payload["run_id"].(string); got != "" {
-		t.Fatalf("run_id = %q, want empty", got)
-	}
-}
-
-func TestSuprRunStatusGet_HonorsRequestedRunID(t *testing.T) {
+func TestSuprSend_EmitsCanonicalMessageCompleted(t *testing.T) {
 	ch, conn, cleanup := openSuprTestSocket(t)
 	defer cleanup()
 
@@ -142,94 +113,91 @@ func TestSuprRunStatusGet_HonorsRequestedRunID(t *testing.T) {
 		EventType: "run.started",
 		RunID:     "run-1",
 		SessionID: "sess-1",
+		Sequence:  3,
 	})
-	ch.rememberRunStatus("supr:sess-1", bus.ActivityEventEnvelope{
-		EventType: "run.completed",
-		RunID:     "run-1",
-		SessionID: "sess-1",
-	})
-	ch.rememberRunStatus("supr:sess-1", bus.ActivityEventEnvelope{
-		EventType: "run.started",
-		RunID:     "run-2",
-		SessionID: "sess-1",
-	})
-
-	req := SuprMessage{
-		Type:      TypeRunStatusGet,
-		ID:        "req-2",
-		SessionID: "sess-1",
-		Payload: map[string]any{
-			"run_id": "run-1",
-		},
-	}
-	if err := conn.WriteJSON(req); err != nil {
-		t.Fatalf("WriteJSON(run.status.get) error = %v", err)
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel: "supr",
+		ChatID:  "supr:sess-1",
+		Content: "hello world",
+	}); err != nil {
+		t.Fatalf("Send() error = %v", err)
 	}
 
 	var frame map[string]any
 	if err := conn.ReadJSON(&frame); err != nil {
-		t.Fatalf("ReadJSON(run.status) error = %v", err)
+		t.Fatalf("ReadJSON(message.completed) error = %v", err)
 	}
-	payload, _ := frame["payload"].(map[string]any)
-	if got, _ := payload["run_id"].(string); got != "run-1" {
+	if _, hasLegacyType := frame["type"]; hasLegacyType {
+		t.Fatalf("expected canonical envelope, got legacy typed frame")
+	}
+	if got, _ := frame["event_type"].(string); got != "message.completed" {
+		t.Fatalf("event_type = %q, want %q", got, "message.completed")
+	}
+	if got, _ := frame["run_id"].(string); got != "run-1" {
 		t.Fatalf("run_id = %q, want %q", got, "run-1")
 	}
-	if got, _ := payload["status"].(string); got != runStatusCompleted {
-		t.Fatalf("status = %q, want %q", got, runStatusCompleted)
+	data, _ := frame["data"].(map[string]any)
+	if got, _ := data["text"].(string); got != "hello world" {
+		t.Fatalf("data.text = %q, want %q", got, "hello world")
 	}
-
-	latestReq := SuprMessage{
-		Type:      TypeRunStatusGet,
-		ID:        "req-2-latest",
-		SessionID: "sess-1",
-	}
-	if err := conn.WriteJSON(latestReq); err != nil {
-		t.Fatalf("WriteJSON(run.status.get latest) error = %v", err)
-	}
-	var latestFrame map[string]any
-	if err := conn.ReadJSON(&latestFrame); err != nil {
-		t.Fatalf("ReadJSON(run.status latest) error = %v", err)
-	}
-	latestPayload, _ := latestFrame["payload"].(map[string]any)
-	if got, _ := latestPayload["run_id"].(string); got != "run-2" {
-		t.Fatalf("latest run_id = %q, want %q", got, "run-2")
-	}
-	if got, _ := latestPayload["status"].(string); got != runStatusInProgress {
-		t.Fatalf("latest status = %q, want %q", got, runStatusInProgress)
+	if got, _ := frame["sequence"].(float64); got <= 3 {
+		t.Fatalf("sequence = %v, want > 3", got)
 	}
 }
 
-func TestSuprRunStatusGet_UnknownForMissingRequestedRun(t *testing.T) {
+func TestSuprSend_EmitsCanonicalErrorRaised(t *testing.T) {
 	ch, conn, cleanup := openSuprTestSocket(t)
 	defer cleanup()
 
 	ch.rememberRunStatus("supr:sess-1", bus.ActivityEventEnvelope{
 		EventType: "run.started",
-		RunID:     "run-2",
+		RunID:     "run-err",
 		SessionID: "sess-1",
+		Sequence:  2,
 	})
-
-	req := SuprMessage{
-		Type:      TypeRunStatusGet,
-		ID:        "req-3",
-		SessionID: "sess-1",
-		Payload: map[string]any{
-			"run_id": "run-missing",
-		},
-	}
-	if err := conn.WriteJSON(req); err != nil {
-		t.Fatalf("WriteJSON(run.status.get) error = %v", err)
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel:      "supr",
+		ChatID:       "supr:sess-1",
+		ErrorCode:    "TEST_ERROR",
+		ErrorMessage: "boom",
+	}); err != nil {
+		t.Fatalf("Send(error) error = %v", err)
 	}
 
 	var frame map[string]any
 	if err := conn.ReadJSON(&frame); err != nil {
-		t.Fatalf("ReadJSON(run.status) error = %v", err)
+		t.Fatalf("ReadJSON(error.raised) error = %v", err)
 	}
-	payload, _ := frame["payload"].(map[string]any)
-	if got, _ := payload["run_id"].(string); got != "run-missing" {
-		t.Fatalf("run_id = %q, want %q", got, "run-missing")
+	if _, hasLegacyType := frame["type"]; hasLegacyType {
+		t.Fatalf("expected canonical envelope, got legacy typed frame")
 	}
-	if got, _ := payload["status"].(string); got != runStatusUnknown {
-		t.Fatalf("status = %q, want %q", got, runStatusUnknown)
+	if got, _ := frame["event_type"].(string); got != "error.raised" {
+		t.Fatalf("event_type = %q, want %q", got, "error.raised")
+	}
+	data, _ := frame["data"].(map[string]any)
+	if got, _ := data["code"].(string); got != "TEST_ERROR" {
+		t.Fatalf("data.code = %q, want %q", got, "TEST_ERROR")
+	}
+	if got, _ := data["message"].(string); got != "boom" {
+		t.Fatalf("data.message = %q, want %q", got, "boom")
+	}
+}
+
+func TestSuprStartTyping_DoesNotEmitLegacyFrames(t *testing.T) {
+	ch, conn, cleanup := openSuprTestSocket(t)
+	defer cleanup()
+
+	stop, err := ch.StartTyping(context.Background(), "supr:sess-1")
+	if err != nil {
+		t.Fatalf("StartTyping() error = %v", err)
+	}
+	stop()
+
+	if err := conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	var frame map[string]any
+	if err := conn.ReadJSON(&frame); err == nil {
+		t.Fatalf("unexpected frame after StartTyping no-op: %+v", frame)
 	}
 }

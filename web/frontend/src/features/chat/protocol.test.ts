@@ -64,7 +64,7 @@ describe("handlePicoMessage", () => {
     ).toEqual([1, 2])
   })
 
-  it("marks unknown run status as stale and clears typing", () => {
+  it("ignores legacy run.status frames", () => {
     updateChatStore({
       isTyping: true,
       activeRunId: "run-1",
@@ -92,9 +92,9 @@ describe("handlePicoMessage", () => {
     )
 
     const state = getChatState()
-    expect(state.isTyping).toBe(false)
+    expect(state.isTyping).toBe(true)
     expect(state.activeRunId).toBe("run-1")
-    expect(state.activityRuns["run-1"]?.status).toBe("stale")
+    expect(state.activityRuns["run-1"]?.status).toBe("in_progress")
   })
 
   it("allows late terminal events to transition stale runs", () => {
