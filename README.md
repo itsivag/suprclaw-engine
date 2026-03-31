@@ -4,6 +4,8 @@
 
 Runs on $10 hardware with <10MB RAM. Single binary, 1-second boot, works across x86_64, ARM64, MIPS, and RISC-V.
 
+Originally forked from `picoclaw`, but it has diverged heavily feature-wise, so the fork relationship was cut.
+
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/license-Elastic%20License%202.0-blue)
 
