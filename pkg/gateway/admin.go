@@ -66,6 +66,7 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 
 	// MCP
 	mux.HandleFunc("POST /api/admin/mcp/configure", h.auth(h.mcpConfigure))
+	mux.HandleFunc("DELETE /api/admin/mcp/tools/{toolName}", h.auth(h.mcpDeleteTool))
 
 	// Skills — specific paths before wildcard
 	mux.HandleFunc("GET /api/admin/skills", h.auth(h.listSkills))

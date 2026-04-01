@@ -685,3 +685,85 @@ func (h *adminHandler) mcpConfigure(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+// --- DELETE /api/admin/mcp/tools/{toolName}?skillName=<name>&agentId=<id>&workspacePath=<path> ---
+
+func (h *adminHandler) mcpDeleteTool(w http.ResponseWriter, r *http.Request) {
+	toolName := strings.TrimSpace(r.PathValue("toolName"))
+	if !reRelPath.MatchString(toolName) || strings.Contains(toolName, "..") || filepath.IsAbs(toolName) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid tool name"})
+		return
+	}
+
+	skillName := strings.TrimSpace(r.URL.Query().Get("skillName"))
+	agentID := strings.TrimSpace(r.URL.Query().Get("agentId"))
+	workspacePath := strings.TrimSpace(r.URL.Query().Get("workspacePath"))
+
+	if skillName != "" && (!reRelPath.MatchString(skillName) || strings.Contains(skillName, "..") || filepath.IsAbs(skillName)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid skill name"})
+		return
+	}
+
+	toolRemoved := false
+	if err := h.mutateCfg(func(cfg *config.Config) error {
+		if cfg.Tools.MCP.Servers == nil {
+			return nil
+		}
+		if _, ok := cfg.Tools.MCP.Servers[toolName]; ok {
+			delete(cfg.Tools.MCP.Servers, toolName)
+			toolRemoved = true
+		}
+		return nil
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	status := "ok"
+	skillRemoved := false
+	resolvedWorkspace := ""
+	errors := make([]string, 0)
+
+	if skillName != "" {
+		if agentID == "" && workspacePath == "" {
+			errors = append(errors, "agentId or workspacePath is required when skillName is provided")
+		} else {
+			ws, err := h.resolveSkillsWorkspace(agentID, workspacePath)
+			if err != nil {
+				errors = append(errors, err.Error())
+			} else {
+				resolvedWorkspace = ws
+				installer, err := h.newSkillsInstallerFor(ws)
+				if err != nil {
+					errors = append(errors, err.Error())
+				} else if err := installer.Uninstall(skillName); err != nil {
+					errors = append(errors, err.Error())
+				} else {
+					skillRemoved = true
+				}
+			}
+		}
+		if len(errors) > 0 {
+			status = "partial"
+		}
+	}
+
+	resp := map[string]any{
+		"status":      status,
+		"toolName":    toolName,
+		"toolRemoved": toolRemoved,
+		"errors":      errors,
+	}
+	if skillName != "" {
+		resp["skillName"] = skillName
+		resp["skillRemoved"] = skillRemoved
+		if agentID != "" {
+			resp["agentId"] = agentID
+		}
+		if resolvedWorkspace != "" {
+			resp["workspacePath"] = resolvedWorkspace
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
