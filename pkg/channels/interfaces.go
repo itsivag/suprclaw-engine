@@ -63,3 +63,21 @@ type StatusBroadcaster interface {
 type ActivityEventBroadcaster interface {
 	BroadcastActivityEvent(ctx context.Context, chatID string, event bus.ActivityEventEnvelope) error
 }
+
+// RunControlError is a typed error for channel-initiated run control operations.
+// Code is intended for direct protocol exposure (e.g. typed WebSocket error payloads).
+type RunControlError struct {
+	Code    string
+	Message string
+}
+
+func (e *RunControlError) Error() string {
+	return e.Code + ": " + e.Message
+}
+
+// RunController allows channels to request cancellation of active runs.
+type RunController interface {
+	// CancelRun attempts to stop an active run for channel+chat.
+	// runID is optional; implementations may resolve current run when empty.
+	CancelRun(channel, chatID, runID, reason string) (cancelled bool, resolvedRunID string, err error)
+}

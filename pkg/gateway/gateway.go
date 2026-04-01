@@ -209,6 +209,7 @@ func setupAndStartServices(
 
 	agentLoop.SetChannelManager(runningServices.ChannelManager)
 	agentLoop.SetMediaStore(runningServices.MediaStore)
+	runningServices.ChannelManager.SetRunController(agentLoop)
 
 	if transcriber := voice.DetectTranscriber(cfg); transcriber != nil {
 		agentLoop.SetTranscriber(transcriber)
@@ -411,6 +412,7 @@ func restartServices(
 		return fmt.Errorf("error recreating channel manager: %w", err)
 	}
 	al.SetChannelManager(runningServices.ChannelManager)
+	runningServices.ChannelManager.SetRunController(al)
 
 	enabledChannels := runningServices.ChannelManager.GetEnabledChannels()
 	if len(enabledChannels) > 0 {

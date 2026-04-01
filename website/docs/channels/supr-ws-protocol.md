@@ -129,6 +129,33 @@ Rules:
 
 Server replies with typed `pong` and mirrors `id` when present.
 
+## `run.stop`
+
+Requests cancellation of the active run for the session.
+
+Payload fields:
+
+- `run_id?: string`
+- `reason?: string`
+
+Validation:
+
+- If there is no active run: typed `error` with `code: "no_active_run"`.
+- If `run_id` is provided and does not match the active run: typed `error` with `code: "run_mismatch"`.
+- On success, no typed ack is sent; cancellation outcome is reported via canonical events.
+
+Example:
+
+```json
+{
+  "type": "run.stop",
+  "payload": {
+    "run_id": "run_abc123",
+    "reason": "Stopped by user."
+  }
+}
+```
+
 ## Server -> client messages
 
 ## Typed frames
@@ -170,6 +197,8 @@ Common protocol error codes:
 - `unknown_type`
 - `empty_content`
 - `invalid_reasoning`
+- `no_active_run`
+- `run_mismatch`
 - `media_store_unavailable`
 - `invalid_media_data`
 - `media_write_failed`
@@ -224,6 +253,11 @@ Optional routing/observability keys may be included:
 - `resolved_agent_id`
 - `route_matched_by`
 
+Cancellation outcome for accepted `run.stop`:
+
+1. `message.completed` with stop text (default: `"Stopped by user."`)
+2. `run.failed` with `error_code: "RUN_CANCELLED"`
+
 ## Ordering and dedupe
 
 - `sequence` is monotonic per `run_id`.
@@ -261,4 +295,3 @@ Defaults:
 For the repository-level full spec (same protocol, expanded detail), see:
 
 - [`docs/supr_ws_protocol.md`](https://github.com/itsivag/suprclaw-engine/blob/main/docs/supr_ws_protocol.md)
-

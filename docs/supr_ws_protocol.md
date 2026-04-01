@@ -136,6 +136,33 @@ Rules:
 
 Server replies with typed `pong` and mirrors `id` when provided.
 
+## `type: "run.stop"`
+
+Requests cancellation of the active run for the session.
+
+Payload fields:
+
+- `run_id?: string`
+- `reason?: string`
+
+Validation:
+
+- If there is no active run: typed `error` with `code: "no_active_run"`.
+- If `run_id` is provided and does not match the active run: typed `error` with `code: "run_mismatch"`.
+- On success, no typed ack is sent; the result is reported via canonical activity events.
+
+Example:
+
+```json
+{
+  "type": "run.stop",
+  "payload": {
+    "run_id": "run_abc123",
+    "reason": "Stopped by user."
+  }
+}
+```
+
 ## Server -> client frame types
 
 ## Typed control/data frames
@@ -184,6 +211,8 @@ Common error codes:
 - `unknown_type`
 - `empty_content`
 - `invalid_reasoning`
+- `no_active_run`
+- `run_mismatch`
 - `media_store_unavailable`
 - `invalid_media_data`
 - `media_write_failed`
@@ -244,6 +273,11 @@ Additional optional observability/routing metadata may appear:
 - `resolved_agent_id`
 - `route_matched_by`
 
+Cancellation outcome for accepted `run.stop`:
+
+1. `message.completed` with stop text (default: `"Stopped by user."`)
+2. `run.failed` with `error_code: "RUN_CANCELLED"`
+
 ## Ordering and idempotency
 
 - `sequence` is per-run monotonic order.
@@ -278,4 +312,3 @@ Defaults from `pkg/config/defaults.go`:
 - `GET /api/supr/token` -> `{ token, ws_url, enabled }`
 - `POST /api/supr/token` -> regenerates token
 - `POST /api/supr/setup` -> ensures Supr channel enabled/token/origins
-

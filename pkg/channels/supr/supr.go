@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -84,17 +85,18 @@ func (pc *suprConn) close() {
 // It serves as the reference implementation for all optional capability interfaces.
 type SuprChannel struct {
 	*channels.BaseChannel
-	config       config.SuprConfig
-	upgrader     websocket.Upgrader
-	connections  sync.Map // connID → *suprConn
-	connCount    atomic.Int32
-	ctx          context.Context
-	cancel       context.CancelFunc
-	agents       []agentSummary
-	defaultAgent string
-	routeMeta    sync.Map // sessionID -> sessionRouteMetadata
-	runStateMu   sync.RWMutex
-	runState     map[string]sessionRunState // sessionID -> run state
+	config        config.SuprConfig
+	upgrader      websocket.Upgrader
+	connections   sync.Map // connID → *suprConn
+	connCount     atomic.Int32
+	ctx           context.Context
+	cancel        context.CancelFunc
+	agents        []agentSummary
+	defaultAgent  string
+	runController channels.RunController
+	routeMeta     sync.Map // sessionID -> sessionRouteMetadata
+	runStateMu    sync.RWMutex
+	runState      map[string]sessionRunState // sessionID -> run state
 }
 
 // NewSuprChannel creates a new Supr WebSocket channel.
@@ -165,6 +167,11 @@ func (c *SuprChannel) Stop(ctx context.Context) error {
 
 	logger.InfoC("supr", "Supr WebSocket channel stopped")
 	return nil
+}
+
+// SetRunController injects run-control callbacks from the agent loop.
+func (c *SuprChannel) SetRunController(rc channels.RunController) {
+	c.runController = rc
 }
 
 // WebhookPath implements channels.WebhookHandler.
@@ -747,6 +754,9 @@ func (c *SuprChannel) handleMessage(pc *suprConn, msg SuprMessage) {
 	case TypeMediaSend:
 		c.handleMediaSend(pc, msg)
 
+	case TypeRunStop:
+		c.handleRunStop(pc, msg)
+
 	default:
 		errMsg := newError("unknown_type", fmt.Sprintf("unknown message type: %s", msg.Type))
 		pc.writeJSON(errMsg)
@@ -1054,6 +1064,44 @@ func (c *SuprChannel) handleMediaSend(pc *suprConn, msg SuprMessage) {
 	})
 
 	c.HandleMessage(c.ctx, peer, messageID, senderID, chatID, content, refs, metadata, sender)
+}
+
+// handleRunStop processes an inbound run.stop frame from a client.
+func (c *SuprChannel) handleRunStop(pc *suprConn, msg SuprMessage) {
+	if c.runController == nil {
+		pc.writeJSON(newError("stop_unavailable", "run stop is not available"))
+		return
+	}
+
+	sessionID := msg.SessionID
+	if sessionID == "" {
+		sessionID = pc.sessionID
+	}
+	chatID := "supr:" + sessionID
+	requestedRunID := strings.TrimSpace(stringField(msg.Payload, "run_id"))
+	reason := strings.TrimSpace(stringField(msg.Payload, "reason"))
+
+	cancelled, resolvedRunID, err := c.runController.CancelRun("supr", chatID, requestedRunID, reason)
+	if err != nil {
+		var controlErr *channels.RunControlError
+		if errors.As(err, &controlErr) && controlErr != nil && controlErr.Code != "" {
+			pc.writeJSON(newError(controlErr.Code, controlErr.Message))
+			return
+		}
+		pc.writeJSON(newError("stop_failed", "failed to stop active run"))
+		return
+	}
+
+	if !cancelled {
+		pc.writeJSON(newError("no_active_run", "no active run to stop"))
+		return
+	}
+
+	logger.InfoCF("supr", "run.stop accepted", map[string]any{
+		"session_id":       sessionID,
+		"requested_run_id": requestedRunID,
+		"resolved_run_id":  resolvedRunID,
+	})
 }
 
 func parseReasoningOverride(payload map[string]any) (string, error) {

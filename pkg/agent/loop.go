@@ -59,6 +59,9 @@ type AgentLoop struct {
 	compactionStageFailTotal atomic.Uint64
 	contextBudgetUnfitTotal  atomic.Uint64
 	providerContext400Total  atomic.Uint64
+	// Active Supr runs keyed by channel+chatID for run.stop cancellation.
+	activeRunsMu sync.RWMutex
+	activeRuns   map[string]*activeRunState
 }
 
 type routeMetadata struct {
@@ -128,6 +131,7 @@ func NewAgentLoop(
 		summarizing: sync.Map{},
 		fallback:    fallbackChain,
 		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
+		activeRuns:  make(map[string]*activeRunState),
 	}
 
 	return al
@@ -1144,6 +1148,12 @@ func (al *AgentLoop) runAgentLoop(
 	// Serialize concurrent callers for the same session to prevent history interleaving.
 	defer al.acquireSessionLock(opts.SessionKey)()
 
+	runID := newActivityRunID()
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+	al.registerActiveRun(opts.Channel, opts.ChatID, runID, runCancel)
+	defer al.unregisterActiveRun(opts.Channel, opts.ChatID, runID)
+
 	// 0. Record last channel for notifications (skip internal channels and cli)
 	if opts.Channel != "" && opts.ChatID != "" {
 		if !constants.IsInternalChannel(opts.Channel) {
@@ -1182,7 +1192,7 @@ func (al *AgentLoop) runAgentLoop(
 	// 2. Save user message to session
 	agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
 
-	activity := newActivityRunEmitter(ctx, al, agent.ID, opts)
+	activity := newActivityRunEmitter(ctx, al, agent.ID, opts, runID)
 	if activity != nil {
 		activity.emit("run.started", map[string]any{
 			"title":         utils.Truncate(strings.TrimSpace(opts.UserMessage), 100),
@@ -1195,8 +1205,36 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	// 3. Run LLM iteration loop
-	finalContent, finalUsage, iteration, modelUsed, err := al.runLLMIteration(ctx, agent, messages, opts, activity)
+	finalContent, finalUsage, iteration, modelUsed, err := al.runLLMIteration(runCtx, agent, messages, opts, activity, runID)
 	if err != nil {
+		var cancelErr *runCancelledError
+		if errors.As(err, &cancelErr) {
+			stopText := normalizeStopReason(cancelErr.Reason)
+			stopMessageID := ""
+			if activity != nil {
+				stopMessageID = activity.nextMessageID()
+				activity.emit("message.completed", map[string]any{
+					"message_id": stopMessageID,
+					"text":       stopText,
+					"format":     "markdown",
+				})
+				activity.emit("run.failed", map[string]any{
+					"status":           "failed",
+					"error_code":       runCancelledErrorCode,
+					"message":          stopText,
+					"retryable":        false,
+					"final_message_id": stopMessageID,
+				})
+			}
+
+			agent.Sessions.AddFullMessage(opts.SessionKey, providers.Message{
+				Role:    "assistant",
+				Content: stopText,
+			})
+			agent.Sessions.Save(opts.SessionKey)
+			return "", "", nil
+		}
+
 		if activity != nil {
 			activity.emit("error.raised", map[string]any{
 				"scope":     "run",
@@ -1210,6 +1248,36 @@ func (al *AgentLoop) runAgentLoop(
 				"message":    err.Error(),
 				"retryable":  false,
 			})
+		}
+		return "", "", err
+	}
+
+	if err := al.runCancelCheckpoint(runCtx, opts.Channel, opts.ChatID, runID); err != nil {
+		var cancelErr *runCancelledError
+		if errors.As(err, &cancelErr) {
+			stopText := normalizeStopReason(cancelErr.Reason)
+			stopMessageID := ""
+			if activity != nil {
+				stopMessageID = activity.nextMessageID()
+				activity.emit("message.completed", map[string]any{
+					"message_id": stopMessageID,
+					"text":       stopText,
+					"format":     "markdown",
+				})
+				activity.emit("run.failed", map[string]any{
+					"status":           "failed",
+					"error_code":       runCancelledErrorCode,
+					"message":          stopText,
+					"retryable":        false,
+					"final_message_id": stopMessageID,
+				})
+			}
+			agent.Sessions.AddFullMessage(opts.SessionKey, providers.Message{
+				Role:    "assistant",
+				Content: stopText,
+			})
+			agent.Sessions.Save(opts.SessionKey)
+			return "", "", nil
 		}
 		return "", "", err
 	}
@@ -1254,7 +1322,9 @@ func (al *AgentLoop) runAgentLoop(
 
 	// 6. Optional: summarization
 	if opts.EnableSummary {
-		al.maybeSummarize(agent, opts.SessionKey, opts.Channel, opts.ChatID)
+		if err := al.runCancelCheckpoint(runCtx, opts.Channel, opts.ChatID, runID); err == nil {
+			al.maybeSummarize(agent, opts.SessionKey, opts.Channel, opts.ChatID)
+		}
 	}
 
 	// 7. Log response
@@ -1342,6 +1412,7 @@ func (al *AgentLoop) runLLMIteration(
 	messages []providers.Message,
 	opts processOptions,
 	activity *activityRunEmitter,
+	runID string,
 ) (string, *providers.UsageInfo, int, string, error) {
 	iteration := 0
 	var finalContent string
@@ -1377,6 +1448,10 @@ func (al *AgentLoop) runLLMIteration(
 	}
 
 	for iteration < agent.MaxIterations {
+		if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+			return "", nil, iteration, activeModel, err
+		}
+
 		iteration++
 		stepName := "Thinking"
 		stepKind := "planning"
@@ -1517,6 +1592,10 @@ func (al *AgentLoop) runLLMIteration(
 			maxCompactionCycles = 3
 		}
 		for retry := 0; retry <= maxRetries; retry++ {
+			if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+				return "", nil, iteration, activeModel, err
+			}
+
 			if guard.Enabled {
 				signature := budgetCheckSignature(
 					messages,
@@ -1582,7 +1661,16 @@ func (al *AgentLoop) runLLMIteration(
 
 			response, err = callLLM()
 			if err == nil {
+				if cancelErr := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); cancelErr != nil {
+					return "", nil, iteration, activeModel, cancelErr
+				}
+			}
+			if err == nil {
 				break
+			}
+
+			if cancelErr := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); cancelErr != nil {
+				return "", nil, iteration, activeModel, cancelErr
 			}
 
 			errMsg := strings.ToLower(err.Error())
@@ -1657,6 +1745,10 @@ func (al *AgentLoop) runLLMIteration(
 					"error":     err.Error(),
 				})
 			return "", nil, iteration, activeModel, fmt.Errorf("LLM call failed after retries: %w", err)
+		}
+
+		if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+			return "", nil, iteration, activeModel, err
 		}
 
 		go al.handleReasoning(
@@ -1737,6 +1829,11 @@ func (al *AgentLoop) runLLMIteration(
 		toolStepIDs := make([]string, len(normalizedToolCalls))
 		toolCallIDs := make([]string, len(normalizedToolCalls))
 		toolStartedAt := make([]time.Time, len(normalizedToolCalls))
+
+		if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+			return "", nil, iteration, activeModel, err
+		}
+
 		if activity != nil {
 			if iterationStepID != "" {
 				activity.emit("step.updated", map[string]any{
@@ -1898,6 +1995,11 @@ func (al *AgentLoop) runLLMIteration(
 			}(i, tc)
 		}
 		wg.Wait()
+
+		if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+			return "", nil, iteration, activeModel, err
+		}
+
 		if activity != nil && iterationStepID != "" {
 			activity.emit("step.updated", map[string]any{
 				"step_id":  iterationStepID,

@@ -7,6 +7,7 @@ const (
 	// TypeMessageSend is sent from client to server.
 	TypeMessageSend = "message.send"
 	TypeMediaSend   = "media.send"
+	TypeRunStop     = "run.stop"
 	TypePing        = "ping"
 
 	// Legacy typed control frames still used for handshake/errors/media transport.

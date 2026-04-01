@@ -81,6 +81,7 @@ type Manager struct {
 	bus           *bus.MessageBus
 	config        *config.Config
 	mediaStore    media.MediaStore
+	runController RunController
 	dispatchTask  *asyncTask
 	mux           *http.ServeMux
 	httpServer    *http.Server
@@ -191,6 +192,19 @@ func NewManager(cfg *config.Config, messageBus *bus.MessageBus, store media.Medi
 	return m, nil
 }
 
+// SetRunController injects run-control into channels that support it.
+func (m *Manager) SetRunController(rc RunController) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.runController = rc
+	for _, ch := range m.channels {
+		if setter, ok := ch.(interface{ SetRunController(rc RunController) }); ok {
+			setter.SetRunController(rc)
+		}
+	}
+}
+
 // initChannel is a helper that looks up a factory by name and creates the channel.
 func (m *Manager) initChannel(name, displayName string) {
 	f, ok := getFactory(name)
@@ -223,6 +237,12 @@ func (m *Manager) initChannel(name, displayName string) {
 		// Inject owner reference so BaseChannel.HandleMessage can auto-trigger typing/reaction
 		if setter, ok := ch.(interface{ SetOwner(ch Channel) }); ok {
 			setter.SetOwner(ch)
+		}
+		// Inject run controller if channel supports run-control requests (e.g. Supr run.stop).
+		if m.runController != nil {
+			if setter, ok := ch.(interface{ SetRunController(rc RunController) }); ok {
+				setter.SetRunController(m.runController)
+			}
 		}
 		m.channels[name] = ch
 		logger.InfoCF("channels", "Channel enabled successfully", map[string]any{

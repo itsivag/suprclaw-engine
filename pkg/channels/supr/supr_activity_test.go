@@ -4,14 +4,39 @@ import (
 	"context"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/itsivag/suprclaw/pkg/bus"
+	"github.com/itsivag/suprclaw/pkg/channels"
 	"github.com/itsivag/suprclaw/pkg/config"
 )
+
+type stubRunController struct {
+	mu            sync.Mutex
+	cancelled     bool
+	resolvedRunID string
+	err           error
+	callCount     int
+	channel       string
+	chatID        string
+	runID         string
+	reason        string
+}
+
+func (s *stubRunController) CancelRun(channel, chatID, runID, reason string) (bool, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.callCount++
+	s.channel = channel
+	s.chatID = chatID
+	s.runID = runID
+	s.reason = reason
+	return s.cancelled, s.resolvedRunID, s.err
+}
 
 func openSuprTestSocket(t *testing.T) (*SuprChannel, *websocket.Conn, func()) {
 	t.Helper()
@@ -199,5 +224,116 @@ func TestSuprStartTyping_DoesNotEmitLegacyFrames(t *testing.T) {
 	var frame map[string]any
 	if err := conn.ReadJSON(&frame); err == nil {
 		t.Fatalf("unexpected frame after StartTyping no-op: %+v", frame)
+	}
+}
+
+func TestSuprRunStop_CancelsActiveRunWithoutTypedError(t *testing.T) {
+	ch, conn, cleanup := openSuprTestSocket(t)
+	defer cleanup()
+
+	controller := &stubRunController{
+		cancelled:     true,
+		resolvedRunID: "run-1",
+	}
+	ch.SetRunController(controller)
+
+	if err := conn.WriteJSON(SuprMessage{
+		Type: TypeRunStop,
+		Payload: map[string]any{
+			"run_id": "run-1",
+			"reason": "Stop now",
+		},
+	}); err != nil {
+		t.Fatalf("WriteJSON(run.stop) error = %v", err)
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	var frame map[string]any
+	if err := conn.ReadJSON(&frame); err == nil {
+		t.Fatalf("unexpected frame for successful run.stop: %+v", frame)
+	}
+
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	if controller.callCount != 1 {
+		t.Fatalf("CancelRun call count = %d, want 1", controller.callCount)
+	}
+	if controller.channel != "supr" {
+		t.Fatalf("CancelRun channel = %q, want %q", controller.channel, "supr")
+	}
+	if controller.chatID != "supr:sess-1" {
+		t.Fatalf("CancelRun chatID = %q, want %q", controller.chatID, "supr:sess-1")
+	}
+	if controller.runID != "run-1" {
+		t.Fatalf("CancelRun runID = %q, want %q", controller.runID, "run-1")
+	}
+	if controller.reason != "Stop now" {
+		t.Fatalf("CancelRun reason = %q, want %q", controller.reason, "Stop now")
+	}
+}
+
+func TestSuprRunStop_NoActiveRunReturnsTypedError(t *testing.T) {
+	ch, conn, cleanup := openSuprTestSocket(t)
+	defer cleanup()
+
+	ch.SetRunController(&stubRunController{
+		err: &channels.RunControlError{
+			Code:    "no_active_run",
+			Message: "no active run to stop",
+		},
+	})
+
+	if err := conn.WriteJSON(SuprMessage{
+		Type:    TypeRunStop,
+		Payload: map[string]any{},
+	}); err != nil {
+		t.Fatalf("WriteJSON(run.stop) error = %v", err)
+	}
+
+	var frame map[string]any
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("ReadJSON(error) error = %v", err)
+	}
+	if got, _ := frame["type"].(string); got != TypeError {
+		t.Fatalf("type = %q, want %q", got, TypeError)
+	}
+	payload, _ := frame["payload"].(map[string]any)
+	if got, _ := payload["code"].(string); got != "no_active_run" {
+		t.Fatalf("code = %q, want %q", got, "no_active_run")
+	}
+}
+
+func TestSuprRunStop_RunMismatchReturnsTypedError(t *testing.T) {
+	ch, conn, cleanup := openSuprTestSocket(t)
+	defer cleanup()
+
+	ch.SetRunController(&stubRunController{
+		err: &channels.RunControlError{
+			Code:    "run_mismatch",
+			Message: "requested run does not match active run",
+		},
+	})
+
+	if err := conn.WriteJSON(SuprMessage{
+		Type: TypeRunStop,
+		Payload: map[string]any{
+			"run_id": "run-x",
+		},
+	}); err != nil {
+		t.Fatalf("WriteJSON(run.stop) error = %v", err)
+	}
+
+	var frame map[string]any
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("ReadJSON(error) error = %v", err)
+	}
+	if got, _ := frame["type"].(string); got != TypeError {
+		t.Fatalf("type = %q, want %q", got, TypeError)
+	}
+	payload, _ := frame["payload"].(map[string]any)
+	if got, _ := payload["code"].(string); got != "run_mismatch" {
+		t.Fatalf("code = %q, want %q", got, "run_mismatch")
 	}
 }

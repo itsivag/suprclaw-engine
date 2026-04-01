@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1101,6 +1102,26 @@ func (m *thinkingCaptureProvider) SupportsThinking() bool {
 	return m.supportsThinking
 }
 
+type blockingCancelProvider struct {
+	startOnce sync.Once
+}
+
+func (p *blockingCancelProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	p.startOnce.Do(func() {})
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (p *blockingCancelProvider) GetDefaultModel() string {
+	return "blocking-cancel-model"
+}
+
 // mockCustomTool is a simple mock tool for registration testing
 type mockCustomTool struct{}
 
@@ -1141,6 +1162,196 @@ func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, ms
 }
 
 const responseTimeout = 3 * time.Second
+
+func collectActivityEventsUntilRunStopped(
+	t *testing.T,
+	msgBus *bus.MessageBus,
+	timeout time.Duration,
+) []bus.OutboundActivityEvent {
+	t.Helper()
+
+	deadline := time.After(timeout)
+	events := make([]bus.OutboundActivityEvent, 0, 16)
+	for {
+		select {
+		case <-deadline:
+			types := make([]string, 0, len(events))
+			for _, evt := range events {
+				code, _ := evt.Event.Data["error_code"].(string)
+				if code != "" {
+					types = append(types, fmt.Sprintf("%s(%s)", evt.Event.EventType, code))
+					continue
+				}
+				types = append(types, evt.Event.EventType)
+			}
+			t.Fatalf("timed out waiting for RUN_CANCELLED run.failed, collected=%d events=%v", len(events), types)
+		case evt, ok := <-msgBus.OutboundActivityChan():
+			if !ok {
+				t.Fatalf("outbound activity channel closed unexpectedly")
+			}
+			events = append(events, evt)
+			if evt.Event.EventType == "run.failed" {
+				if code, _ := evt.Event.Data["error_code"].(string); code == runCancelledErrorCode {
+					return events
+				}
+			}
+		}
+	}
+}
+
+func waitForRunStartedEvent(
+	t *testing.T,
+	msgBus *bus.MessageBus,
+	timeout time.Duration,
+) bus.OutboundActivityEvent {
+	t.Helper()
+
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for run.started event")
+		case evt, ok := <-msgBus.OutboundActivityChan():
+			if !ok {
+				t.Fatal("outbound activity channel closed unexpectedly")
+			}
+			if evt.Event.EventType == "run.started" {
+				return evt
+			}
+		}
+	}
+}
+
+func TestAgentLoopCancelRun_StopsActiveRunAndEmitsStoppedEvents(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-cancel-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "blocking-cancel-model",
+				MaxTokens:         8192,
+				MaxToolIterations: 4,
+				ContextGuard: config.ContextGuardConfig{
+					Enabled: false,
+				},
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &blockingCancelProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	msg := bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:sess-cancel",
+		Content:  "please run",
+		Peer: bus.Peer{
+			Kind: "direct",
+			ID:   "supr:sess-cancel",
+		},
+	}
+
+	done := make(chan struct{})
+	var response string
+	var modelUsed string
+	var runErr error
+	go func() {
+		defer close(done)
+		response, modelUsed, runErr = al.processMessage(context.Background(), msg)
+	}()
+
+	started := waitForRunStartedEvent(t, msgBus, 3*time.Second)
+	runID := started.Event.RunID
+
+	cancelled, resolvedRunID, err := al.CancelRun("supr", "supr:sess-cancel", runID, "")
+	if err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	if !cancelled {
+		t.Fatal("CancelRun() cancelled = false, want true")
+	}
+	if resolvedRunID != runID {
+		t.Fatalf("resolved run id = %q, want %q", resolvedRunID, runID)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("processMessage did not return after cancellation")
+	}
+
+	if runErr != nil {
+		t.Fatalf("processMessage() error = %v", runErr)
+	}
+	if response != "" {
+		t.Fatalf("processMessage() response = %q, want empty after cancellation", response)
+	}
+	if modelUsed != "" {
+		t.Fatalf("processMessage() modelUsed = %q, want empty after cancellation", modelUsed)
+	}
+
+	events := collectActivityEventsUntilRunStopped(t, msgBus, 2*time.Second)
+	seenStoppedMessage := false
+	seenRunFailed := false
+	seenRunCompleted := false
+	seenToolCalled := false
+	messageIndex := -1
+	failedIndex := -1
+
+	for i, evt := range events {
+		switch evt.Event.EventType {
+		case "message.completed":
+			if text, _ := evt.Event.Data["text"].(string); text == defaultRunStoppedMessage {
+				seenStoppedMessage = true
+				messageIndex = i
+			}
+		case "run.failed":
+			if code, _ := evt.Event.Data["error_code"].(string); code == runCancelledErrorCode {
+				seenRunFailed = true
+				failedIndex = i
+			}
+		case "run.completed":
+			seenRunCompleted = true
+		case "tool.called":
+			seenToolCalled = true
+		}
+	}
+
+	if !seenStoppedMessage {
+		t.Fatal("missing message.completed stop message")
+	}
+	if !seenRunFailed {
+		t.Fatal("missing run.failed RUN_CANCELLED event")
+	}
+	if seenRunCompleted {
+		t.Fatal("unexpected run.completed event for cancelled run")
+	}
+	if seenToolCalled {
+		t.Fatal("unexpected tool.called after cancellation")
+	}
+	if failedIndex <= messageIndex {
+		t.Fatalf("event order invalid: run.failed index=%d, message.completed index=%d", failedIndex, messageIndex)
+	}
+
+	_, _, err = al.CancelRun("supr", "supr:sess-cancel", "", "")
+	if err == nil {
+		t.Fatal("expected no_active_run after run completion")
+	}
+	var controlErr *channels.RunControlError
+	if !errors.As(err, &controlErr) {
+		t.Fatalf("CancelRun() error type = %T, want *channels.RunControlError", err)
+	}
+	if controlErr.Code != "no_active_run" {
+		t.Fatalf("CancelRun() code = %q, want %q", controlErr.Code, "no_active_run")
+	}
+}
 
 func TestProcessMessage_UsesRouteSessionKey(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")

@@ -34,11 +34,16 @@ type activityRunEmitter struct {
 	startedAt      time.Time
 }
 
+func newActivityRunID() string {
+	return "run_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+}
+
 func newActivityRunEmitter(
 	ctx context.Context,
 	al *AgentLoop,
 	agentID string,
 	opts processOptions,
+	runID string,
 ) *activityRunEmitter {
 	if al == nil || ctx == nil {
 		return nil
@@ -60,7 +65,12 @@ func newActivityRunEmitter(
 		channel:   opts.Channel,
 		sessionID: sessionID,
 		agentID:   strings.TrimSpace(agentID),
-		runID:     "run_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		runID: func() string {
+			if id := strings.TrimSpace(runID); id != "" {
+				return id
+			}
+			return newActivityRunID()
+		}(),
 		startedAt: time.Now().UTC(),
 	}
 }
