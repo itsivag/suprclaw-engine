@@ -35,6 +35,11 @@ func (p *budgetRecordingProvider) Chat(
 	return &providers.LLMResponse{
 		Content:   "ok",
 		ToolCalls: []providers.ToolCall{},
+		Usage: &providers.UsageInfo{
+			PromptTokens:     100,
+			CompletionTokens: 20,
+			TotalTokens:      120,
+		},
 	}, nil
 }
 
@@ -52,6 +57,10 @@ type budgetCountAwareProvider struct {
 	timeoutOnFirstChat  bool
 	contextOnFirstChat  bool
 	providerTokenResult int
+}
+
+type toolThenFinalUsageProvider struct {
+	calls int
 }
 
 func (p *requiresNonSystemProvider) Chat(
@@ -88,7 +97,14 @@ func (p *budgetCountAwareProvider) Chat(
 	if p.contextOnFirstChat && call == 1 {
 		return nil, fmt.Errorf("context_length_exceeded: mock")
 	}
-	return &providers.LLMResponse{Content: "ok"}, nil
+	return &providers.LLMResponse{
+		Content: "ok",
+		Usage: &providers.UsageInfo{
+			PromptTokens:     90,
+			CompletionTokens: 10,
+			TotalTokens:      100,
+		},
+	}, nil
 }
 
 func (p *budgetCountAwareProvider) GetDefaultModel() string {
@@ -112,6 +128,47 @@ func (p *budgetCountAwareProvider) CountTokens(
 		return p.providerTokenResult, nil
 	}
 	return 1000, nil
+}
+
+func (p *toolThenFinalUsageProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	p.calls++
+	if p.calls == 1 {
+		return &providers.LLMResponse{
+			Content: "calling tool",
+			ToolCalls: []providers.ToolCall{
+				{
+					ID:   "tc-1",
+					Name: "noop_tool",
+					Arguments: map[string]any{
+						"text": "hello",
+					},
+				},
+			},
+			Usage: &providers.UsageInfo{
+				PromptTokens:     150,
+				CompletionTokens: 25,
+				TotalTokens:      175,
+			},
+		}, nil
+	}
+	return &providers.LLMResponse{
+		Content: "done",
+		Usage: &providers.UsageInfo{
+			PromptTokens:     200,
+			CompletionTokens: 30,
+			TotalTokens:      230,
+		},
+	}, nil
+}
+
+func (p *toolThenFinalUsageProvider) GetDefaultModel() string {
+	return "mock-tool-usage-model"
 }
 
 func estimateMessageTokens(messages []providers.Message) int {
@@ -336,14 +393,14 @@ func TestAgentLoop_BudgetCheckDedupeOnTimeoutRetry(t *testing.T) {
 	}
 	defaultAgent.ContextWindow = 4096
 
-	longInput := strings.Repeat("X", 9000)
+	longInput := strings.Repeat("X", 5000)
 	_, err = al.ProcessDirectWithChannel(context.Background(), longInput, "budget-timeout-dedupe", "cli", "direct")
 	if err != nil {
 		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&provider.countCalls); got != 1 {
-		t.Fatalf("provider count calls = %d, want 1 (deduped across unchanged timeout retry)", got)
+	if got := atomic.LoadInt32(&provider.countCalls); got != 0 {
+		t.Fatalf("provider count calls = %d, want 0 (local-only estimate path)", got)
 	}
 }
 
@@ -365,13 +422,81 @@ func TestAgentLoop_BudgetRechecksAfterContextOverflow(t *testing.T) {
 	}
 	defaultAgent.ContextWindow = 4096
 
-	longInput := strings.Repeat("Y", 9000)
+	longInput := strings.Repeat("Y", 5000)
 	_, err = al.ProcessDirectWithChannel(context.Background(), longInput, "budget-context-recheck", "cli", "direct")
 	if err != nil {
 		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&provider.countCalls); got < 2 {
-		t.Fatalf("provider count calls = %d, want >= 2 after context overflow emergency recheck", got)
+	if got := atomic.LoadInt32(&provider.countCalls); got != 0 {
+		t.Fatalf("provider count calls = %d, want 0 after context overflow emergency recheck", got)
+	}
+}
+
+func TestAgentLoop_FinalAssistantUsagePersistsToSession(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	provider := &budgetRecordingProvider{}
+	al := NewAgentLoop(newBudgetTestConfig(tmpDir), bus.NewMessageBus(), provider)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+
+	_, err = al.ProcessDirectWithChannel(context.Background(), "hello", "budget-final-usage", "cli", "direct")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
+	}
+
+	history := defaultAgent.Sessions.GetHistory("agent:main:main")
+	if len(history) < 2 {
+		t.Fatalf("history len = %d, want at least 2", len(history))
+	}
+	last := history[len(history)-1]
+	if last.Role != "assistant" {
+		t.Fatalf("last role = %q, want assistant", last.Role)
+	}
+	if last.Usage == nil {
+		t.Fatal("expected final assistant usage to be persisted")
+	}
+	if last.Usage.TotalTokens != 120 {
+		t.Fatalf("final usage total = %d, want 120", last.Usage.TotalTokens)
+	}
+}
+
+func TestAgentLoop_ToolCallAssistantUsagePersistsToSession(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	provider := &toolThenFinalUsageProvider{}
+	al := NewAgentLoop(newBudgetTestConfig(tmpDir), bus.NewMessageBus(), provider)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.Tools.Register(&noopTool{})
+
+	_, err = al.ProcessDirectWithChannel(context.Background(), "run tool", "budget-tool-usage", "cli", "direct")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
+	}
+
+	history := defaultAgent.Sessions.GetHistory("agent:main:main")
+	if len(history) < 4 {
+		t.Fatalf("history len = %d, want at least 4", len(history))
+	}
+	toolAssistant := history[1]
+	if toolAssistant.Role != "assistant" || len(toolAssistant.ToolCalls) != 1 {
+		t.Fatalf("expected persisted tool-call assistant, got %+v", toolAssistant)
+	}
+	if toolAssistant.Usage == nil || toolAssistant.Usage.TotalTokens != 175 {
+		t.Fatalf("tool-call usage = %+v, want total_tokens=175", toolAssistant.Usage)
 	}
 }

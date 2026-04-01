@@ -33,6 +33,7 @@ const sidebars = {
       label: 'Chat Channels',
       items: [
         'channels/overview',
+        'channels/supr-ws-protocol',
         'channels/telegram',
         'channels/discord',
         'channels/whatsapp',

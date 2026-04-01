@@ -1195,7 +1195,7 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	// 3. Run LLM iteration loop
-	finalContent, iteration, modelUsed, err := al.runLLMIteration(ctx, agent, messages, opts, activity)
+	finalContent, finalUsage, iteration, modelUsed, err := al.runLLMIteration(ctx, agent, messages, opts, activity)
 	if err != nil {
 		if activity != nil {
 			activity.emit("error.raised", map[string]any{
@@ -1245,7 +1245,11 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	// 5. Save final assistant message to session
-	agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
+	agent.Sessions.AddFullMessage(opts.SessionKey, providers.Message{
+		Role:    "assistant",
+		Content: finalContent,
+		Usage:   finalUsage,
+	})
 	agent.Sessions.Save(opts.SessionKey)
 
 	// 6. Optional: summarization
@@ -1338,9 +1342,10 @@ func (al *AgentLoop) runLLMIteration(
 	messages []providers.Message,
 	opts processOptions,
 	activity *activityRunEmitter,
-) (string, int, string, error) {
+) (string, *providers.UsageInfo, int, string, error) {
 	iteration := 0
 	var finalContent string
+	var finalUsage *providers.UsageInfo
 
 	// Determine effective model tier for this conversation turn.
 	// selectCandidates evaluates routing once and the decision is sticky for
@@ -1353,7 +1358,7 @@ func (al *AgentLoop) runLLMIteration(
 		if len(opts.Media) > 0 {
 			if vc, ok := agent.Provider.(providers.VisionCapable); ok {
 				if !vc.SupportsVision(opts.ModelOverride) {
-					return "", 0, "", &RequestError{
+					return "", nil, 0, "", &RequestError{
 						Code:    ErrCodeModelModalityUnsupported,
 						Message: fmt.Sprintf("model %q does not support image content", opts.ModelOverride),
 					}
@@ -1533,7 +1538,7 @@ func (al *AgentLoop) runLLMIteration(
 					}
 					if compactionCycles >= maxCompactionCycles {
 						al.contextBudgetUnfitTotal.Add(1)
-						return "", iteration, activeModel, &RequestError{
+						return "", nil, iteration, activeModel, &RequestError{
 							Code: ErrCodeContextBudgetUnfit,
 							Message: fmt.Sprintf(
 								"context compaction circuit breaker tripped after %d cycles",
@@ -1555,7 +1560,7 @@ func (al *AgentLoop) runLLMIteration(
 					)
 					compactionCycles++
 					if compactErr != nil {
-						return "", iteration, activeModel, compactErr
+						return "", nil, iteration, activeModel, compactErr
 					}
 					messages = compacted
 					lastBudgetSignature = signature
@@ -1651,7 +1656,7 @@ func (al *AgentLoop) runLLMIteration(
 					"model":     activeModel,
 					"error":     err.Error(),
 				})
-			return "", iteration, activeModel, fmt.Errorf("LLM call failed after retries: %w", err)
+			return "", nil, iteration, activeModel, fmt.Errorf("LLM call failed after retries: %w", err)
 		}
 
 		go al.handleReasoning(
@@ -1684,6 +1689,7 @@ func (al *AgentLoop) runLLMIteration(
 			if finalContent == "" && response.ReasoningContent != "" {
 				finalContent = response.ReasoningContent
 			}
+			finalUsage = response.Usage
 			if activity != nil && iterationStepID != "" {
 				durationMS := int64(0)
 				if !iterationStepStartedAt.IsZero() {
@@ -1781,6 +1787,7 @@ func (al *AgentLoop) runLLMIteration(
 			Role:             "assistant",
 			Content:          response.Content,
 			ReasoningContent: response.ReasoningContent,
+			Usage:            response.Usage,
 		}
 		for _, tc := range normalizedToolCalls {
 			argumentsJSON, _ := json.Marshal(tc.Arguments)
@@ -2044,7 +2051,7 @@ func (al *AgentLoop) runLLMIteration(
 		})
 	}
 
-	return finalContent, iteration, activeModel, nil
+	return finalContent, finalUsage, iteration, activeModel, nil
 }
 
 // publishStatus publishes a live status update to the bus for channel display.

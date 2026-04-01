@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/itsivag/suprclaw/pkg/providers"
 )
 
 func TestSanitizeFilename(t *testing.T) {
@@ -58,6 +60,39 @@ func TestSave_WithColonInKey(t *testing.T) {
 	}
 	if history[0].Content != "hello" {
 		t.Errorf("expected message content %q, got %q", "hello", history[0].Content)
+	}
+}
+
+func TestSave_RoundTripsMessageUsage(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir)
+
+	key := "usage-roundtrip"
+	sm.GetOrCreate(key)
+	sm.AddFullMessage(key, providers.Message{
+		Role:    "assistant",
+		Content: "hello",
+		Usage: &providers.UsageInfo{
+			PromptTokens:     120,
+			CompletionTokens: 24,
+			TotalTokens:      144,
+		},
+	})
+
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save(%q) failed: %v", key, err)
+	}
+
+	sm2 := NewSessionManager(tmpDir)
+	history := sm2.GetHistory(key)
+	if len(history) != 1 {
+		t.Fatalf("expected 1 message after reload, got %d", len(history))
+	}
+	if history[0].Usage == nil {
+		t.Fatal("expected usage to round-trip")
+	}
+	if history[0].Usage.TotalTokens != 144 {
+		t.Fatalf("Usage.TotalTokens = %d, want 144", history[0].Usage.TotalTokens)
 	}
 }
 

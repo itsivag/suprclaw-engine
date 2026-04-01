@@ -11,6 +11,9 @@ Originally forked from `picoclaw`, but it has diverged heavily feature-wise, so 
 
 **[Documentation](https://itsivag.github.io/suprclaw-engine/)**
 
+- WebSocket protocol spec (repo doc): [docs/supr_ws_protocol.md](./docs/supr_ws_protocol.md)
+- WebSocket protocol spec (docs site): [Supr WS Protocol](https://itsivag.github.io/suprclaw-engine/docs/channels/supr-ws-protocol)
+
 ---
 
 ## Features

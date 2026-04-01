@@ -90,6 +90,11 @@ func TestAddFullMessage_WithToolCalls(t *testing.T) {
 	msg := providers.Message{
 		Role:    "assistant",
 		Content: "Let me search that.",
+		Usage: &providers.UsageInfo{
+			PromptTokens:     80,
+			CompletionTokens: 20,
+			TotalTokens:      100,
+		},
 		ToolCalls: []providers.ToolCall{
 			{
 				ID:   "call_abc",
@@ -123,6 +128,9 @@ func TestAddFullMessage_WithToolCalls(t *testing.T) {
 	}
 	if tc.Function == nil || tc.Function.Name != "web_search" {
 		t.Errorf("tool call function = %+v", tc.Function)
+	}
+	if history[0].Usage == nil || history[0].Usage.TotalTokens != 100 {
+		t.Errorf("usage = %+v, want total_tokens=100", history[0].Usage)
 	}
 }
 

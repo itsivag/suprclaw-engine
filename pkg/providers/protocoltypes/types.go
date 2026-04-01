@@ -67,6 +67,7 @@ type Message struct {
 	Content          string         `json:"content"`
 	Media            []string       `json:"media,omitempty"`
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Usage            *UsageInfo     `json:"usage,omitempty"`
 	SystemParts      []ContentBlock `json:"system_parts,omitempty"` // structured system blocks for cache-aware adapters
 	ToolCalls        []ToolCall     `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`

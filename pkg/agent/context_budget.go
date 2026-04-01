@@ -21,7 +21,6 @@ const (
 	defaultContextGuardEmergencyInputRatio    = 0.60
 	defaultContextGuardMaxCompactionPasses    = 3
 	defaultContextGuardPreserveRecentMessages = 6
-	contextBudgetProviderThresholdRatio       = 0.80
 
 	estimatorFixedReserveTokens = 512
 )
@@ -100,74 +99,43 @@ func computeContextBudget(contextWindow, requestedOutput int, guard config.Conte
 	}
 }
 
-func (al *AgentLoop) estimateInputTokens(messages []providers.Message) int {
-	est := al.estimateTokens(messages)
+func estimateInputTokensWithOverhead(tokens int) int {
 	// Conservative fallback: estimator + 10% overhead + fixed reserve.
-	est = est + est/10 + estimatorFixedReserveTokens
+	est := tokens + tokens/10 + estimatorFixedReserveTokens
 	if est < estimatorFixedReserveTokens {
 		return estimatorFixedReserveTokens
 	}
 	return est
 }
 
-func (al *AgentLoop) countInputTokens(
-	ctx context.Context,
-	provider providers.LLMProvider,
-	model string,
+func latestUsageAnchor(
 	messages []providers.Message,
-	tools []providers.ToolDefinition,
-	options map[string]any,
-	allowProvider bool,
-) (int, string) {
-	estimate := al.estimateInputTokens(messages)
-	if !allowProvider {
-		return estimate, "estimator"
-	}
-
-	if counter, ok := provider.(providers.TokenCountCapable); ok {
-		tokens, err := counter.CountTokens(ctx, messages, tools, model, options)
-		if err == nil && tokens > 0 {
-			return tokens, "provider"
+) (int, *providers.UsageInfo, bool) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != "assistant" || msg.Usage == nil || msg.Usage.TotalTokens <= 0 {
+			continue
 		}
-		if err != nil {
-			logger.WarnCF("agent", "Provider token count failed, using estimator", map[string]any{
-				"model": model,
-				"error": err.Error(),
-			})
-			return estimate, "estimator_fallback"
-		}
+		return i, msg.Usage, true
 	}
-	return estimate, "estimator"
+	return -1, nil, false
 }
 
-func providerCountThreshold(effectiveLimit int) int {
-	if effectiveLimit <= 0 {
-		return 0
+func (al *AgentLoop) estimateInputTokens(messages []providers.Message) (int, string) {
+	if idx, usage, ok := latestUsageAnchor(messages); ok {
+		tailTokens := 0
+		if idx+1 < len(messages) {
+			tailTokens = al.estimateTokens(messages[idx+1:])
+		}
+		return usage.TotalTokens + estimateInputTokensWithOverhead(tailTokens), "usage_anchor"
 	}
-	threshold := int(float64(effectiveLimit) * contextBudgetProviderThresholdRatio)
-	if threshold <= 0 {
-		return effectiveLimit
-	}
-	if threshold > effectiveLimit {
-		return effectiveLimit
-	}
-	return threshold
+	return estimateInputTokensWithOverhead(al.estimateTokens(messages)), "estimator"
 }
 
 func (al *AgentLoop) selectInputTokensForBudget(
-	ctx context.Context,
-	provider providers.LLMProvider,
-	model string,
 	messages []providers.Message,
-	tools []providers.ToolDefinition,
-	options map[string]any,
-	effectiveLimit int,
 ) (int, string) {
-	estimate, _ := al.countInputTokens(ctx, provider, model, messages, tools, options, false)
-	if estimate <= providerCountThreshold(effectiveLimit) {
-		return estimate, "estimator_fast"
-	}
-	return al.countInputTokens(ctx, provider, model, messages, tools, options, true)
+	return al.estimateInputTokens(messages)
 }
 
 func budgetCheckSignature(
@@ -193,6 +161,13 @@ func budgetCheckSignature(
 
 	for _, msg := range messages {
 		write("role", msg.Role, "content", msg.Content, "tool_call_id", msg.ToolCallID, "reasoning", msg.ReasoningContent)
+		if msg.Usage != nil {
+			write(
+				"usage_prompt_tokens", strconv.Itoa(msg.Usage.PromptTokens),
+				"usage_completion_tokens", strconv.Itoa(msg.Usage.CompletionTokens),
+				"usage_total_tokens", strconv.Itoa(msg.Usage.TotalTokens),
+			)
+		}
 		write("media_count", strconv.Itoa(len(msg.Media)))
 		for _, media := range msg.Media {
 			write("media", media)
@@ -327,13 +302,7 @@ func (al *AgentLoop) compactToBudget(
 	budget := computeContextBudget(contextWindow, requestedOutput, guard)
 
 	predicted, countSource := al.selectInputTokensForBudget(
-		ctx,
-		agent.Provider,
-		model,
 		messages,
-		tools,
-		llmOpts,
-		budget.EffectiveInputLimit,
 	)
 	al.logBudgetDecision(agent, opts, budget, compactionStageNone, predicted, countSource)
 
@@ -376,13 +345,7 @@ func (al *AgentLoop) compactToBudget(
 		}
 
 		predicted, countSource = al.selectInputTokensForBudget(
-			ctx,
-			agent.Provider,
-			model,
 			working,
-			tools,
-			llmOpts,
-			budget.EffectiveInputLimit,
 		)
 		al.logBudgetDecision(agent, opts, budget, stage, predicted, countSource)
 

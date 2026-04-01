@@ -16,6 +16,7 @@ All webhook-based channels share a single HTTP server at `gateway.host:gateway.p
 
 | Channel | Difficulty | Notes |
 |---------|-----------|-------|
+| [**Supr WebSocket (Web UI)**](./supr-ws-protocol) | Easy | Native web chat protocol used by the launcher/web console |
 | [**Telegram**](./telegram) | Easy | Just a bot token |
 | [**Discord**](./discord) | Easy | Bot token + message intent |
 | [**WhatsApp**](./whatsapp) | Easy | QR scan (native) or bridge |

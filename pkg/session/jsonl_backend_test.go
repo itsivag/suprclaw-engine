@@ -49,6 +49,11 @@ func TestJSONLBackend_AddFullMessage(t *testing.T) {
 	msg := providers.Message{
 		Role:    "assistant",
 		Content: "done",
+		Usage: &providers.UsageInfo{
+			PromptTokens:     42,
+			CompletionTokens: 8,
+			TotalTokens:      50,
+		},
 		ToolCalls: []providers.ToolCall{
 			{ID: "tc1", Function: &providers.FunctionCall{Name: "read_file", Arguments: `{"path":"x"}`}},
 		},
@@ -61,6 +66,9 @@ func TestJSONLBackend_AddFullMessage(t *testing.T) {
 	}
 	if len(history[0].ToolCalls) != 1 || history[0].ToolCalls[0].ID != "tc1" {
 		t.Errorf("tool calls = %+v", history[0].ToolCalls)
+	}
+	if history[0].Usage == nil || history[0].Usage.TotalTokens != 50 {
+		t.Errorf("usage = %+v, want total_tokens=50", history[0].Usage)
 	}
 }
 
