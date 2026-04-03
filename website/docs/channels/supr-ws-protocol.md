@@ -76,6 +76,9 @@ Authentication (any one succeeds):
 }
 ```
 
+`agent_id` is the actual responding agent. For canonical activity events,
+`data.agent_id` mirrors top-level `agent_id` and both must match.
+
 ## Client -> server messages
 
 ## `message.send`
@@ -242,10 +245,10 @@ Observed `event_type` values:
 
 Important `data` keys used by the frontend timeline:
 
-- message: `message_id`, `text`, `format`
+- message: `message_id`, `text`, `format`, `agent_id`
 - step: `step_id`, `kind`, `title`, `headline`, `summary`, `message`
 - tool: `tool_call_id`, `tool_name`, `display_name`, `arg_preview`, `result_preview`
-- error: `scope`, `code`, `message`, `retryable`
+- error: `scope`, `code`, `message`, `retryable`, `agent_id`
 
 Optional routing/observability keys may be included:
 

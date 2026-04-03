@@ -216,13 +216,15 @@ func registerSharedTools(
 		// Message tool
 		if cfg.Tools.IsToolEnabled("message") {
 			messageTool := tools.NewMessageTool()
+			emittingAgentID := agent.ID
 			messageTool.SetSendCallback(func(channel, chatID, content string) error {
 				pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer pubCancel()
 				return msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
-					Channel: channel,
-					ChatID:  chatID,
-					Content: content,
+					Channel:         channel,
+					ChatID:          chatID,
+					Content:         content,
+					ResolvedAgentID: emittingAgentID,
 				})
 			})
 			agent.Tools.Register(messageTool)

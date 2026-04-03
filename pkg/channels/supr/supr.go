@@ -195,6 +195,15 @@ func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 		return channels.ErrNotRunning
 	}
 	c.rememberRouteMetadata(msg.ChatID, msg.ResolvedAgentID, msg.RouteMatchedBy)
+	routeMeta := c.routeMetadataPayload(msg.ChatID)
+	resolvedAgentID := strings.TrimSpace(msg.ResolvedAgentID)
+	if resolvedAgentID == "" {
+		resolvedAgentID = routeMetadataValue(routeMeta, "resolved_agent_id")
+	}
+	routeMatchedBy := strings.TrimSpace(msg.RouteMatchedBy)
+	if routeMatchedBy == "" {
+		routeMatchedBy = routeMetadataValue(routeMeta, "route_matched_by")
+	}
 	sessionID := strings.TrimPrefix(msg.ChatID, "supr:")
 	if sessionID == "" {
 		return fmt.Errorf("invalid supr chat id: %q", msg.ChatID)
@@ -209,13 +218,13 @@ func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 			"message":   msg.ErrorMessage,
 			"retryable": false,
 		}
-		if msg.ResolvedAgentID != "" {
-			errData["resolved_agent_id"] = msg.ResolvedAgentID
+		if resolvedAgentID != "" {
+			errData["resolved_agent_id"] = resolvedAgentID
 		}
-		if msg.RouteMatchedBy != "" {
-			errData["route_matched_by"] = msg.RouteMatchedBy
+		if routeMatchedBy != "" {
+			errData["route_matched_by"] = routeMatchedBy
 		}
-		return c.broadcastRawToSession(msg.ChatID, c.newDerivedEventEnvelope(sessionID, runID, "error.raised", errData))
+		return c.broadcastRawToSession(msg.ChatID, c.newDerivedEventEnvelope(sessionID, runID, "error.raised", errData, resolvedAgentID))
 	}
 
 	if strings.TrimSpace(msg.Content) == "" {
@@ -230,13 +239,13 @@ func (c *SuprChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if msg.ModelUsed != "" {
 		payload["model_used"] = msg.ModelUsed
 	}
-	if msg.ResolvedAgentID != "" {
-		payload["resolved_agent_id"] = msg.ResolvedAgentID
+	if resolvedAgentID != "" {
+		payload["resolved_agent_id"] = resolvedAgentID
 	}
-	if msg.RouteMatchedBy != "" {
-		payload["route_matched_by"] = msg.RouteMatchedBy
+	if routeMatchedBy != "" {
+		payload["route_matched_by"] = routeMatchedBy
 	}
-	return c.broadcastRawToSession(msg.ChatID, c.newDerivedEventEnvelope(sessionID, runID, "message.completed", payload))
+	return c.broadcastRawToSession(msg.ChatID, c.newDerivedEventEnvelope(sessionID, runID, "message.completed", payload, resolvedAgentID))
 }
 
 // EditMessage implements channels.MessageEditor.
@@ -269,6 +278,7 @@ func (c *SuprChannel) BroadcastActivityEvent(ctx context.Context, chatID string,
 	if event.SessionID == "" {
 		event.SessionID = strings.TrimPrefix(chatID, "supr:")
 	}
+	event = normalizeActivityEventAgent(event)
 	c.rememberRunStatus(chatID, event)
 	return c.broadcastRawToSession(chatID, event)
 }
@@ -375,9 +385,9 @@ func (c *SuprChannel) nextDerivedEventSequence(sessionID, runID string) int {
 	return seq
 }
 
-func (c *SuprChannel) newDerivedEventEnvelope(sessionID, runID, eventType string, data map[string]any) bus.ActivityEventEnvelope {
+func (c *SuprChannel) newDerivedEventEnvelope(sessionID, runID, eventType string, data map[string]any, agentID string) bus.ActivityEventEnvelope {
 	seq := c.nextDerivedEventSequence(sessionID, runID)
-	return bus.ActivityEventEnvelope{
+	event := bus.ActivityEventEnvelope{
 		V:              eventSchemaVersion,
 		EventID:        "evt_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
 		EventType:      eventType,
@@ -386,10 +396,12 @@ func (c *SuprChannel) newDerivedEventEnvelope(sessionID, runID, eventType string
 		SessionID:      sessionID,
 		RunID:          runID,
 		ParentRunID:    nil,
+		AgentID:        strings.TrimSpace(agentID),
 		IdempotencyKey: fmt.Sprintf("%s_%d", runID, seq),
 		Replay:         false,
 		Data:           data,
 	}
+	return normalizeActivityEventAgent(event)
 }
 
 func (c *SuprChannel) resolveRunStatus(sessionID, requestedRunID string) (string, string) {
@@ -478,6 +490,40 @@ func (c *SuprChannel) routeMetadataPayload(chatID string) map[string]any {
 		return nil
 	}
 	return payload
+}
+
+func routeMetadataValue(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	value, _ := payload[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func normalizeActivityEventAgent(event bus.ActivityEventEnvelope) bus.ActivityEventEnvelope {
+	agentID := strings.TrimSpace(event.AgentID)
+	dataAgentID := routeMetadataValue(event.Data, "agent_id")
+	if agentID == "" {
+		agentID = dataAgentID
+	}
+	normalizedData := cloneAnyMap(event.Data)
+	if agentID != "" {
+		normalizedData["agent_id"] = agentID
+	}
+	event.AgentID = agentID
+	event.Data = normalizedData
+	return event
+}
+
+func cloneAnyMap(input map[string]any) map[string]any {
+	if input == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(input)+1)
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 // broadcastToSession sends a message to all connections with a matching session.

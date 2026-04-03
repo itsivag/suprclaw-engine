@@ -83,6 +83,9 @@ Used for run/step/tool/message lifecycle streaming.
 }
 ```
 
+`agent_id` represents the actual agent that responded. For canonical activity
+events, `data.agent_id` mirrors top-level `agent_id` and both must match.
+
 ## Client -> server frame types
 
 ## `type: "message.send"`
@@ -259,13 +262,13 @@ Observed event types emitted in this project:
 Important `data` fields used by client UI:
 
 - message events:
-  - `message_id`, `text`, `format`
+  - `message_id`, `text`, `format`, `agent_id`
 - step events:
   - `step_id`, `kind`, `title`, `headline`, `summary`, `message`
 - tool events:
   - `tool_call_id`, `tool_name`, `display_name`, `arg_preview`, `result_preview`, `message`
 - error events:
-  - `scope`, `code`, `message`, `retryable`
+  - `scope`, `code`, `message`, `retryable`, `agent_id`
 
 Additional optional observability/routing metadata may appear:
 

@@ -87,6 +87,39 @@ func (p *toolCallThenFinalProvider) Chat(
 
 func (p *toolCallThenFinalProvider) GetDefaultModel() string { return "mock-model" }
 
+type messageToolThenDoneProvider struct {
+	callCount int
+}
+
+func (p *messageToolThenDoneProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	p.callCount++
+	if p.callCount == 1 {
+		return &providers.LLMResponse{
+			ToolCalls: []providers.ToolCall{
+				{
+					ID:   "tc-message-1",
+					Name: "message",
+					Arguments: map[string]any{
+						"content": "sent via message tool",
+					},
+				},
+			},
+		}, nil
+	}
+	return &providers.LLMResponse{
+		Content:   "",
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (p *messageToolThenDoneProvider) GetDefaultModel() string { return "mock-model" }
+
 type noopTool struct{}
 
 func (t *noopTool) Name() string        { return "noop_tool" }
@@ -288,6 +321,102 @@ func TestProcessMessage_ExplicitAgentRouteIsPreserved(t *testing.T) {
 	}
 }
 
+func TestProcessMessage_ExplicitAgentRouteEmitsCanonicalAgentID(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "test-model"
+	cfg.Agents.Defaults.MaxToolIterations = 4
+	cfg.Agents.List = []config.AgentConfig{
+		{ID: "main", Default: true},
+		{ID: "writer"},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &mockProvider{})
+
+	response, _, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:test",
+		Content:  "hello",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "writer",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if response != "Mock response" {
+		t.Fatalf("response = %q, want %q", response, "Mock response")
+	}
+
+	events := collectActivityEventsUntilTerminal(t, msgBus, 2*time.Second)
+	if len(events) == 0 {
+		t.Fatal("expected activity events")
+	}
+
+	requiredEvents := map[string]bool{
+		"run.started":       false,
+		"message.completed": false,
+		"run.completed":     false,
+	}
+	for _, evt := range events {
+		if evt.Event.AgentID != "writer" {
+			t.Fatalf("event %q agent_id = %q, want %q", evt.Event.EventType, evt.Event.AgentID, "writer")
+		}
+		if got, _ := evt.Event.Data["agent_id"].(string); got != "writer" {
+			t.Fatalf("event %q data.agent_id = %q, want %q", evt.Event.EventType, got, "writer")
+		}
+		if _, ok := requiredEvents[evt.Event.EventType]; ok {
+			requiredEvents[evt.Event.EventType] = true
+		}
+	}
+	for eventType, seen := range requiredEvents {
+		if !seen {
+			t.Fatalf("missing %s event", eventType)
+		}
+	}
+}
+
+func TestProcessMessage_MessageToolPublishesResolvedAgentID(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "test-model"
+	cfg.Agents.Defaults.MaxToolIterations = 4
+	cfg.Tools.Message.Enabled = true
+	cfg.Agents.List = []config.AgentConfig{
+		{ID: "main", Default: true},
+		{ID: "writer"},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &messageToolThenDoneProvider{})
+
+	if _, _, err := al.processMessage(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "supr-user",
+		ChatID:   "supr:test",
+		Content:  "send via tool",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "writer",
+		},
+	}); err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+
+	select {
+	case out := <-msgBus.OutboundChan():
+		if out.Content != "sent via message tool" {
+			t.Fatalf("outbound content = %q, want %q", out.Content, "sent via message tool")
+		}
+		if out.ResolvedAgentID != "writer" {
+			t.Fatalf("resolved_agent_id = %q, want %q", out.ResolvedAgentID, "writer")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected outbound message from message tool")
+	}
+}
+
 func TestProcessMessage_NoExplicitAgentUsesDefaultRoute(t *testing.T) {
 	al, _, _, _, cleanup := newTestAgentLoop(t)
 	defer cleanup()
@@ -381,6 +510,7 @@ func TestProcessMessage_SuprPublishesStructuredActivityEvents(t *testing.T) {
 	if defaultAgent == nil {
 		t.Fatal("default agent missing")
 	}
+	expectedAgentID := defaultAgent.ID
 	defaultAgent.Tools.Register(&noopTool{})
 
 	response, _, err := al.processMessage(context.Background(), bus.InboundMessage{
@@ -431,6 +561,12 @@ func TestProcessMessage_SuprPublishesStructuredActivityEvents(t *testing.T) {
 		}
 		if e.RunID != runID {
 			t.Fatalf("run_id mismatch: got=%q want=%q", e.RunID, runID)
+		}
+		if e.AgentID != expectedAgentID {
+			t.Fatalf("event %q agent_id = %q, want %q", e.EventType, e.AgentID, expectedAgentID)
+		}
+		if got, _ := e.Data["agent_id"].(string); got != expectedAgentID {
+			t.Fatalf("event %q data.agent_id = %q, want %q", e.EventType, got, expectedAgentID)
 		}
 		if e.IdempotencyKey == "" {
 			t.Fatalf("idempotency_key is empty for event %q", e.EventType)

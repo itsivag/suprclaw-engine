@@ -128,6 +128,13 @@ func TestSuprBroadcastActivityEvent_EmitsCanonicalEnvelope(t *testing.T) {
 	if got, _ := frame["session_id"].(string); got != "sess-1" {
 		t.Fatalf("session_id = %q, want %q", got, "sess-1")
 	}
+	if got, _ := frame["agent_id"].(string); got != "agent_main" {
+		t.Fatalf("agent_id = %q, want %q", got, "agent_main")
+	}
+	data, _ := frame["data"].(map[string]any)
+	if got, _ := data["agent_id"].(string); got != "agent_main" {
+		t.Fatalf("data.agent_id = %q, want %q", got, "agent_main")
+	}
 }
 
 func TestSuprSend_EmitsCanonicalMessageCompleted(t *testing.T) {
@@ -141,9 +148,10 @@ func TestSuprSend_EmitsCanonicalMessageCompleted(t *testing.T) {
 		Sequence:  3,
 	})
 	if err := ch.Send(context.Background(), bus.OutboundMessage{
-		Channel: "supr",
-		ChatID:  "supr:sess-1",
-		Content: "hello world",
+		Channel:         "supr",
+		ChatID:          "supr:sess-1",
+		Content:         "hello world",
+		ResolvedAgentID: "agent_writer",
 	}); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
@@ -165,6 +173,12 @@ func TestSuprSend_EmitsCanonicalMessageCompleted(t *testing.T) {
 	if got, _ := data["text"].(string); got != "hello world" {
 		t.Fatalf("data.text = %q, want %q", got, "hello world")
 	}
+	if got, _ := frame["agent_id"].(string); got != "agent_writer" {
+		t.Fatalf("agent_id = %q, want %q", got, "agent_writer")
+	}
+	if got, _ := data["agent_id"].(string); got != "agent_writer" {
+		t.Fatalf("data.agent_id = %q, want %q", got, "agent_writer")
+	}
 	if got, _ := frame["sequence"].(float64); got <= 3 {
 		t.Fatalf("sequence = %v, want > 3", got)
 	}
@@ -181,10 +195,11 @@ func TestSuprSend_EmitsCanonicalErrorRaised(t *testing.T) {
 		Sequence:  2,
 	})
 	if err := ch.Send(context.Background(), bus.OutboundMessage{
-		Channel:      "supr",
-		ChatID:       "supr:sess-1",
-		ErrorCode:    "TEST_ERROR",
-		ErrorMessage: "boom",
+		Channel:         "supr",
+		ChatID:          "supr:sess-1",
+		ErrorCode:       "TEST_ERROR",
+		ErrorMessage:    "boom",
+		ResolvedAgentID: "agent_writer",
 	}); err != nil {
 		t.Fatalf("Send(error) error = %v", err)
 	}
@@ -205,6 +220,51 @@ func TestSuprSend_EmitsCanonicalErrorRaised(t *testing.T) {
 	}
 	if got, _ := data["message"].(string); got != "boom" {
 		t.Fatalf("data.message = %q, want %q", got, "boom")
+	}
+	if got, _ := frame["agent_id"].(string); got != "agent_writer" {
+		t.Fatalf("agent_id = %q, want %q", got, "agent_writer")
+	}
+	if got, _ := data["agent_id"].(string); got != "agent_writer" {
+		t.Fatalf("data.agent_id = %q, want %q", got, "agent_writer")
+	}
+}
+
+func TestSuprSend_UsesRouteMetadataAgentFallback(t *testing.T) {
+	ch, conn, cleanup := openSuprTestSocket(t)
+	defer cleanup()
+
+	ch.rememberRouteMetadata("supr:sess-1", "agent_route", "binding.channel")
+	ch.rememberRunStatus("supr:sess-1", bus.ActivityEventEnvelope{
+		EventType: "run.started",
+		RunID:     "run-1",
+		SessionID: "sess-1",
+		Sequence:  1,
+	})
+
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel: "supr",
+		ChatID:  "supr:sess-1",
+		Content: "hello from fallback",
+	}); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	var frame map[string]any
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("ReadJSON(message.completed) error = %v", err)
+	}
+	if got, _ := frame["event_type"].(string); got != "message.completed" {
+		t.Fatalf("event_type = %q, want %q", got, "message.completed")
+	}
+	if got, _ := frame["agent_id"].(string); got != "agent_route" {
+		t.Fatalf("agent_id = %q, want %q", got, "agent_route")
+	}
+	data, _ := frame["data"].(map[string]any)
+	if got, _ := data["agent_id"].(string); got != "agent_route" {
+		t.Fatalf("data.agent_id = %q, want %q", got, "agent_route")
+	}
+	if got, _ := data["resolved_agent_id"].(string); got != "agent_route" {
+		t.Fatalf("data.resolved_agent_id = %q, want %q", got, "agent_route")
 	}
 }
 

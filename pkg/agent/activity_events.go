@@ -90,9 +90,7 @@ func (e *activityRunEmitter) emit(eventType string, data map[string]any) {
 		return
 	}
 	e.sequence++
-	if data == nil {
-		data = map[string]any{}
-	}
+	agentID, normalizedData := normalizeEventAgentFields(e.agentID, data)
 	envelope := bus.ActivityEventEnvelope{
 		V:              activitySchemaVersion,
 		EventID:        "evt_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
@@ -102,16 +100,43 @@ func (e *activityRunEmitter) emit(eventType string, data map[string]any) {
 		SessionID:      e.sessionID,
 		RunID:          e.runID,
 		ParentRunID:    nil,
-		AgentID:        e.agentID,
+		AgentID:        agentID,
 		IdempotencyKey: fmt.Sprintf("%s_%d", e.runID, e.sequence),
 		Replay:         false,
-		Data:           data,
+		Data:           normalizedData,
 	}
 	_ = e.al.bus.PublishOutboundActivity(e.ctx, bus.OutboundActivityEvent{
 		Channel: e.channel,
 		ChatID:  e.chatID,
 		Event:   envelope,
 	})
+}
+
+func normalizeEventAgentFields(agentID string, data map[string]any) (string, map[string]any) {
+	normalizedAgentID := strings.TrimSpace(agentID)
+	var dataAgentID string
+	if rawDataAgentID, ok := data["agent_id"].(string); ok {
+		dataAgentID = strings.TrimSpace(rawDataAgentID)
+	}
+	if normalizedAgentID == "" {
+		normalizedAgentID = dataAgentID
+	}
+	normalizedData := cloneAnyMap(data)
+	if normalizedAgentID != "" {
+		normalizedData["agent_id"] = normalizedAgentID
+	}
+	return normalizedAgentID, normalizedData
+}
+
+func cloneAnyMap(input map[string]any) map[string]any {
+	if input == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(input)+1)
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 func toolCallID(callID string, iteration, index int) string {
