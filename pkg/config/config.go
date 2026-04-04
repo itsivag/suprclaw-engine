@@ -274,6 +274,7 @@ type ContextGuardConfig struct {
 	Enabled                bool    `json:"enabled"                  env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_ENABLED"`
 	SafetyMarginTokens     int     `json:"safety_margin_tokens"     env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_SAFETY_MARGIN_TOKENS"`
 	TargetInputRatio       float64 `json:"target_input_ratio"       env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_TARGET_INPUT_RATIO"`
+	PrecheckTriggerRatio   float64 `json:"precheck_trigger_ratio"   env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_PRECHECK_TRIGGER_RATIO"`
 	EmergencyInputRatio    float64 `json:"emergency_input_ratio"    env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_EMERGENCY_INPUT_RATIO"`
 	MaxCompactionPasses    int     `json:"max_compaction_passes"    env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_MAX_COMPACTION_PASSES"`
 	PreserveRecentMessages int     `json:"preserve_recent_messages" env:"SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_PRESERVE_RECENT_MESSAGES"`

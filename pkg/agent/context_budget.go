@@ -18,6 +18,7 @@ import (
 const (
 	defaultContextGuardSafetyMarginTokens     = 2048
 	defaultContextGuardTargetInputRatio       = 0.78
+	defaultContextGuardPrecheckTriggerRatio   = 0.85
 	defaultContextGuardEmergencyInputRatio    = 0.60
 	defaultContextGuardMaxCompactionPasses    = 3
 	defaultContextGuardPreserveRecentMessages = 6
@@ -32,6 +33,13 @@ type contextBudget struct {
 	EffectiveInputLimit   int
 	TargetInputTokens     int
 	EmergencyInputTokens  int
+}
+
+type contextPrecheckDecision struct {
+	ShouldRunPrecheck    bool
+	PredictedInputTokens int
+	CountSource          string
+	Budget               contextBudget
 }
 
 type compactionStage string
@@ -52,6 +60,9 @@ func normalizeContextGuard(guard config.ContextGuardConfig) config.ContextGuardC
 	}
 	if guard.TargetInputRatio <= 0 || guard.TargetInputRatio > 1 {
 		guard.TargetInputRatio = defaultContextGuardTargetInputRatio
+	}
+	if guard.PrecheckTriggerRatio <= 0 || guard.PrecheckTriggerRatio > 1 {
+		guard.PrecheckTriggerRatio = defaultContextGuardPrecheckTriggerRatio
 	}
 	if guard.EmergencyInputRatio <= 0 || guard.EmergencyInputRatio > 1 {
 		guard.EmergencyInputRatio = defaultContextGuardEmergencyInputRatio
@@ -366,6 +377,35 @@ func (al *AgentLoop) compactToBudget(
 			predicted,
 			budget.EffectiveInputLimit,
 		),
+	}
+}
+
+func (al *AgentLoop) decideContextBudgetPrecheck(
+	agent *AgentInstance,
+	messages []providers.Message,
+	llmOpts map[string]any,
+	candidates []providers.FallbackCandidate,
+	forceEmergency bool,
+) contextPrecheckDecision {
+	guard := normalizeContextGuard(agent.ContextGuard)
+	requestedOutput := getRequestedOutputTokens(llmOpts, agent.MaxTokens)
+	contextWindow := al.resolveContextWindowForTurn(agent, candidates, guard, requestedOutput)
+	budget := computeContextBudget(contextWindow, requestedOutput, guard)
+
+	predicted, countSource := al.selectInputTokensForBudget(messages)
+	hasUsageAnchor := countSource == "usage_anchor"
+
+	shouldRun := true
+	if !forceEmergency && hasUsageAnchor {
+		triggerThreshold := float64(budget.EffectiveInputLimit) * guard.PrecheckTriggerRatio
+		shouldRun = float64(predicted) >= triggerThreshold
+	}
+
+	return contextPrecheckDecision{
+		ShouldRunPrecheck:    shouldRun,
+		PredictedInputTokens: predicted,
+		CountSource:          countSource,
+		Budget:               budget,
 	}
 }
 

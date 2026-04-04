@@ -191,6 +191,7 @@ func newBudgetTestConfig(workspace string) *config.Config {
 					Enabled:                true,
 					SafetyMarginTokens:     64,
 					TargetInputRatio:       0.78,
+					PrecheckTriggerRatio:   0.85,
 					EmergencyInputRatio:    0.60,
 					MaxCompactionPasses:    3,
 					PreserveRecentMessages: 4,
@@ -375,6 +376,48 @@ func TestAgentLoop_BudgetCheckSkipsProviderCountInSafeZone(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_AnchoredBelowThresholdCompletesWithoutCompaction(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	provider := &budgetRecordingProvider{}
+	al := NewAgentLoop(newBudgetTestConfig(tmpDir), bus.NewMessageBus(), provider)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.ContextWindow = 4096
+
+	sessionKey := "budget-anchor-low"
+	defaultAgent.Sessions.SetHistory(sessionKey, []providers.Message{
+		{Role: "user", Content: "hello"},
+		{
+			Role:    "assistant",
+			Content: "anchor",
+			Usage: &providers.UsageInfo{
+				PromptTokens:     350,
+				CompletionTokens: 50,
+				TotalTokens:      400,
+			},
+		},
+		{Role: "user", Content: "small tail"},
+	})
+
+	_, err = al.ProcessDirectWithChannel(context.Background(), "short prompt", sessionKey, "cli", "direct")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", provider.calls)
+	}
+	if got := al.compactionTriggeredTotal.Load(); got != 0 {
+		t.Fatalf("compactionTriggeredTotal = %d, want 0", got)
+	}
+}
+
 func TestAgentLoop_BudgetCheckDedupeOnTimeoutRetry(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
 	if err != nil {
@@ -430,6 +473,104 @@ func TestAgentLoop_BudgetRechecksAfterContextOverflow(t *testing.T) {
 
 	if got := atomic.LoadInt32(&provider.countCalls); got != 0 {
 		t.Fatalf("provider count calls = %d, want 0 after context overflow emergency recheck", got)
+	}
+}
+
+func TestAgentLoop_AnchoredNearThresholdStillCompactsBeforeProviderCall(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	provider := &budgetRecordingProvider{}
+	al := NewAgentLoop(newBudgetTestConfig(tmpDir), bus.NewMessageBus(), provider)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.ContextWindow = 4096
+
+	sessionKey := "budget-anchor-near-threshold"
+	history := []providers.Message{
+		{Role: "user", Content: "u0"},
+		{
+			Role:    "assistant",
+			Content: "anchor",
+			Usage: &providers.UsageInfo{
+				PromptTokens:     2000,
+				CompletionTokens: 200,
+				TotalTokens:      2200,
+			},
+		},
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: strings.Repeat("A", 9000)},
+	}
+	for i := 0; i < 5; i++ {
+		history = append(history,
+			providers.Message{Role: "user", Content: fmt.Sprintf("u%d", i+2)},
+			providers.Message{Role: "assistant", Content: "ok"},
+		)
+	}
+	defaultAgent.Sessions.SetHistory(sessionKey, history)
+
+	_, err = al.ProcessDirectWithChannel(context.Background(), "retry intent", sessionKey, "cli", "direct")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
+	}
+
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", provider.calls)
+	}
+	if len(provider.tokenPerCall) != 1 {
+		t.Fatalf("tokenPerCall len = %d, want 1", len(provider.tokenPerCall))
+	}
+	// effective_input_limit = 4096 - 512 - 64 = 3520
+	if provider.tokenPerCall[0] > 3520 {
+		t.Fatalf("provider received oversized context: %d > 3520", provider.tokenPerCall[0])
+	}
+}
+
+func TestAgentLoop_OverflowAfterAnchoredSkipRecoversWithEmergencyCompaction(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-budget-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	provider := &budgetCountAwareProvider{
+		contextOnFirstChat:  true,
+		providerTokenResult: 1000,
+	}
+	al := NewAgentLoop(newBudgetTestConfig(tmpDir), bus.NewMessageBus(), provider)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent missing")
+	}
+	defaultAgent.ContextWindow = 4096
+	sessionKey := "budget-overflow-after-skip"
+	defaultAgent.Sessions.SetHistory(sessionKey, []providers.Message{
+		{
+			Role:    "assistant",
+			Content: "anchor",
+			Usage: &providers.UsageInfo{
+				PromptTokens:     250,
+				CompletionTokens: 50,
+				TotalTokens:      300,
+			},
+		},
+		{Role: "user", Content: "small tail"},
+	})
+
+	_, err = al.ProcessDirectWithChannel(context.Background(), "small prompt", sessionKey, "cli", "direct")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error: %v", err)
+	}
+	if got := atomic.LoadInt32(&provider.chatCalls); got != 2 {
+		t.Fatalf("provider chat calls = %d, want 2 (overflow retry path)", got)
+	}
+	if got := atomic.LoadInt32(&provider.countCalls); got != 0 {
+		t.Fatalf("provider count calls = %d, want 0", got)
 	}
 }
 

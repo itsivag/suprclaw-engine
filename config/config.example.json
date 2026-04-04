@@ -13,6 +13,7 @@
         "enabled": true,
         "safety_margin_tokens": 2048,
         "target_input_ratio": 0.78,
+        "precheck_trigger_ratio": 0.85,
         "emergency_input_ratio": 0.60,
         "max_compaction_passes": 3,
         "preserve_recent_messages": 6

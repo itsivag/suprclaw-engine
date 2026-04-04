@@ -32,6 +32,7 @@ func DefaultConfig() *Config {
 					Enabled:                true,
 					SafetyMarginTokens:     2048,
 					TargetInputRatio:       0.78,
+					PrecheckTriggerRatio:   0.85,
 					EmergencyInputRatio:    0.60,
 					MaxCompactionPasses:    3,
 					PreserveRecentMessages: 6,

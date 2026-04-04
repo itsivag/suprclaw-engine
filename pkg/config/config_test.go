@@ -566,6 +566,9 @@ func TestDefaultConfig_ContextGuardDefaults(t *testing.T) {
 	if guard.TargetInputRatio != 0.78 {
 		t.Fatalf("ContextGuard.TargetInputRatio = %v, want 0.78", guard.TargetInputRatio)
 	}
+	if guard.PrecheckTriggerRatio != 0.85 {
+		t.Fatalf("ContextGuard.PrecheckTriggerRatio = %v, want 0.85", guard.PrecheckTriggerRatio)
+	}
 	if guard.EmergencyInputRatio != 0.60 {
 		t.Fatalf("ContextGuard.EmergencyInputRatio = %v, want 0.60", guard.EmergencyInputRatio)
 	}
@@ -591,6 +594,7 @@ func TestLoadConfig_ContextGuardFromEnv(t *testing.T) {
 	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_ENABLED", "false")
 	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_SAFETY_MARGIN_TOKENS", "111")
 	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_TARGET_INPUT_RATIO", "0.50")
+	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_PRECHECK_TRIGGER_RATIO", "0.70")
 	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_EMERGENCY_INPUT_RATIO", "0.40")
 	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_MAX_COMPACTION_PASSES", "2")
 	t.Setenv("SUPRCLAW_AGENTS_DEFAULTS_CONTEXT_GUARD_PRESERVE_RECENT_MESSAGES", "4")
@@ -609,6 +613,9 @@ func TestLoadConfig_ContextGuardFromEnv(t *testing.T) {
 	}
 	if guard.TargetInputRatio != 0.50 {
 		t.Fatalf("ContextGuard.TargetInputRatio = %v, want 0.50", guard.TargetInputRatio)
+	}
+	if guard.PrecheckTriggerRatio != 0.70 {
+		t.Fatalf("ContextGuard.PrecheckTriggerRatio = %v, want 0.70", guard.PrecheckTriggerRatio)
 	}
 	if guard.EmergencyInputRatio != 0.40 {
 		t.Fatalf("ContextGuard.EmergencyInputRatio = %v, want 0.40", guard.EmergencyInputRatio)

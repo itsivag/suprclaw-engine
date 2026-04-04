@@ -1599,54 +1599,72 @@ func (al *AgentLoop) runLLMIteration(
 			}
 
 			if guard.Enabled {
-				signature := budgetCheckSignature(
+				precheck := al.decideContextBudgetPrecheck(
+					agent,
 					messages,
-					activeModel,
-					providerToolDefs,
 					llmOpts,
+					activeCandidates,
 					forceEmergencyCompaction,
 				)
-
-				if lastBudgetReady && signature == lastBudgetSignature {
-					messages = cloneMessages(lastBudgetResult)
-				} else {
-					if activity != nil && iterationStepID != "" {
-						activity.emit("step.updated", map[string]any{
-							"step_id":  iterationStepID,
-							"headline": "Checking context budget",
-							"progress": 0.2,
-						})
-					}
-					if compactionCycles >= maxCompactionCycles {
-						al.contextBudgetUnfitTotal.Add(1)
-						return "", nil, iteration, activeModel, &RequestError{
-							Code: ErrCodeContextBudgetUnfit,
-							Message: fmt.Sprintf(
-								"context compaction circuit breaker tripped after %d cycles",
-								compactionCycles,
-							),
-						}
-					}
-
-					compacted, compactErr := al.compactToBudget(
-						ctx,
-						agent,
+				if precheck.ShouldRunPrecheck {
+					signature := budgetCheckSignature(
 						messages,
-						opts,
 						activeModel,
 						providerToolDefs,
 						llmOpts,
-						activeCandidates,
 						forceEmergencyCompaction,
 					)
-					compactionCycles++
-					if compactErr != nil {
-						return "", nil, iteration, activeModel, compactErr
+
+					if lastBudgetReady && signature == lastBudgetSignature {
+						messages = cloneMessages(lastBudgetResult)
+					} else {
+						if activity != nil && iterationStepID != "" {
+							activity.emit("step.updated", map[string]any{
+								"step_id":  iterationStepID,
+								"headline": "Checking context budget",
+								"progress": 0.2,
+							})
+						}
+						if compactionCycles >= maxCompactionCycles {
+							al.contextBudgetUnfitTotal.Add(1)
+							return "", nil, iteration, activeModel, &RequestError{
+								Code: ErrCodeContextBudgetUnfit,
+								Message: fmt.Sprintf(
+									"context compaction circuit breaker tripped after %d cycles",
+									compactionCycles,
+								),
+							}
+						}
+
+						compacted, compactErr := al.compactToBudget(
+							ctx,
+							agent,
+							messages,
+							opts,
+							activeModel,
+							providerToolDefs,
+							llmOpts,
+							activeCandidates,
+							forceEmergencyCompaction,
+						)
+						compactionCycles++
+						if compactErr != nil {
+							return "", nil, iteration, activeModel, compactErr
+						}
+						messages = compacted
+						lastBudgetSignature = signature
+						lastBudgetResult = cloneMessages(compacted)
+						lastBudgetReady = true
 					}
-					messages = compacted
-					lastBudgetSignature = signature
-					lastBudgetResult = cloneMessages(compacted)
-					lastBudgetReady = true
+				} else {
+					al.logBudgetDecision(
+						agent,
+						opts,
+						precheck.Budget,
+						compactionStageNone,
+						precheck.PredictedInputTokens,
+						precheck.CountSource,
+					)
 				}
 			}
 
