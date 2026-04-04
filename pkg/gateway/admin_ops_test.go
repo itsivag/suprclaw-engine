@@ -188,6 +188,83 @@ func TestAdminReloadRuntime_ReloadsRegistryFromConfig(t *testing.T) {
 	}
 }
 
+func TestAdminVersionEndpoint_ReturnsVersionMetadata(t *testing.T) {
+	oldVersion, oldGit := config.Version, config.GitCommit
+	oldBuildTime, oldGoVersion := config.BuildTime, config.GoVersion
+	oldGHRunCount := config.GHRunCount
+	t.Cleanup(func() {
+		config.Version, config.GitCommit = oldVersion, oldGit
+		config.BuildTime, config.GoVersion = oldBuildTime, oldGoVersion
+		config.GHRunCount = oldGHRunCount
+	})
+
+	config.Version = "v1.2.3"
+	config.GitCommit = "deadbeef"
+	config.BuildTime = "2026-04-04T10:00:00Z"
+	config.GoVersion = "go1.23.0"
+	config.GHRunCount = ""
+
+	h := &adminHandler{secret: "test-secret"}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/version", nil)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	body := decodeJSONMap(t, rec.Body.String())
+	if got, _ := body["version"].(string); got != "v1.2.3" {
+		t.Fatalf("version = %v, want v1.2.3", body["version"])
+	}
+	if got, _ := body["git_commit"].(string); got != "deadbeef" {
+		t.Fatalf("git_commit = %v, want deadbeef", body["git_commit"])
+	}
+	if got, _ := body["build_time"].(string); got != "2026-04-04T10:00:00Z" {
+		t.Fatalf("build_time = %v, want 2026-04-04T10:00:00Z", body["build_time"])
+	}
+	if got, _ := body["go_version"].(string); got != "go1.23.0" {
+		t.Fatalf("go_version = %v, want go1.23.0", body["go_version"])
+	}
+	if got, ok := body["gh_run_count"].(float64); !ok || int(got) != 0 {
+		t.Fatalf("gh_run_count = %v, want 0", body["gh_run_count"])
+	}
+	if got, _ := body["source"].(string); got != "local" {
+		t.Fatalf("source = %v, want local", body["source"])
+	}
+}
+
+func TestAdminVersionEndpoint_UnauthorizedWithoutBearer(t *testing.T) {
+	h := &adminHandler{secret: "test-secret"}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/version", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminVersionEndpoint_ForbiddenWhenAdminDisabled(t *testing.T) {
+	h := &adminHandler{}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/version", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminMCPDeleteTool_RemovesExistingTool(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.json")

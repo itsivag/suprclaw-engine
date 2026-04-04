@@ -22,6 +22,7 @@ builds:
       - -X github.com/itsivag/suprclaw/pkg/config.GitCommit={{ .ShortCommit }}
       - -X github.com/itsivag/suprclaw/pkg/config.BuildTime={{ .Date }}
       - -X github.com/itsivag/suprclaw/pkg/config.GoVersion={{ .Env.GOVERSION }}
+      - -X github.com/itsivag/suprclaw/pkg/config.GHRunCount={{ .Env.GITHUB_RUN_NUMBER }}
     goos:
       - linux
       - windows
@@ -60,6 +61,11 @@ builds:
       - stdjson
     ldflags:
       - -s -w
+      - -X github.com/itsivag/suprclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/itsivag/suprclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/itsivag/suprclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/itsivag/suprclaw/pkg/config.GoVersion={{ .Env.GOVERSION }}
+      - -X github.com/itsivag/suprclaw/pkg/config.GHRunCount={{ .Env.GITHUB_RUN_NUMBER }}
     goos:
       - linux
       - windows
@@ -98,6 +104,11 @@ builds:
       - stdjson
     ldflags:
       - -s -w
+      - -X github.com/itsivag/suprclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/itsivag/suprclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/itsivag/suprclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/itsivag/suprclaw/pkg/config.GoVersion={{ .Env.GOVERSION }}
+      - -X github.com/itsivag/suprclaw/pkg/config.GHRunCount={{ .Env.GITHUB_RUN_NUMBER }}
     goos:
       - linux
       - windows

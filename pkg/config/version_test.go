@@ -90,3 +90,51 @@ func TestVersion_DefaultIsDev(t *testing.T) {
 
 	assert.Equal(t, "dev", Version)
 }
+
+func TestParseGHRunCount_Valid(t *testing.T) {
+	assert.Equal(t, 123, parseGHRunCount("123"))
+}
+
+func TestParseGHRunCount_InvalidOrEmpty(t *testing.T) {
+	assert.Equal(t, 0, parseGHRunCount(""))
+	assert.Equal(t, 0, parseGHRunCount("abc"))
+	assert.Equal(t, 0, parseGHRunCount("0"))
+	assert.Equal(t, 0, parseGHRunCount("-12"))
+}
+
+func TestGetVersionMetadata_GitHubActionsSource(t *testing.T) {
+	oldVersion, oldGit := Version, GitCommit
+	oldBuildTime, oldGoVersion := BuildTime, GoVersion
+	oldGHRunCount := GHRunCount
+	t.Cleanup(func() {
+		Version, GitCommit = oldVersion, oldGit
+		BuildTime, GoVersion = oldBuildTime, oldGoVersion
+		GHRunCount = oldGHRunCount
+	})
+
+	Version = "v1.2.3"
+	GitCommit = "abc12345"
+	BuildTime = "2026-04-04T10:00:00Z"
+	GoVersion = "go1.23.0"
+	GHRunCount = "456"
+
+	meta := GetVersionMetadata()
+
+	assert.Equal(t, "v1.2.3", meta.Version)
+	assert.Equal(t, "abc12345", meta.GitCommit)
+	assert.Equal(t, "2026-04-04T10:00:00Z", meta.BuildTime)
+	assert.Equal(t, "go1.23.0", meta.GoVersion)
+	assert.Equal(t, 456, meta.GHRunCount)
+	assert.Equal(t, "github_actions", meta.Source)
+}
+
+func TestGetVersionMetadata_LocalSourceOnInvalidRunCount(t *testing.T) {
+	oldGHRunCount := GHRunCount
+	t.Cleanup(func() { GHRunCount = oldGHRunCount })
+
+	GHRunCount = "not-a-number"
+	meta := GetVersionMetadata()
+
+	assert.Equal(t, 0, meta.GHRunCount)
+	assert.Equal(t, "local", meta.Source)
+}

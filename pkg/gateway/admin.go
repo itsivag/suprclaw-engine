@@ -54,6 +54,7 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 	// Runtime
 	mux.HandleFunc("POST /api/admin/runtime/reload", h.auth(h.reloadRuntime))
 	mux.HandleFunc("POST /api/admin/runtime/stop", h.auth(h.stopRuntime))
+	mux.HandleFunc("GET /api/admin/version", h.auth(h.getVersion))
 
 	// Workspaces
 	mux.HandleFunc("POST /api/admin/workspaces/bootstrap", h.auth(h.bootstrapWorkspace))
@@ -162,6 +163,10 @@ func (h *adminHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg)
+}
+
+func (h *adminHandler) getVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, config.GetVersionMetadata())
 }
 
 func (h *adminHandler) putConfig(w http.ResponseWriter, r *http.Request) {
