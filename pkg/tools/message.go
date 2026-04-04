@@ -3,14 +3,12 @@ package tools
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 )
 
 type SendCallback func(channel, chatID, content string) error
 
 type MessageTool struct {
 	sendCallback SendCallback
-	sentInRound  atomic.Bool // Tracks whether a message was sent in the current processing round
 }
 
 func NewMessageTool() *MessageTool {
@@ -49,17 +47,6 @@ func (t *MessageTool) Parameters() map[string]any {
 	}
 }
 
-// ResetSentInRound resets the per-round send tracker.
-// Called by the agent loop at the start of each inbound message processing round.
-func (t *MessageTool) ResetSentInRound() {
-	t.sentInRound.Store(false)
-}
-
-// HasSentInRound returns true if the message tool sent a message during the current round.
-func (t *MessageTool) HasSentInRound() bool {
-	return t.sentInRound.Load()
-}
-
 func (t *MessageTool) SetSendCallback(callback SendCallback) {
 	t.sendCallback = callback
 }
@@ -96,7 +83,9 @@ func (t *MessageTool) Execute(ctx context.Context, args map[string]any) *ToolRes
 		}
 	}
 
-	t.sentInRound.Store(true)
+	if state := MessageRoundStateFromContext(ctx); state != nil {
+		state.MarkSent()
+	}
 	// Silent: user already received the message directly
 	return &ToolResult{
 		ForLLM: fmt.Sprintf("Message sent to %s:%s", channel, chatID),

@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -89,6 +91,78 @@ func TestMessageTool_Execute_WithCustomChannel(t *testing.T) {
 	}
 	if result.ForLLM != "Message sent to custom-channel:custom-chat-id" {
 		t.Errorf("Expected ForLLM 'Message sent to custom-channel:custom-chat-id', got '%s'", result.ForLLM)
+	}
+}
+
+func TestMessageTool_Execute_MarksRequestScopedRoundState(t *testing.T) {
+	tool := NewMessageTool()
+	tool.SetSendCallback(func(channel, chatID, content string) error { return nil })
+
+	state := NewMessageRoundState()
+	ctx := WithMessageRoundState(
+		WithToolContext(context.Background(), "test-channel", "test-chat-id"),
+		state,
+	)
+
+	result := tool.Execute(ctx, map[string]any{"content": "hello"})
+	if result.IsError {
+		t.Fatalf("Execute() unexpected error: %s", result.ForLLM)
+	}
+	if !state.WasSent() {
+		t.Fatal("expected round state to be marked sent")
+	}
+}
+
+func TestMessageTool_Execute_MissingRoundState_NoImplicitFallback(t *testing.T) {
+	tool := NewMessageTool()
+	tool.SetSendCallback(func(channel, chatID, content string) error { return nil })
+
+	// No WithMessageRoundState on purpose: missing state must not panic and must
+	// not create hidden fallback behavior.
+	ctx := WithToolContext(context.Background(), "test-channel", "test-chat-id")
+	result := tool.Execute(ctx, map[string]any{"content": "hello"})
+
+	if result.IsError {
+		t.Fatalf("Execute() unexpected error: %s", result.ForLLM)
+	}
+	if state := MessageRoundStateFromContext(ctx); state != nil {
+		t.Fatal("expected no round state in context")
+	}
+}
+
+func TestMessageTool_Execute_ConcurrentCallsMarkRoundState(t *testing.T) {
+	tool := NewMessageTool()
+	var sendCount atomic.Int32
+	tool.SetSendCallback(func(channel, chatID, content string) error {
+		sendCount.Add(1)
+		return nil
+	})
+
+	state := NewMessageRoundState()
+	ctx := WithMessageRoundState(
+		WithToolContext(context.Background(), "test-channel", "test-chat-id"),
+		state,
+	)
+
+	const calls = 8
+	var wg sync.WaitGroup
+	wg.Add(calls)
+	for i := 0; i < calls; i++ {
+		go func() {
+			defer wg.Done()
+			result := tool.Execute(ctx, map[string]any{"content": "parallel"})
+			if result.IsError {
+				t.Errorf("Execute() unexpected error: %s", result.ForLLM)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if sendCount.Load() != calls {
+		t.Fatalf("send callback count = %d, want %d", sendCount.Load(), calls)
+	}
+	if !state.WasSent() {
+		t.Fatal("expected round state to be marked sent after concurrent calls")
 	}
 }
 

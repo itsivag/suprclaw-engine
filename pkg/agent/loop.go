@@ -369,6 +369,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 }
 
 func (al *AgentLoop) handleInboundMessage(ctx context.Context, msg bus.InboundMessage) {
+	messageRoundState := tools.NewMessageRoundState()
+	ctx = tools.WithMessageRoundState(ctx, messageRoundState)
+
 	// Process message
 	// TODO: Re-enable media cleanup after inbound media is properly consumed by the agent.
 	// Currently disabled because files are deleted before the LLM can access their content.
@@ -415,18 +418,8 @@ func (al *AgentLoop) handleInboundMessage(ctx context.Context, msg bus.InboundMe
 		return
 	}
 
-	// Check if the message tool already sent a response during this round.
-	// If so, skip publishing to avoid duplicate messages to the user.
-	// Use default agent's tools to check (message tool is shared).
-	alreadySent := false
-	defaultAgent := al.GetRegistry().GetDefaultAgent()
-	if defaultAgent != nil {
-		if tool, ok := defaultAgent.Tools.Get("message"); ok {
-			if mt, ok := tool.(*tools.MessageTool); ok {
-				alreadySent = mt.HasSentInRound()
-			}
-		}
-	}
+	// Skip publishing final response when the message tool already sent in this run.
+	alreadySent := messageRoundState.WasSent()
 
 	if alreadySent {
 		logger.DebugCF(
@@ -1000,13 +993,6 @@ func (al *AgentLoop) processMessageDetailed(
 	}
 	defer releaseAgentLock()
 
-	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
-	if tool, ok := agent.Tools.Get("message"); ok {
-		if resetter, ok := tool.(interface{ ResetSentInRound() }); ok {
-			resetter.ResetSentInRound()
-		}
-	}
-
 	// Resolve session key from route, while preserving explicit agent-scoped keys.
 	scopeKey := resolveScopeKey(route, msg.SessionKey)
 	sessionKey := scopeKey
@@ -1341,10 +1327,8 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	alreadySentInRound := false
-	if tool, ok := agent.Tools.Get("message"); ok {
-		if mt, ok := tool.(*tools.MessageTool); ok {
-			alreadySentInRound = mt.HasSentInRound()
-		}
+	if state := tools.MessageRoundStateFromContext(runCtx); state != nil {
+		alreadySentInRound = state.WasSent()
 	}
 
 	finalMessageID := ""

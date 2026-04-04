@@ -1,6 +1,9 @@
 package tools
 
-import "context"
+import (
+	"context"
+	"sync/atomic"
+)
 
 // Tool is the interface that all tools must implement.
 type Tool interface {
@@ -23,6 +26,7 @@ type toolCtxKey struct{ name string }
 var (
 	ctxKeyChannel = &toolCtxKey{"channel"}
 	ctxKeyChatID  = &toolCtxKey{"chatID"}
+	ctxKeyMessage = &toolCtxKey{"messageRoundState"}
 )
 
 // WithToolContext returns a child context carrying channel and chatID.
@@ -42,6 +46,42 @@ func ToolChannel(ctx context.Context) string {
 func ToolChatID(ctx context.Context) string {
 	v, _ := ctx.Value(ctxKeyChatID).(string)
 	return v
+}
+
+// MessageRoundState is request-scoped state used by MessageTool to mark whether
+// a direct message send already occurred in the current run.
+type MessageRoundState struct {
+	sent atomic.Bool
+}
+
+func NewMessageRoundState() *MessageRoundState {
+	return &MessageRoundState{}
+}
+
+func (s *MessageRoundState) MarkSent() {
+	if s == nil {
+		return
+	}
+	s.sent.Store(true)
+}
+
+func (s *MessageRoundState) WasSent() bool {
+	if s == nil {
+		return false
+	}
+	return s.sent.Load()
+}
+
+// WithMessageRoundState returns a child context carrying request-scoped
+// MessageTool state.
+func WithMessageRoundState(ctx context.Context, state *MessageRoundState) context.Context {
+	return context.WithValue(ctx, ctxKeyMessage, state)
+}
+
+// MessageRoundStateFromContext extracts request-scoped MessageTool state.
+func MessageRoundStateFromContext(ctx context.Context) *MessageRoundState {
+	state, _ := ctx.Value(ctxKeyMessage).(*MessageRoundState)
+	return state
 }
 
 // AsyncCallback is a function type that async tools use to notify completion.

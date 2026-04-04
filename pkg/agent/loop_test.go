@@ -1484,6 +1484,224 @@ func TestAgentLoopRun_WorkersShutdownOnCancelAndBusClose(t *testing.T) {
 	})
 }
 
+func TestAgentLoopRun_MessageToolSuppressesFinalOutbound(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 1
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "test-model"
+	cfg.Agents.Defaults.MaxToolIterations = 4
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+	cfg.Tools.Message.Enabled = true
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &messageToolThenDoneProvider{})
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user",
+		ChatID:   "chat-msg",
+		Content:  "send",
+	}); err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	var outboundForChat []string
+	deadline := time.After(2 * time.Second)
+collect:
+	for {
+		select {
+		case out := <-msgBus.OutboundChan():
+			if out.ChatID != "chat-msg" {
+				continue
+			}
+			if out.ErrorCode != "" {
+				t.Fatalf("unexpected error outbound: %+v", out)
+			}
+			outboundForChat = append(outboundForChat, out.Content)
+			if len(outboundForChat) == 1 {
+				if out.Content != "sent via message tool" {
+					t.Fatalf("first outbound content = %q, want %q", out.Content, "sent via message tool")
+				}
+				// Wait briefly for potential leaked final response.
+				time.Sleep(250 * time.Millisecond)
+				break collect
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for outbound message")
+		}
+	}
+
+	// Drain any remaining immediate messages for this chat.
+drain:
+	for {
+		select {
+		case out := <-msgBus.OutboundChan():
+			if out.ChatID == "chat-msg" && out.ErrorCode == "" {
+				outboundForChat = append(outboundForChat, out.Content)
+			}
+		default:
+			break drain
+		}
+	}
+
+	if len(outboundForChat) != 1 {
+		t.Fatalf("outbound count for chat-msg = %d, want 1; contents=%v", len(outboundForChat), outboundForChat)
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
+func TestAgentLoopRun_MessageStateDoesNotLeakAcrossParallelAgents(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 2
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "test-model"
+	cfg.Agents.Defaults.MaxToolIterations = 4
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+	cfg.Tools.Message.Enabled = true
+	cfg.Agents.List = []config.AgentConfig{
+		{ID: "main", Default: true},
+		{ID: "writer"},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &messageStateIsolationProvider{})
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user-main",
+		ChatID:   "chat-msg",
+		Content:  "use-message",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(main) error = %v", err)
+	}
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user-writer",
+		ChatID:   "chat-plain",
+		Content:  "plain",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "writer",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(writer) error = %v", err)
+	}
+
+	messagesByChat := map[string][]string{}
+	deadline := time.After(2 * time.Second)
+	for len(messagesByChat["chat-msg"]) == 0 || len(messagesByChat["chat-plain"]) == 0 {
+		select {
+		case out := <-msgBus.OutboundChan():
+			if out.ErrorCode != "" {
+				t.Fatalf("unexpected error outbound: %+v", out)
+			}
+			messagesByChat[out.ChatID] = append(messagesByChat[out.ChatID], out.Content)
+		case <-deadline:
+			t.Fatalf("timed out waiting for expected outbounds; got=%v", messagesByChat)
+		}
+	}
+
+	// Wait briefly to catch leaked/suppressed extra final outputs.
+	time.Sleep(250 * time.Millisecond)
+drain:
+	for {
+		select {
+		case out := <-msgBus.OutboundChan():
+			if out.ErrorCode == "" {
+				messagesByChat[out.ChatID] = append(messagesByChat[out.ChatID], out.Content)
+			}
+		default:
+			break drain
+		}
+	}
+
+	if len(messagesByChat["chat-msg"]) != 1 || messagesByChat["chat-msg"][0] != "from message tool" {
+		t.Fatalf("chat-msg outbounds = %v, want [from message tool]", messagesByChat["chat-msg"])
+	}
+	if len(messagesByChat["chat-plain"]) != 1 || messagesByChat["chat-plain"][0] != "plain-final" {
+		t.Fatalf("chat-plain outbounds = %v, want [plain-final]", messagesByChat["chat-plain"])
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
+func TestAgentLoopRun_NoMessageSendPublishesFinalResponse(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 1
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "test-model"
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+	cfg.Tools.Message.Enabled = true
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &simpleMockProvider{response: "plain-final"})
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user",
+		ChatID:   "chat-plain",
+		Content:  "hello",
+	}); err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	select {
+	case out := <-msgBus.OutboundChan():
+		if out.ErrorCode != "" {
+			t.Fatalf("unexpected error outbound: %+v", out)
+		}
+		if out.Content != "plain-final" {
+			t.Fatalf("outbound content = %q, want %q", out.Content, "plain-final")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for final response outbound")
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
 // Mock implementations for testing
 
 type simpleMockProvider struct {
@@ -1620,6 +1838,56 @@ func (p *gatedProvider) Chat(
 
 func (p *gatedProvider) GetDefaultModel() string {
 	return "gated-provider-model"
+}
+
+type messageStateIsolationProvider struct{}
+
+func (p *messageStateIsolationProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	lastUser := ""
+	hasToolResult := false
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "tool" {
+			hasToolResult = true
+		}
+		if messages[i].Role == "user" && lastUser == "" {
+			lastUser = messages[i].Content
+		}
+	}
+
+	if strings.Contains(lastUser, "use-message") {
+		if !hasToolResult {
+			return &providers.LLMResponse{
+				ToolCalls: []providers.ToolCall{
+					{
+						ID:   "tc-msg-state",
+						Name: "message",
+						Arguments: map[string]any{
+							"content": "from message tool",
+						},
+					},
+				},
+			}, nil
+		}
+		return &providers.LLMResponse{
+			Content:   "",
+			ToolCalls: []providers.ToolCall{},
+		}, nil
+	}
+
+	return &providers.LLMResponse{
+		Content:   "plain-final",
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (p *messageStateIsolationProvider) GetDefaultModel() string {
+	return "message-state-isolation-model"
 }
 
 // mockCustomTool is a simple mock tool for registration testing
