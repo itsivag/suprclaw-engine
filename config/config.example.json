@@ -1,5 +1,6 @@
 {
   "agents": {
+    "max_parallel_runs": 8,
     "defaults": {
       "workspace": "~/.suprclaw/workspace",
       "restrict_to_workspace": true,

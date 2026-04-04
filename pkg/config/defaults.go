@@ -18,6 +18,7 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Agents: AgentsConfig{
+			MaxParallelRuns: 8,
 			Defaults: AgentDefaults{
 				Workspace:                 workspacePath,
 				RestrictToWorkspace:       true,

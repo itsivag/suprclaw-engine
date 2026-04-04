@@ -1157,6 +1157,333 @@ func TestAgentLoop_Stop(t *testing.T) {
 	}
 }
 
+func TestAgentLoopRun_AllowsParallelRunsAcrossDifferentAgents(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 2
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "gated-model"
+	cfg.Agents.Defaults.MaxToolIterations = 2
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+	cfg.Agents.List = []config.AgentConfig{
+		{ID: "main", Default: true},
+		{ID: "writer"},
+	}
+
+	msgBus := bus.NewMessageBus()
+	release := make(chan struct{})
+	provider := &gatedProvider{
+		started: make(chan string, 4),
+		release: release,
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user-1",
+		ChatID:   "chat-main",
+		Content:  "hello-main",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(main) error = %v", err)
+	}
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user-2",
+		ChatID:   "chat-writer",
+		Content:  "hello-writer",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "writer",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(writer) error = %v", err)
+	}
+
+	startedSeen := map[string]bool{}
+	startDeadline := time.After(2 * time.Second)
+	for len(startedSeen) < 2 {
+		select {
+		case started := <-provider.started:
+			startedSeen[started] = true
+		case <-startDeadline:
+			t.Fatalf("expected two concurrent provider starts, got %v", startedSeen)
+		}
+	}
+	if !startedSeen["hello-main"] || !startedSeen["hello-writer"] {
+		t.Fatalf("started set = %v, want both hello-main and hello-writer", startedSeen)
+	}
+
+	close(release)
+
+	gotChats := map[string]bool{}
+	responseDeadline := time.After(2 * time.Second)
+	for len(gotChats) < 2 {
+		select {
+		case out := <-msgBus.OutboundChan():
+			if out.ErrorCode != "" {
+				t.Fatalf("unexpected outbound error: %+v", out)
+			}
+			gotChats[out.ChatID] = true
+		case <-responseDeadline:
+			t.Fatalf("expected 2 outbound responses, got chats=%v", gotChats)
+		}
+	}
+	if !gotChats["chat-main"] || !gotChats["chat-writer"] {
+		t.Fatalf("outbound chats = %v, want chat-main and chat-writer", gotChats)
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
+func TestAgentLoopRun_BusyAgentReturnsRunInProgress(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 2
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "gated-model"
+	cfg.Agents.Defaults.MaxToolIterations = 2
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+
+	msgBus := bus.NewMessageBus()
+	release := make(chan struct{})
+	provider := &gatedProvider{
+		started: make(chan string, 2),
+		release: release,
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user-1",
+		ChatID:   "chat-1",
+		Content:  "first",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(first) error = %v", err)
+	}
+
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first run did not reach provider")
+	}
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user-2",
+		ChatID:   "chat-2",
+		Content:  "second",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(second) error = %v", err)
+	}
+
+	gotBusy := false
+	busyDeadline := time.After(2 * time.Second)
+	for !gotBusy {
+		select {
+		case out := <-msgBus.OutboundChan():
+			if out.ChatID != "chat-2" {
+				continue
+			}
+			if out.ErrorCode != ErrCodeRunInProgress {
+				t.Fatalf("chat-2 ErrorCode = %q, want %q", out.ErrorCode, ErrCodeRunInProgress)
+			}
+			gotBusy = true
+		case <-busyDeadline:
+			t.Fatal("timed out waiting for RUN_IN_PROGRESS on second request")
+		}
+	}
+
+	close(release)
+
+	gotFirstResponse := false
+	responseDeadline := time.After(2 * time.Second)
+	for !gotFirstResponse {
+		select {
+		case out := <-msgBus.OutboundChan():
+			if out.ChatID != "chat-1" {
+				continue
+			}
+			if out.ErrorCode != "" {
+				t.Fatalf("chat-1 unexpected error: %+v", out)
+			}
+			gotFirstResponse = true
+		case <-responseDeadline:
+			t.Fatal("timed out waiting for first request completion")
+		}
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
+func TestAgentLoopRun_BusyAgentSameSessionReturnsRunInProgress(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 2
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "gated-model"
+	cfg.Agents.Defaults.MaxToolIterations = 2
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+
+	msgBus := bus.NewMessageBus()
+	release := make(chan struct{})
+	provider := &gatedProvider{
+		started: make(chan string, 2),
+		release: release,
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	firstMessage := bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user-1",
+		ChatID:     "chat-shared",
+		SessionKey: "session-shared",
+		Content:    "first",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}
+	if err := msgBus.PublishInbound(context.Background(), firstMessage); err != nil {
+		t.Fatalf("PublishInbound(first) error = %v", err)
+	}
+
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first run did not reach provider")
+	}
+
+	secondMessage := firstMessage
+	secondMessage.Content = "second"
+	if err := msgBus.PublishInbound(context.Background(), secondMessage); err != nil {
+		t.Fatalf("PublishInbound(second) error = %v", err)
+	}
+
+	gotBusy := false
+	busyDeadline := time.After(2 * time.Second)
+	for !gotBusy {
+		select {
+		case out := <-msgBus.OutboundChan():
+			if out.ErrorCode == ErrCodeRunInProgress {
+				gotBusy = true
+			}
+		case <-busyDeadline:
+			t.Fatal("timed out waiting for RUN_IN_PROGRESS on same-session request")
+		}
+	}
+
+	close(release)
+
+	gotFinal := false
+	finalDeadline := time.After(2 * time.Second)
+	for !gotFinal {
+		select {
+		case out := <-msgBus.OutboundChan():
+			if out.ChatID != "chat-shared" {
+				continue
+			}
+			if out.ErrorCode == "" {
+				gotFinal = true
+			}
+		case <-finalDeadline:
+			t.Fatal("timed out waiting for first same-session request completion")
+		}
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
+func TestAgentLoopRun_WorkersShutdownOnCancelAndBusClose(t *testing.T) {
+	baseConfig := func(tmp string) *config.Config {
+		cfg := config.DefaultConfig()
+		cfg.Agents.MaxParallelRuns = 2
+		cfg.Agents.Defaults.Workspace = tmp
+		cfg.Agents.Defaults.Model = "test-model"
+		cfg.Agents.Defaults.ContextGuard.Enabled = false
+		return cfg
+	}
+
+	t.Run("context cancel", func(t *testing.T) {
+		msgBus := bus.NewMessageBus()
+		al := NewAgentLoop(baseConfig(t.TempDir()), msgBus, &mockProvider{})
+
+		runCtx, cancel := context.WithCancel(context.Background())
+		runDone := make(chan error, 1)
+		go func() { runDone <- al.Run(runCtx) }()
+
+		cancel()
+		select {
+		case err := <-runDone:
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Run() did not stop after context cancellation")
+		}
+	})
+
+	t.Run("bus close", func(t *testing.T) {
+		msgBus := bus.NewMessageBus()
+		al := NewAgentLoop(baseConfig(t.TempDir()), msgBus, &mockProvider{})
+
+		runDone := make(chan error, 1)
+		go func() { runDone <- al.Run(context.Background()) }()
+
+		msgBus.Close()
+		select {
+		case err := <-runDone:
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Run() did not stop after bus close")
+		}
+	})
+}
+
 // Mock implementations for testing
 
 type simpleMockProvider struct {
@@ -1256,6 +1583,43 @@ func (p *blockingCancelProvider) Chat(
 
 func (p *blockingCancelProvider) GetDefaultModel() string {
 	return "blocking-cancel-model"
+}
+
+type gatedProvider struct {
+	started chan string
+	release <-chan struct{}
+}
+
+func (p *gatedProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	lastContent := ""
+	if len(messages) > 0 {
+		lastContent = messages[len(messages)-1].Content
+	}
+	select {
+	case p.started <- lastContent:
+	default:
+	}
+
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	return &providers.LLMResponse{
+		Content:   "ok",
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (p *gatedProvider) GetDefaultModel() string {
+	return "gated-provider-model"
 }
 
 // mockCustomTool is a simple mock tool for registration testing

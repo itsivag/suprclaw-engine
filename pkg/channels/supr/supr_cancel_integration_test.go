@@ -63,6 +63,7 @@ func TestSuprRunStop_StopsActiveRunAndEmitsStoppedEvents(t *testing.T) {
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
+			MaxParallelRuns: 1,
 			Defaults: config.AgentDefaults{
 				Workspace:         tmpDir,
 				Model:             "blocking-model",

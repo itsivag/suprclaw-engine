@@ -54,6 +54,8 @@ type AgentLoop struct {
 	activeRequests sync.WaitGroup
 	// sessionLocks serializes concurrent runAgentLoop calls for the same session key
 	sessionLocks sync.Map
+	// agentRunLocks enforces a strict one-active-run-per-agent admission policy.
+	agentRunLocks sync.Map
 	// Context compaction / budget observability counters.
 	compactionTriggeredTotal atomic.Uint64
 	compactionStageFailTotal atomic.Uint64
@@ -67,6 +69,10 @@ type AgentLoop struct {
 type routeMetadata struct {
 	ResolvedAgentID string
 	RouteMatchedBy  string
+}
+
+type agentRunLock struct {
+	running atomic.Bool
 }
 
 // processOptions configures how a message is processed
@@ -332,108 +338,129 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 		return err
 	}
 
-	for al.running.Load() {
-		select {
-		case <-ctx.Done():
-			return nil
-		case msg, ok := <-al.bus.InboundChan():
-			if !ok {
-				return nil
-			}
-			// Process message
-			// TODO: Re-enable media cleanup after inbound media is properly consumed by the agent.
-			// Currently disabled because files are deleted before the LLM can access their content.
-			// defer func() {
-			// 	if al.mediaStore != nil && msg.MediaScope != "" {
-			// 		if releaseErr := al.mediaStore.ReleaseAll(msg.MediaScope); releaseErr != nil {
-			// 			logger.WarnCF("agent", "Failed to release media", map[string]any{
-			// 				"scope": msg.MediaScope,
-			// 				"error": releaseErr.Error(),
-			// 			})
-			// 		}
-			// 	}
-			// }()
+	workerCount := al.GetConfig().Agents.MaxParallelRuns
+	if workerCount <= 0 {
+		return fmt.Errorf("agents.max_parallel_runs must be > 0, got %d", workerCount)
+	}
 
-			response, modelUsed, routeMeta, err := al.processMessageDetailed(ctx, msg)
-			if err != nil {
-				var reqErr *RequestError
-				if errors.As(err, &reqErr) {
-					// Send typed error to client — not as assistant text
-					resolvedAgentID := reqErr.ResolvedAgentID
-					routeMatchedBy := reqErr.RouteMatchedBy
-					if routeMeta != nil {
-						if resolvedAgentID == "" {
-							resolvedAgentID = routeMeta.ResolvedAgentID
-						}
-						if routeMatchedBy == "" {
-							routeMatchedBy = routeMeta.RouteMatchedBy
-						}
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for i := 0; i < workerCount; i++ {
+		go func() {
+			defer workers.Done()
+			for al.running.Load() {
+				select {
+				case <-ctx.Done():
+					return
+				case msg, ok := <-al.bus.InboundChan():
+					if !ok {
+						return
 					}
-					al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-						Channel:         msg.Channel,
-						ChatID:          msg.ChatID,
-						ErrorCode:       reqErr.Code,
-						ErrorMessage:    reqErr.Message,
-						ResolvedAgentID: resolvedAgentID,
-						RouteMatchedBy:  routeMatchedBy,
-					})
-					continue
-				}
-				response = fmt.Sprintf("Error processing message: %v", err)
-			}
-
-			if response != "" {
-				// Check if the message tool already sent a response during this round.
-				// If so, skip publishing to avoid duplicate messages to the user.
-				// Use default agent's tools to check (message tool is shared).
-				alreadySent := false
-				defaultAgent := al.GetRegistry().GetDefaultAgent()
-				if defaultAgent != nil {
-					if tool, ok := defaultAgent.Tools.Get("message"); ok {
-						if mt, ok := tool.(*tools.MessageTool); ok {
-							alreadySent = mt.HasSentInRound()
-						}
-					}
-				}
-
-				if !alreadySent {
-					if msg.Channel == "supr" {
-						logger.InfoCF("agent", "Skipped legacy outbound response for supr (message.completed event is authoritative)",
-							map[string]any{
-								"channel":     msg.Channel,
-								"chat_id":     msg.ChatID,
-								"content_len": len(response),
-							})
-					} else {
-						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-							Channel:         msg.Channel,
-							ChatID:          msg.ChatID,
-							Content:         response,
-							ModelUsed:       modelUsed,
-							ResolvedAgentID: routeMetaValue(routeMeta, func(m routeMetadata) string { return m.ResolvedAgentID }),
-							RouteMatchedBy:  routeMetaValue(routeMeta, func(m routeMetadata) string { return m.RouteMatchedBy }),
-						})
-						logger.InfoCF("agent", "Published outbound response",
-							map[string]any{
-								"channel":     msg.Channel,
-								"chat_id":     msg.ChatID,
-								"content_len": len(response),
-							})
-					}
-				} else {
-					logger.DebugCF(
-						"agent",
-						"Skipped outbound (message tool already sent)",
-						map[string]any{"channel": msg.Channel},
-					)
+					al.handleInboundMessage(ctx, msg)
+				default:
+					time.Sleep(time.Microsecond * 200)
 				}
 			}
-		default:
-			time.Sleep(time.Microsecond * 200)
+		}()
+	}
+
+	workers.Wait()
+	return nil
+}
+
+func (al *AgentLoop) handleInboundMessage(ctx context.Context, msg bus.InboundMessage) {
+	// Process message
+	// TODO: Re-enable media cleanup after inbound media is properly consumed by the agent.
+	// Currently disabled because files are deleted before the LLM can access their content.
+	// defer func() {
+	// 	if al.mediaStore != nil && msg.MediaScope != "" {
+	// 		if releaseErr := al.mediaStore.ReleaseAll(msg.MediaScope); releaseErr != nil {
+	// 			logger.WarnCF("agent", "Failed to release media", map[string]any{
+	// 				"scope": msg.MediaScope,
+	// 				"error": releaseErr.Error(),
+	// 			})
+	// 		}
+	// 	}
+	// }()
+
+	response, modelUsed, routeMeta, err := al.processMessageDetailed(ctx, msg)
+	if err != nil {
+		var reqErr *RequestError
+		if errors.As(err, &reqErr) {
+			// Send typed error to client — not as assistant text
+			resolvedAgentID := reqErr.ResolvedAgentID
+			routeMatchedBy := reqErr.RouteMatchedBy
+			if routeMeta != nil {
+				if resolvedAgentID == "" {
+					resolvedAgentID = routeMeta.ResolvedAgentID
+				}
+				if routeMatchedBy == "" {
+					routeMatchedBy = routeMeta.RouteMatchedBy
+				}
+			}
+			al.bus.PublishOutbound(ctx, bus.OutboundMessage{
+				Channel:         msg.Channel,
+				ChatID:          msg.ChatID,
+				ErrorCode:       reqErr.Code,
+				ErrorMessage:    reqErr.Message,
+				ResolvedAgentID: resolvedAgentID,
+				RouteMatchedBy:  routeMatchedBy,
+			})
+			return
+		}
+		response = fmt.Sprintf("Error processing message: %v", err)
+	}
+
+	if response == "" {
+		return
+	}
+
+	// Check if the message tool already sent a response during this round.
+	// If so, skip publishing to avoid duplicate messages to the user.
+	// Use default agent's tools to check (message tool is shared).
+	alreadySent := false
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent != nil {
+		if tool, ok := defaultAgent.Tools.Get("message"); ok {
+			if mt, ok := tool.(*tools.MessageTool); ok {
+				alreadySent = mt.HasSentInRound()
+			}
 		}
 	}
 
-	return nil
+	if alreadySent {
+		logger.DebugCF(
+			"agent",
+			"Skipped outbound (message tool already sent)",
+			map[string]any{"channel": msg.Channel},
+		)
+		return
+	}
+
+	if msg.Channel == "supr" {
+		logger.InfoCF("agent", "Skipped legacy outbound response for supr (message.completed event is authoritative)",
+			map[string]any{
+				"channel":     msg.Channel,
+				"chat_id":     msg.ChatID,
+				"content_len": len(response),
+			})
+		return
+	}
+
+	al.bus.PublishOutbound(ctx, bus.OutboundMessage{
+		Channel:         msg.Channel,
+		ChatID:          msg.ChatID,
+		Content:         response,
+		ModelUsed:       modelUsed,
+		ResolvedAgentID: routeMetaValue(routeMeta, func(m routeMetadata) string { return m.ResolvedAgentID }),
+		RouteMatchedBy:  routeMetaValue(routeMeta, func(m routeMetadata) string { return m.RouteMatchedBy }),
+	})
+	logger.InfoCF("agent", "Published outbound response",
+		map[string]any{
+			"channel":     msg.Channel,
+			"chat_id":     msg.ChatID,
+			"content_len": len(response),
+		})
 }
 
 func (al *AgentLoop) Stop() {
@@ -962,6 +989,16 @@ func (al *AgentLoop) processMessageDetailed(
 		ResolvedAgentID: route.AgentID,
 		RouteMatchedBy:  route.MatchedBy,
 	}
+	releaseAgentLock, locked := al.tryAcquireAgentRun(route.AgentID)
+	if !locked {
+		return "", "", routeMeta, &RequestError{
+			Code:            ErrCodeRunInProgress,
+			Message:         fmt.Sprintf("agent %q already has an active run", route.AgentID),
+			ResolvedAgentID: routeMeta.ResolvedAgentID,
+			RouteMatchedBy:  routeMeta.RouteMatchedBy,
+		}
+	}
+	defer releaseAgentLock()
 
 	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
 	if tool, ok := agent.Tools.Get("message"); ok {
@@ -1063,6 +1100,17 @@ func resolveScopeKey(route routing.ResolvedRoute, msgSessionKey string) string {
 		return msgSessionKey
 	}
 	return route.SessionKey
+}
+
+func (al *AgentLoop) tryAcquireAgentRun(agentID string) (func(), bool) {
+	v, _ := al.agentRunLocks.LoadOrStore(agentID, &agentRunLock{})
+	lock := v.(*agentRunLock)
+	if !lock.running.CompareAndSwap(false, true) {
+		return nil, false
+	}
+	return func() {
+		lock.running.Store(false)
+	}, true
 }
 
 func (al *AgentLoop) processSystemMessage(

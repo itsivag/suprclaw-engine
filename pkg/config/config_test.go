@@ -580,6 +580,13 @@ func TestDefaultConfig_ContextGuardDefaults(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_MaxParallelRuns(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Agents.MaxParallelRuns != 8 {
+		t.Fatalf("Agents.MaxParallelRuns = %d, want 8", cfg.Agents.MaxParallelRuns)
+	}
+}
+
 func TestLoadConfig_ContextGuardFromEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.json")
@@ -625,6 +632,48 @@ func TestLoadConfig_ContextGuardFromEnv(t *testing.T) {
 	}
 	if guard.PreserveRecentMessages != 4 {
 		t.Fatalf("ContextGuard.PreserveRecentMessages = %d, want 4", guard.PreserveRecentMessages)
+	}
+}
+
+func TestLoadConfig_MaxParallelRunsFromEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "agents": {"defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20}},
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	t.Setenv("SUPRCLAW_AGENTS_MAX_PARALLEL_RUNS", "3")
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.Agents.MaxParallelRuns != 3 {
+		t.Fatalf("Agents.MaxParallelRuns = %d, want 3", cfg.Agents.MaxParallelRuns)
+	}
+}
+
+func TestLoadConfig_MaxParallelRunsInvalidReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "agents": {"max_parallel_runs": 0, "defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20}},
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Fatal("expected LoadConfig() to fail for agents.max_parallel_runs <= 0")
+	}
+	if !strings.Contains(err.Error(), "agents.max_parallel_runs must be > 0") {
+		t.Fatalf("error = %v, want max_parallel_runs validation error", err)
 	}
 }
 
@@ -911,11 +960,11 @@ func TestSaveConfig_MixedKeys(t *testing.T) {
 	mustSetupSSHKey(t)
 
 	// Pre-encrypt one key so we have a genuine enc:// value to put in the config.
-	if err := SaveConfig(cfgPath, &Config{
-		ModelList: []ModelConfig{
-			{ModelName: "pre", Model: "openai/gpt-4", APIKey: "sk-already-plain"},
-		},
-	}); err != nil {
+	preCfg := DefaultConfig()
+	preCfg.ModelList = []ModelConfig{
+		{ModelName: "pre", Model: "openai/gpt-4", APIKey: "sk-already-plain"},
+	}
+	if err := SaveConfig(cfgPath, preCfg); err != nil {
 		t.Fatalf("setup SaveConfig: %v", err)
 	}
 	raw, _ := os.ReadFile(cfgPath)
@@ -941,12 +990,11 @@ func TestSaveConfig_MixedKeys(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte("sk-from-file"), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	cfg := &Config{
-		ModelList: []ModelConfig{
-			{ModelName: "plain", Model: "openai/gpt-4", APIKey: "sk-new-plaintext"},
-			{ModelName: "enc", Model: "openai/gpt-4", APIKey: alreadyEncrypted},
-			{ModelName: "file", Model: "openai/gpt-4", APIKey: "file://api.key"},
-		},
+	cfg := DefaultConfig()
+	cfg.ModelList = []ModelConfig{
+		{ModelName: "plain", Model: "openai/gpt-4", APIKey: "sk-new-plaintext"},
+		{ModelName: "enc", Model: "openai/gpt-4", APIKey: alreadyEncrypted},
+		{ModelName: "file", Model: "openai/gpt-4", APIKey: "file://api.key"},
 	}
 	if err := SaveConfig(cfgPath, cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
@@ -998,11 +1046,11 @@ func TestLoadConfig_MixedKeys_NoPassphrase(t *testing.T) {
 	// First encrypt a key so we have a real enc:// value.
 	t.Setenv("SUPRCLAW_KEY_PASSPHRASE", "test-passphrase")
 	mustSetupSSHKey(t)
-	if err := SaveConfig(cfgPath, &Config{
-		ModelList: []ModelConfig{
-			{ModelName: "m", Model: "openai/gpt-4", APIKey: "sk-secret"},
-		},
-	}); err != nil {
+	encCfg := DefaultConfig()
+	encCfg.ModelList = []ModelConfig{
+		{ModelName: "m", Model: "openai/gpt-4", APIKey: "sk-secret"},
+	}
+	if err := SaveConfig(cfgPath, encCfg); err != nil {
 		t.Fatalf("setup SaveConfig: %v", err)
 	}
 	raw, _ := os.ReadFile(cfgPath)

@@ -151,8 +151,9 @@ func (c Config) MarshalJSON() ([]byte, error) {
 }
 
 type AgentsConfig struct {
-	Defaults AgentDefaults `json:"defaults"`
-	List     []AgentConfig `json:"list,omitempty"`
+	Defaults        AgentDefaults `json:"defaults"`
+	List            []AgentConfig `json:"list,omitempty"`
+	MaxParallelRuns int           `json:"max_parallel_runs,omitempty" env:"SUPRCLAW_AGENTS_MAX_PARALLEL_RUNS"`
 }
 
 // AgentModelConfig supports both string and structured model config.
@@ -843,8 +844,18 @@ func LoadConfig(path string) (*Config, error) {
 	if err := cfg.ValidateModelList(); err != nil {
 		return nil, err
 	}
+	if err := cfg.validateAgentsConfig(); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
+}
+
+func (c *Config) validateAgentsConfig() error {
+	if c.Agents.MaxParallelRuns <= 0 {
+		return fmt.Errorf("agents.max_parallel_runs must be > 0, got %d", c.Agents.MaxParallelRuns)
+	}
+	return nil
 }
 
 // encryptPlaintextAPIKeys returns a copy of models with plaintext api_key values
