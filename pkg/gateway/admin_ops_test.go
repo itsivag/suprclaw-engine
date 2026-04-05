@@ -70,7 +70,7 @@ func TestAdminUpsertAgent_SyncsRuntimeRegistry(t *testing.T) {
 	if !found {
 		t.Fatal("writer heartbeat job should be created on new agent add")
 	}
-	if job.IntervalMinutes != 30 || job.IdleWindowMinutes != 15 || job.Timezone != "UTC" {
+	if job.IntervalMinutes != 30 || job.IdleWindowMinutes != 15 {
 		t.Fatalf("unexpected default heartbeat job: %+v", job)
 	}
 }

@@ -486,6 +486,7 @@ func DefaultConfig() *Config {
 		Voice: VoiceConfig{
 			EchoTranscription: false,
 		},
+		Timezone: "UTC",
 		Heartbeat: HeartbeatConfig{
 			Enabled:           false,
 			MinimumGapMinutes: 5,

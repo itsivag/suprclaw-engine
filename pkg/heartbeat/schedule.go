@@ -2,6 +2,7 @@ package heartbeat
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -9,7 +10,7 @@ import (
 type HeartbeatScheduleConfig struct {
 	ActiveHoursStart string // "08:00"
 	ActiveHoursEnd   string // "22:00"
-	Timezone         string // IANA e.g. "America/New_York"; empty = UTC
+	Timezone         string // IANA e.g. "America/New_York"
 }
 
 // IsWithinActiveHours checks whether now falls within [start, end) in the
@@ -24,8 +25,7 @@ func IsWithinActiveHours(cfg HeartbeatScheduleConfig, now time.Time) (bool, time
 
 	loc, err := loadLocation(cfg.Timezone)
 	if err != nil {
-		// Fall back to UTC on bad timezone config.
-		loc = time.UTC
+		panic(fmt.Sprintf("heartbeat schedule timezone invariant violated: %v", err))
 	}
 
 	localNow := now.In(loc)
@@ -119,8 +119,8 @@ func IsIdleWindowActive(lastActivityAt time.Time, idleWindowMin int, now time.Ti
 // --- helpers ---
 
 func loadLocation(tz string) (*time.Location, error) {
-	if tz == "" {
-		return time.UTC, nil
+	if strings.TrimSpace(tz) == "" {
+		return nil, fmt.Errorf("timezone is required")
 	}
 	return time.LoadLocation(tz)
 }

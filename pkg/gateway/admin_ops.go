@@ -72,7 +72,6 @@ func defaultHeartbeatJobForAgent(agentID string) config.HeartbeatJobConfig {
 		SkipIfUnchanged:    true,
 		ActiveHoursStart:   "08:00",
 		ActiveHoursEnd:     "22:00",
-		Timezone:           "UTC",
 		ShowOk:             false,
 		AckMaxChars:        60,
 		AdaptiveBackoff:    true,

@@ -455,6 +455,7 @@
   "voice": {
     "echo_transcription": false
   },
+  "timezone": "UTC",
   "heartbeat": {
     "enabled": false,
     "minimum_gap_minutes": 5,
@@ -467,7 +468,6 @@
         "skip_if_unchanged": true,
         "active_hours_start": "08:00",
         "active_hours_end": "22:00",
-        "timezone": "UTC",
         "show_ok": false,
         "ack_max_chars": 60,
         "adaptive_backoff": true,

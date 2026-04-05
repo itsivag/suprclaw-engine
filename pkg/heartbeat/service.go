@@ -3,6 +3,7 @@ package heartbeat
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 // HeartbeatService manages the heartbeat lifecycle and scheduling loop.
 type HeartbeatService struct {
 	cfg       config.HeartbeatConfig
+	timezone  string
 	workspace string
 	agentLoop HeartbeatExecutor
 	msgBus    *bus.MessageBus
@@ -36,6 +38,7 @@ type heartbeatJobRuntime struct {
 // NewHeartbeatService creates a new service. Call Start() to begin scheduling.
 func NewHeartbeatService(
 	cfg config.HeartbeatConfig,
+	timezone string,
 	workspace string,
 	agentLoop HeartbeatExecutor,
 	msgBus *bus.MessageBus,
@@ -43,6 +46,7 @@ func NewHeartbeatService(
 ) *HeartbeatService {
 	return &HeartbeatService{
 		cfg:       cfg,
+		timezone:  timezone,
 		workspace: workspace,
 		agentLoop: agentLoop,
 		msgBus:    msgBus,
@@ -63,7 +67,7 @@ func (s *HeartbeatService) Start() error {
 	if !s.cfg.Enabled {
 		return nil
 	}
-	if err := validateConfig(s.cfg); err != nil {
+	if err := validateConfig(s.cfg, s.timezone); err != nil {
 		return err
 	}
 
@@ -207,7 +211,7 @@ func (s *HeartbeatService) buildRuntimeJobs(states map[string]*HeartbeatState) [
 		}
 		jobs = append(jobs, heartbeatJobRuntime{
 			index: i,
-			cfg:   heartbeatRunConfigFromJob(jobCfg, s.workspace),
+			cfg:   heartbeatRunConfigFromJob(jobCfg, s.workspace, s.timezone),
 			state: jobState,
 		})
 	}
@@ -262,7 +266,13 @@ func (s *HeartbeatService) jobDueAt(job heartbeatJobRuntime, now time.Time) time
 }
 
 // Validate returns an error if the config is invalid.
-func validateConfig(cfg config.HeartbeatConfig) error {
+func validateConfig(cfg config.HeartbeatConfig, timezone string) error {
+	if strings.TrimSpace(timezone) == "" {
+		return fmt.Errorf("heartbeat timezone is required")
+	}
+	if _, err := time.LoadLocation(timezone); err != nil {
+		return fmt.Errorf("heartbeat timezone %q is invalid: %w", timezone, err)
+	}
 	if cfg.MinimumGapMinutes <= 0 {
 		return fmt.Errorf("heartbeat minimum_gap_minutes must be > 0 (got %d)", cfg.MinimumGapMinutes)
 	}

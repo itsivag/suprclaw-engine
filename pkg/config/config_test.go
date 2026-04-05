@@ -679,6 +679,9 @@ func TestLoadConfig_MaxParallelRunsInvalidReturnsError(t *testing.T) {
 
 func TestDefaultConfig_HeartbeatSchema(t *testing.T) {
 	cfg := DefaultConfig()
+	if cfg.Timezone != "UTC" {
+		t.Fatalf("Timezone = %q, want UTC", cfg.Timezone)
+	}
 	if cfg.Heartbeat.MinimumGapMinutes != 5 {
 		t.Fatalf("Heartbeat.MinimumGapMinutes = %d, want 5", cfg.Heartbeat.MinimumGapMinutes)
 	}
@@ -695,12 +698,13 @@ func TestLoadConfig_HeartbeatMultiJobValid(t *testing.T) {
     "defaults": {"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20},
     "list": [{"id":"main"},{"id":"ops"}]
   },
+  "timezone": "UTC",
   "heartbeat": {
     "enabled": true,
     "minimum_gap_minutes": 5,
     "jobs": [
       {"agent_id":"main","interval_minutes": 5},
-      {"agent_id":"ops","interval_minutes": 10,"active_hours_start":"08:00","active_hours_end":"22:00","timezone":"UTC"}
+      {"agent_id":"ops","interval_minutes": 10,"active_hours_start":"08:00","active_hours_end":"22:00"}
     ]
   },
   "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
@@ -749,11 +753,13 @@ func TestLoadConfig_HeartbeatRejectsLegacyShape(t *testing.T) {
 func TestLoadConfig_HeartbeatRejectsInvalidStates(t *testing.T) {
 	tests := []struct {
 		name      string
+		timezone  string
 		heartbeat string
 		wantErr   string
 	}{
 		{
-			name: "duplicate agent_id",
+			name:     "duplicate agent_id",
+			timezone: `"UTC"`,
 			heartbeat: `{
         "enabled": true,
         "minimum_gap_minutes": 5,
@@ -765,7 +771,8 @@ func TestLoadConfig_HeartbeatRejectsInvalidStates(t *testing.T) {
 			wantErr: "duplicates",
 		},
 		{
-			name: "invalid minimum gap",
+			name:     "invalid minimum gap",
+			timezone: `"UTC"`,
 			heartbeat: `{
         "enabled": true,
         "minimum_gap_minutes": 0,
@@ -774,7 +781,8 @@ func TestLoadConfig_HeartbeatRejectsInvalidStates(t *testing.T) {
 			wantErr: "minimum_gap_minutes must be > 0",
 		},
 		{
-			name: "unknown agent",
+			name:     "unknown agent",
+			timezone: `"UTC"`,
 			heartbeat: `{
         "enabled": true,
         "minimum_gap_minutes": 5,
@@ -783,7 +791,8 @@ func TestLoadConfig_HeartbeatRejectsInvalidStates(t *testing.T) {
 			wantErr: "does not match a configured agent",
 		},
 		{
-			name: "invalid interval",
+			name:     "invalid interval",
+			timezone: `"UTC"`,
 			heartbeat: `{
         "enabled": true,
         "minimum_gap_minutes": 5,
@@ -792,13 +801,44 @@ func TestLoadConfig_HeartbeatRejectsInvalidStates(t *testing.T) {
 			wantErr: "interval_minutes must be at least 5",
 		},
 		{
-			name: "invalid active hours",
+			name:     "invalid active hours",
+			timezone: `"UTC"`,
 			heartbeat: `{
         "enabled": true,
         "minimum_gap_minutes": 5,
         "jobs": [{"agent_id":"main","interval_minutes":5,"active_hours_start":"99:00","active_hours_end":"22:00"}]
       }`,
 			wantErr: "active_hours_start",
+		},
+		{
+			name:     "missing root timezone",
+			timezone: `""`,
+			heartbeat: `{
+        "enabled": true,
+        "minimum_gap_minutes": 5,
+        "jobs": [{"agent_id":"main","interval_minutes":5}]
+      }`,
+			wantErr: "timezone is required",
+		},
+		{
+			name:     "invalid root timezone",
+			timezone: `"Invalid/Zone"`,
+			heartbeat: `{
+        "enabled": true,
+        "minimum_gap_minutes": 5,
+        "jobs": [{"agent_id":"main","interval_minutes":5}]
+      }`,
+			wantErr: "timezone \"Invalid/Zone\" is invalid",
+		},
+		{
+			name:     "legacy job timezone rejected",
+			timezone: `"UTC"`,
+			heartbeat: `{
+        "enabled": true,
+        "minimum_gap_minutes": 5,
+        "jobs": [{"agent_id":"main","interval_minutes":5,"timezone":"UTC"}]
+      }`,
+			wantErr: "heartbeat.jobs: unknown field \"timezone\"",
 		},
 	}
 
@@ -811,6 +851,7 @@ func TestLoadConfig_HeartbeatRejectsInvalidStates(t *testing.T) {
     "defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20},
     "list": [{"id":"main"}]
   },
+  "timezone": ` + tc.timezone + `,
   "heartbeat": ` + tc.heartbeat + `,
   "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
 }`

@@ -288,7 +288,7 @@ func truncate(s string, n int) string {
 }
 
 // heartbeatRunConfigFromJob builds a HeartbeatRunConfig from one heartbeat job.
-func heartbeatRunConfigFromJob(job config.HeartbeatJobConfig, workspace string) HeartbeatRunConfig {
+func heartbeatRunConfigFromJob(job config.HeartbeatJobConfig, workspace, timezone string) HeartbeatRunConfig {
 	return HeartbeatRunConfig{
 		AgentID:            job.AgentID,
 		Workspace:          workspace,
@@ -303,7 +303,7 @@ func heartbeatRunConfigFromJob(job config.HeartbeatJobConfig, workspace string) 
 		ScheduleCfg: HeartbeatScheduleConfig{
 			ActiveHoursStart: job.ActiveHoursStart,
 			ActiveHoursEnd:   job.ActiveHoursEnd,
-			Timezone:         job.Timezone,
+			Timezone:         timezone,
 		},
 	}
 }

@@ -89,6 +89,7 @@ type Config struct {
 	Tools     ToolsConfig     `json:"tools"`
 	Devices   DevicesConfig   `json:"devices"`
 	Voice     VoiceConfig     `json:"voice"`
+	Timezone  string          `json:"timezone,omitempty" env:"SUPRCLAW_TIMEZONE"`
 	Heartbeat HeartbeatConfig `json:"heartbeat,omitempty"`
 	// BuildInfo contains build-time version information
 	BuildInfo BuildInfo `json:"build_info,omitempty"`
@@ -114,7 +115,6 @@ type HeartbeatJobConfig struct {
 	// Delivery
 	ActiveHoursStart string `json:"active_hours_start,omitempty"` // "08:00"
 	ActiveHoursEnd   string `json:"active_hours_end,omitempty"`   // "22:00"
-	Timezone         string `json:"timezone,omitempty"`           // IANA: "America/New_York"
 	ShowOk           bool   `json:"show_ok"`                      // deliver HEARTBEAT_OK; default false
 	AckMaxChars      int    `json:"ack_max_chars"`                // strip trailing ack up to N chars; default 60
 
@@ -175,7 +175,6 @@ func (j *HeartbeatJobConfig) UnmarshalJSON(data []byte) error {
 		"skip_if_unchanged":    {},
 		"active_hours_start":   {},
 		"active_hours_end":     {},
-		"timezone":             {},
 		"show_ok":              {},
 		"ack_max_chars":        {},
 		"adaptive_backoff":     {},
@@ -931,11 +930,25 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) validateAgentsConfig() error {
+	if err := c.validateTimezone(); err != nil {
+		return err
+	}
 	if c.Agents.MaxParallelRuns <= 0 {
 		return fmt.Errorf("agents.max_parallel_runs must be > 0, got %d", c.Agents.MaxParallelRuns)
 	}
 	if err := c.validateHeartbeatConfig(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (c *Config) validateTimezone() error {
+	tz := strings.TrimSpace(c.Timezone)
+	if tz == "" {
+		return fmt.Errorf("timezone is required")
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return fmt.Errorf("timezone %q is invalid: %w", c.Timezone, err)
 	}
 	return nil
 }
@@ -998,11 +1011,6 @@ func (c *Config) validateHeartbeatConfig() error {
 			}
 			if err := validateHeartbeatHHMM(job.ActiveHoursEnd); err != nil {
 				return fmt.Errorf("heartbeat.jobs[%d].active_hours_end: %w", i, err)
-			}
-		}
-		if tz := strings.TrimSpace(job.Timezone); tz != "" {
-			if _, err := time.LoadLocation(tz); err != nil {
-				return fmt.Errorf("heartbeat.jobs[%d].timezone %q is invalid: %w", i, job.Timezone, err)
 			}
 		}
 	}

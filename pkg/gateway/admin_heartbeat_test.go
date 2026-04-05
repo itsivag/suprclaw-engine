@@ -96,6 +96,14 @@ func TestAdminHeartbeatConfigAndJobsCRUD(t *testing.T) {
 		t.Fatalf("PUT job status = %d, want 200, body=%s", putJobRec.Code, putJobRec.Body.String())
 	}
 
+	postLegacyTimezoneReq := httptest.NewRequest(http.MethodPost, "/api/admin/heartbeat/jobs", bytes.NewBufferString(`{"agent_id":"writer","interval_minutes":5,"timezone":"UTC"}`))
+	postLegacyTimezoneReq.Header.Set("Authorization", "Bearer test-secret")
+	postLegacyTimezoneRec := httptest.NewRecorder()
+	mux.ServeHTTP(postLegacyTimezoneRec, postLegacyTimezoneReq)
+	if postLegacyTimezoneRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST legacy timezone status = %d, want 400, body=%s", postLegacyTimezoneRec.Code, postLegacyTimezoneRec.Body.String())
+	}
+
 	delMissingReq := httptest.NewRequest(http.MethodDelete, "/api/admin/heartbeat/jobs/missing", nil)
 	delMissingReq.Header.Set("Authorization", "Bearer test-secret")
 	delMissingRec := httptest.NewRecorder()
@@ -259,5 +267,6 @@ func minimalAdminConfig(workspace string) *config.Config {
 				APIKey:    "x",
 			},
 		},
+		Timezone: "UTC",
 	}
 }

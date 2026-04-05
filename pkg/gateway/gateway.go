@@ -267,6 +267,7 @@ func setupAndStartServices(
 	if cfg.Heartbeat.Enabled {
 		runningServices.HeartbeatService = heartbeat.NewHeartbeatService(
 			cfg.Heartbeat,
+			cfg.Timezone,
 			cfg.WorkspacePath(),
 			agentLoop,
 			msgBus,
@@ -489,6 +490,7 @@ func restartServices(
 	if cfg.Heartbeat.Enabled {
 		runningServices.HeartbeatService = heartbeat.NewHeartbeatService(
 			cfg.Heartbeat,
+			cfg.Timezone,
 			cfg.WorkspacePath(),
 			al,
 			msgBus,

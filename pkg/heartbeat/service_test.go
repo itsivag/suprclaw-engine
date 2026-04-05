@@ -91,7 +91,57 @@ func TestValidateConfigRejectsDuplicateAgents(t *testing.T) {
 			{AgentID: "main", IntervalMinutes: 5},
 		},
 	}
-	if err := validateConfig(cfg); err == nil {
+	if err := validateConfig(cfg, "UTC"); err == nil {
 		t.Fatal("expected validateConfig() to fail for duplicate agent_id")
+	}
+}
+
+func TestValidateConfigRejectsInvalidTimezone(t *testing.T) {
+	cfg := config.HeartbeatConfig{
+		Enabled:           true,
+		MinimumGapMinutes: 5,
+		Jobs: []config.HeartbeatJobConfig{
+			{AgentID: "main", IntervalMinutes: 5},
+		},
+	}
+	if err := validateConfig(cfg, "Invalid/Timezone"); err == nil {
+		t.Fatal("expected validateConfig() to fail for invalid timezone")
+	}
+}
+
+func TestBuildRuntimeJobs_UsesGlobalTimezone(t *testing.T) {
+	svc := &HeartbeatService{
+		timezone:  "Asia/Kolkata",
+		workspace: "/tmp",
+		cfg: config.HeartbeatConfig{
+			Enabled:           true,
+			MinimumGapMinutes: 5,
+			Jobs: []config.HeartbeatJobConfig{
+				{
+					AgentID:          "main",
+					IntervalMinutes:  5,
+					ActiveHoursStart: "08:00",
+					ActiveHoursEnd:   "22:00",
+				},
+			},
+		},
+	}
+
+	jobStates := map[string]*HeartbeatState{
+		"main": {LastRunAtMs: time.Date(2026, 1, 2, 0, 50, 0, 0, time.UTC).UnixMilli()},
+	}
+	jobs := svc.buildRuntimeJobs(jobStates)
+	if len(jobs) != 1 {
+		t.Fatalf("jobs len = %d, want 1", len(jobs))
+	}
+	if jobs[0].cfg.ScheduleCfg.Timezone != "Asia/Kolkata" {
+		t.Fatalf("runtime timezone = %q, want Asia/Kolkata", jobs[0].cfg.ScheduleCfg.Timezone)
+	}
+
+	now := time.Date(2026, 1, 2, 1, 0, 0, 0, time.UTC) // 06:30 in Asia/Kolkata
+	due := svc.jobDueAt(jobs[0], now)
+	want := time.Date(2026, 1, 2, 2, 30, 0, 0, time.UTC) // 08:00 in Asia/Kolkata
+	if !due.Equal(want) {
+		t.Fatalf("job due = %s, want %s", due.Format(time.RFC3339), want.Format(time.RFC3339))
 	}
 }
