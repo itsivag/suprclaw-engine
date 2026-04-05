@@ -7,6 +7,7 @@ const (
 	ErrCodeContextBudgetUnfit       = "CONTEXT_BUDGET_UNFIT"
 	ErrCodeAgentNotFound            = "AGENT_NOT_FOUND"
 	ErrCodeRunInProgress            = "RUN_IN_PROGRESS"
+	ErrCodeInvalidSessionKey        = "INVALID_SESSION_KEY"
 )
 
 // RequestError is a typed, client-visible error for per-request validation failures.

@@ -12,6 +12,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/logger"
+	"github.com/itsivag/suprclaw/pkg/routing"
 	"github.com/itsivag/suprclaw/pkg/state"
 )
 
@@ -256,7 +257,7 @@ func pruneLastTurn(deps RunnerDeps, agentID string) error {
 	if deps.AgentLoop == nil {
 		return nil
 	}
-	sessionKey := fmt.Sprintf("agent:%s:main", agentID)
+	sessionKey := routing.BuildAgentHeartbeatSessionKey(agentID)
 	return deps.AgentLoop.PruneLastTurn(agentID, sessionKey)
 }
 

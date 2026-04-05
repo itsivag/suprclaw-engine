@@ -42,6 +42,11 @@ func BuildAgentMainSessionKey(agentID string) string {
 	return fmt.Sprintf("agent:%s:%s", NormalizeAgentID(agentID), DefaultMainKey)
 }
 
+// BuildAgentHeartbeatSessionKey returns "agent:<agentId>:heartbeat".
+func BuildAgentHeartbeatSessionKey(agentID string) string {
+	return fmt.Sprintf("agent:%s:%s", NormalizeAgentID(agentID), DefaultHeartbeatKey)
+}
+
 // BuildAgentPeerSessionKey constructs a session key based on agent, channel, peer, and DM scope.
 func BuildAgentPeerSessionKey(params SessionKeyParams) string {
 	agentID := NormalizeAgentID(params.AgentID)
@@ -134,6 +139,15 @@ func IsSubagentSessionKey(sessionKey string) bool {
 		return false
 	}
 	return strings.HasPrefix(strings.ToLower(parsed.Rest), "subagent:")
+}
+
+// IsHeartbeatSessionKey returns true when the key is the reserved heartbeat namespace.
+func IsHeartbeatSessionKey(sessionKey string) bool {
+	parsed := ParseAgentSessionKey(strings.TrimSpace(sessionKey))
+	if parsed == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(parsed.Rest), DefaultHeartbeatKey)
 }
 
 func normalizeChannel(channel string) string {

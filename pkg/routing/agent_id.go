@@ -6,10 +6,11 @@ import (
 )
 
 const (
-	DefaultAgentID   = "main"
-	DefaultMainKey   = "main"
-	DefaultAccountID = "default"
-	MaxAgentIDLength = 64
+	DefaultAgentID      = "main"
+	DefaultMainKey      = "main"
+	DefaultHeartbeatKey = "heartbeat"
+	DefaultAccountID    = "default"
+	MaxAgentIDLength    = 64
 )
 
 var (

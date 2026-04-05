@@ -1436,6 +1436,251 @@ func TestAgentLoopRun_BusyAgentSameSessionReturnsRunInProgress(t *testing.T) {
 	}
 }
 
+func TestAgentLoopRun_RejectsReservedHeartbeatSessionKey(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 1
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "mock-model"
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+
+	msgBus := bus.NewMessageBus()
+	provider := &recordingProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user-1",
+		ChatID:     "chat-1",
+		SessionKey: routing.BuildAgentHeartbeatSessionKey("main"),
+		Content:    "hello",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	select {
+	case out := <-msgBus.OutboundChan():
+		if out.ErrorCode != ErrCodeInvalidSessionKey {
+			t.Fatalf("ErrorCode = %q, want %q", out.ErrorCode, ErrCodeInvalidSessionKey)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for invalid session key error")
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
+func TestProcessHeartbeat_UsesHeartbeatSessionIsolation(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "mock-model"
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingProvider{})
+
+	if _, err := al.ProcessHeartbeat(context.Background(), "main", "heartbeat prompt", "telegram", "chat-1", 0); err != nil {
+		t.Fatalf("ProcessHeartbeat() error = %v", err)
+	}
+
+	agent := al.GetRegistry().GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("default agent is nil")
+	}
+	heartbeatSession := routing.BuildAgentHeartbeatSessionKey(agent.ID)
+	mainSession := routing.BuildAgentMainSessionKey(agent.ID)
+
+	if got := len(agent.Sessions.GetHistory(heartbeatSession)); got == 0 {
+		t.Fatalf("heartbeat session history len = %d, want > 0", got)
+	}
+	if got := len(agent.Sessions.GetHistory(mainSession)); got != 0 {
+		t.Fatalf("main session history len = %d, want 0", got)
+	}
+}
+
+func TestAgentLoopRun_HeartbeatAndChatSameAgentRunConcurrently(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 2
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "gated-model"
+	cfg.Agents.Defaults.MaxToolIterations = 2
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+	cfg.Session.DMScope = "main"
+
+	msgBus := bus.NewMessageBus()
+	release := make(chan struct{})
+	provider := &gatedProvider{
+		started: make(chan string, 4),
+		release: release,
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	heartbeatDone := make(chan error, 1)
+	go func() {
+		_, err := al.ProcessHeartbeat(context.Background(), "main", "heartbeat probe", "telegram", "chat-main", 0)
+		heartbeatDone <- err
+	}()
+
+	waitForStartedMessage(t, provider.started, "heartbeat probe", 2*time.Second)
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user-2",
+		ChatID:   "chat-main",
+		Content:  "live user chat",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(chat) error = %v", err)
+	}
+
+	waitForStartedMessage(t, provider.started, "live user chat", 2*time.Second)
+
+	select {
+	case out := <-msgBus.OutboundChan():
+		if out.ChatID == "chat-main" && out.ErrorCode == ErrCodeRunInProgress {
+			t.Fatalf("unexpected run-in-progress while heartbeat active: %+v", out)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case err := <-heartbeatDone:
+		if err != nil {
+			t.Fatalf("heartbeat error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for heartbeat completion")
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
+func TestAgentLoopRunStop_OnlyCancelsChatWhenHeartbeatOverlaps(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 2
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "gated-model"
+	cfg.Agents.Defaults.MaxToolIterations = 2
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+	cfg.Session.DMScope = "main"
+
+	msgBus := bus.NewMessageBus()
+	release := make(chan struct{})
+	provider := &gatedProvider{
+		started: make(chan string, 4),
+		release: release,
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	heartbeatDone := make(chan error, 1)
+	go func() {
+		_, err := al.ProcessHeartbeat(context.Background(), "main", "heartbeat overlap", "supr", "supr:sess-shared", 0)
+		heartbeatDone <- err
+	}()
+
+	waitForStartedMessage(t, provider.started, "heartbeat overlap", 2*time.Second)
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "supr",
+		SenderID: "user-3",
+		ChatID:   "supr:sess-shared",
+		Content:  "chat overlap",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(chat) error = %v", err)
+	}
+
+	waitForStartedMessage(t, provider.started, "chat overlap", 2*time.Second)
+
+	cancelled, _, err := al.CancelRun("supr", "supr:sess-shared", "", "stop chat")
+	if err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	if !cancelled {
+		t.Fatal("CancelRun() cancelled = false, want true")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, _, err := al.CancelRun("supr", "supr:sess-shared", "", "probe")
+		if err != nil {
+			var controlErr *channels.RunControlError
+			if errors.As(err, &controlErr) && controlErr.Code == "no_active_run" {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for chat run to clear active run state")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	select {
+	case err := <-heartbeatDone:
+		t.Fatalf("heartbeat finished early after chat cancel: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case err := <-heartbeatDone:
+		if err != nil {
+			t.Fatalf("heartbeat error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for heartbeat completion")
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
 func TestAgentLoopRun_WorkersShutdownOnCancelAndBusClose(t *testing.T) {
 	baseConfig := func(tmp string) *config.Config {
 		cfg := config.DefaultConfig()
@@ -1838,6 +2083,21 @@ func (p *gatedProvider) Chat(
 
 func (p *gatedProvider) GetDefaultModel() string {
 	return "gated-provider-model"
+}
+
+func waitForStartedMessage(t *testing.T, started <-chan string, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case got := <-started:
+			if got == want {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for provider started message %q", want)
+		}
+	}
 }
 
 type messageStateIsolationProvider struct{}

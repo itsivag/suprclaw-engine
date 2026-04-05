@@ -92,6 +92,7 @@ type processOptions struct {
 	ThinkingOverride  string   // If non-empty, overrides the agent's thinking level for this turn only
 	ResolvedAgentID   string   // Route metadata for this request (if available)
 	RouteMatchedBy    string   // Route metadata for this request (if available)
+	TrackRunControl   bool     // Whether this run participates in channel/chat run.stop tracking
 }
 
 const (
@@ -835,7 +836,7 @@ func (al *AgentLoop) ProcessHeartbeat(
 		return "", fmt.Errorf("no agent available for heartbeat")
 	}
 
-	sessionKey := routing.BuildAgentMainSessionKey(agentInst.ID)
+	sessionKey := routing.BuildAgentHeartbeatSessionKey(agentInst.ID)
 
 	content, _, err := al.runAgentLoop(ctx, agentInst, processOptions{
 		SessionKey:        sessionKey,
@@ -846,6 +847,7 @@ func (al *AgentLoop) ProcessHeartbeat(
 		EnableSummary:     false,
 		SendResponse:      false, // heartbeat runner decides delivery after policy check
 		MaxTokensOverride: maxTokens,
+		TrackRunControl:   false,
 	})
 	return content, err
 }
@@ -982,6 +984,9 @@ func (al *AgentLoop) processMessageDetailed(
 		ResolvedAgentID: route.AgentID,
 		RouteMatchedBy:  route.MatchedBy,
 	}
+	if err := validateExplicitSessionKey(msg.SessionKey); err != nil {
+		return "", "", routeMeta, err
+	}
 	releaseAgentLock, locked := al.tryAcquireAgentRun(route.AgentID)
 	if !locked {
 		return "", "", routeMeta, &RequestError{
@@ -1022,6 +1027,7 @@ func (al *AgentLoop) processMessageDetailed(
 		ThinkingOverride:  inboundMetadata(msg, metadataKeyReasoningOverride),
 		ResolvedAgentID:   routeMeta.ResolvedAgentID,
 		RouteMatchedBy:    routeMeta.RouteMatchedBy,
+		TrackRunControl:   true,
 	}
 
 	// context-dependent commands check their own Runtime fields and report
@@ -1086,6 +1092,23 @@ func resolveScopeKey(route routing.ResolvedRoute, msgSessionKey string) string {
 		return msgSessionKey
 	}
 	return route.SessionKey
+}
+
+func validateExplicitSessionKey(sessionKey string) error {
+	raw := strings.TrimSpace(sessionKey)
+	if raw == "" {
+		return nil
+	}
+	if !strings.HasPrefix(raw, sessionKeyAgentPrefix) {
+		return nil
+	}
+	if routing.IsHeartbeatSessionKey(raw) {
+		return &RequestError{
+			Code:    ErrCodeInvalidSessionKey,
+			Message: fmt.Sprintf("session_key %q is reserved for internal heartbeat runs", raw),
+		}
+	}
+	return nil
 }
 
 func (al *AgentLoop) tryAcquireAgentRun(agentID string) (func(), bool) {
@@ -1161,6 +1184,7 @@ func (al *AgentLoop) processSystemMessage(
 		DefaultResponse: "Background task completed.",
 		EnableSummary:   false,
 		SendResponse:    true,
+		TrackRunControl: true,
 	})
 	return content, err
 }
@@ -1187,8 +1211,10 @@ func (al *AgentLoop) runAgentLoop(
 	runID := newActivityRunID()
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
-	al.registerActiveRun(opts.Channel, opts.ChatID, runID, runCancel)
-	defer al.unregisterActiveRun(opts.Channel, opts.ChatID, runID)
+	if opts.TrackRunControl {
+		al.registerActiveRun(opts.Channel, opts.ChatID, runID, runCancel)
+		defer al.unregisterActiveRun(opts.Channel, opts.ChatID, runID)
+	}
 
 	// 0. Record last channel for notifications (skip internal channels and cli)
 	if opts.Channel != "" && opts.ChatID != "" {
@@ -1288,34 +1314,36 @@ func (al *AgentLoop) runAgentLoop(
 		return "", "", err
 	}
 
-	if err := al.runCancelCheckpoint(runCtx, opts.Channel, opts.ChatID, runID); err != nil {
-		var cancelErr *runCancelledError
-		if errors.As(err, &cancelErr) {
-			stopText := normalizeStopReason(cancelErr.Reason)
-			stopMessageID := ""
-			if activity != nil {
-				stopMessageID = activity.nextMessageID()
-				activity.emit("message.completed", map[string]any{
-					"message_id": stopMessageID,
-					"text":       stopText,
-					"format":     "markdown",
+	if opts.TrackRunControl {
+		if err := al.runCancelCheckpoint(runCtx, opts.Channel, opts.ChatID, runID); err != nil {
+			var cancelErr *runCancelledError
+			if errors.As(err, &cancelErr) {
+				stopText := normalizeStopReason(cancelErr.Reason)
+				stopMessageID := ""
+				if activity != nil {
+					stopMessageID = activity.nextMessageID()
+					activity.emit("message.completed", map[string]any{
+						"message_id": stopMessageID,
+						"text":       stopText,
+						"format":     "markdown",
+					})
+					activity.emit("run.failed", map[string]any{
+						"status":           "failed",
+						"error_code":       runCancelledErrorCode,
+						"message":          stopText,
+						"retryable":        false,
+						"final_message_id": stopMessageID,
+					})
+				}
+				agent.Sessions.AddFullMessage(opts.SessionKey, providers.Message{
+					Role:    "assistant",
+					Content: stopText,
 				})
-				activity.emit("run.failed", map[string]any{
-					"status":           "failed",
-					"error_code":       runCancelledErrorCode,
-					"message":          stopText,
-					"retryable":        false,
-					"final_message_id": stopMessageID,
-				})
+				agent.Sessions.Save(opts.SessionKey)
+				return "", "", nil
 			}
-			agent.Sessions.AddFullMessage(opts.SessionKey, providers.Message{
-				Role:    "assistant",
-				Content: stopText,
-			})
-			agent.Sessions.Save(opts.SessionKey)
-			return "", "", nil
+			return "", "", err
 		}
-		return "", "", err
 	}
 
 	// If last tool had ForUser content and we already sent it, we might not need to send final response
@@ -1356,7 +1384,7 @@ func (al *AgentLoop) runAgentLoop(
 
 	// 6. Optional: summarization
 	if opts.EnableSummary {
-		if err := al.runCancelCheckpoint(runCtx, opts.Channel, opts.ChatID, runID); err == nil {
+		if !opts.TrackRunControl || al.runCancelCheckpoint(runCtx, opts.Channel, opts.ChatID, runID) == nil {
 			al.maybeSummarize(agent, opts.SessionKey, opts.Channel, opts.ChatID)
 		}
 	}
@@ -1481,8 +1509,18 @@ func (al *AgentLoop) runLLMIteration(
 		activeModel = activeCandidates[0].Model
 	}
 
+	checkpoint := func() error {
+		if opts.TrackRunControl {
+			return al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	for iteration < agent.MaxIterations {
-		if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+		if err := checkpoint(); err != nil {
 			return "", nil, iteration, activeModel, err
 		}
 
@@ -1626,7 +1664,7 @@ func (al *AgentLoop) runLLMIteration(
 			maxCompactionCycles = 3
 		}
 		for retry := 0; retry <= maxRetries; retry++ {
-			if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+			if err := checkpoint(); err != nil {
 				return "", nil, iteration, activeModel, err
 			}
 
@@ -1713,7 +1751,7 @@ func (al *AgentLoop) runLLMIteration(
 
 			response, err = callLLM()
 			if err == nil {
-				if cancelErr := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); cancelErr != nil {
+				if cancelErr := checkpoint(); cancelErr != nil {
 					return "", nil, iteration, activeModel, cancelErr
 				}
 			}
@@ -1721,7 +1759,7 @@ func (al *AgentLoop) runLLMIteration(
 				break
 			}
 
-			if cancelErr := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); cancelErr != nil {
+			if cancelErr := checkpoint(); cancelErr != nil {
 				return "", nil, iteration, activeModel, cancelErr
 			}
 
@@ -1799,7 +1837,7 @@ func (al *AgentLoop) runLLMIteration(
 			return "", nil, iteration, activeModel, fmt.Errorf("LLM call failed after retries: %w", err)
 		}
 
-		if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+		if err := checkpoint(); err != nil {
 			return "", nil, iteration, activeModel, err
 		}
 
@@ -1882,7 +1920,7 @@ func (al *AgentLoop) runLLMIteration(
 		toolCallIDs := make([]string, len(normalizedToolCalls))
 		toolStartedAt := make([]time.Time, len(normalizedToolCalls))
 
-		if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+		if err := checkpoint(); err != nil {
 			return "", nil, iteration, activeModel, err
 		}
 
@@ -2048,7 +2086,7 @@ func (al *AgentLoop) runLLMIteration(
 		}
 		wg.Wait()
 
-		if err := al.runCancelCheckpoint(ctx, opts.Channel, opts.ChatID, runID); err != nil {
+		if err := checkpoint(); err != nil {
 			return "", nil, iteration, activeModel, err
 		}
 

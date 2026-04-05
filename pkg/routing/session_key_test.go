@@ -18,6 +18,14 @@ func TestBuildAgentMainSessionKey_Normalizes(t *testing.T) {
 	}
 }
 
+func TestBuildAgentHeartbeatSessionKey(t *testing.T) {
+	got := BuildAgentHeartbeatSessionKey("sales")
+	want := "agent:sales:heartbeat"
+	if got != want {
+		t.Errorf("BuildAgentHeartbeatSessionKey('sales') = %q, want %q", got, want)
+	}
+}
+
 func TestBuildAgentPeerSessionKey_DMScopeMain(t *testing.T) {
 	got := BuildAgentPeerSessionKey(SessionKeyParams{
 		AgentID: "main",
@@ -202,6 +210,25 @@ func TestIsSubagentSessionKey(t *testing.T) {
 	for _, tt := range tests {
 		if got := IsSubagentSessionKey(tt.input); got != tt.want {
 			t.Errorf("IsSubagentSessionKey(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestIsHeartbeatSessionKey(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"agent:main:heartbeat", true},
+		{"agent:writer:heartbeat", true},
+		{"agent:main:main", false},
+		{"agent:main:subagent:task-1", false},
+		{"heartbeat:main", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := IsHeartbeatSessionKey(tt.input); got != tt.want {
+			t.Errorf("IsHeartbeatSessionKey(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
