@@ -17,7 +17,7 @@ const (
 
 // HeartbeatEvent is emitted after every heartbeat cycle.
 type HeartbeatEvent struct {
-	Ts                   int64           // Unix ms
+	Ts                   int64 // Unix ms
 	Status               HeartbeatStatus
 	AgentID              string
 	DurationMs           int64
@@ -60,6 +60,7 @@ func OnHeartbeatEvent(fn func(HeartbeatEvent)) func() {
 
 	heartbeatMu.Lock()
 	heartbeatHandles = append(heartbeatHandles, handle)
+	heartbeatListeners = append(heartbeatListeners, fn)
 	heartbeatMu.Unlock()
 
 	return func() {

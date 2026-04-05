@@ -1213,6 +1213,17 @@ func (c *Config) ValidateModelList() error {
 	return nil
 }
 
+// Validate checks cross-field and schema invariants needed for runtime usage.
+func (c *Config) Validate() error {
+	if err := c.ValidateModelList(); err != nil {
+		return err
+	}
+	if err := c.validateAgentsConfig(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func MergeAPIKeys(apiKey string, apiKeys []string) []string {
 	seen := make(map[string]struct{})
 	var all []string

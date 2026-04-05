@@ -8,14 +8,16 @@ import (
 	"github.com/itsivag/suprclaw/pkg/agent"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/cron"
+	"github.com/itsivag/suprclaw/pkg/heartbeat"
 )
 
 type adminHandler struct {
-	configPath  string
-	cronService *cron.CronService
-	secret      string
-	mu          sync.Mutex // serialises all config mutations
-	agentLoop   *agent.AgentLoop
+	configPath            string
+	cronService           *cron.CronService
+	secret                string
+	mu                    sync.Mutex // serialises all config mutations
+	agentLoop             *agent.AgentLoop
+	heartbeatHistoryStore *heartbeat.HistoryStore
 }
 
 func newAdminHandler(
@@ -23,12 +25,14 @@ func newAdminHandler(
 	cs *cron.CronService,
 	secret string,
 	al *agent.AgentLoop,
+	hs *heartbeat.HistoryStore,
 ) *adminHandler {
 	return &adminHandler{
-		configPath:  configPath,
-		cronService: cs,
-		secret:      secret,
-		agentLoop:   al,
+		configPath:            configPath,
+		cronService:           cs,
+		secret:                secret,
+		agentLoop:             al,
+		heartbeatHistoryStore: hs,
 	}
 }
 
@@ -55,6 +59,17 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin/runtime/reload", h.auth(h.reloadRuntime))
 	mux.HandleFunc("POST /api/admin/runtime/stop", h.auth(h.stopRuntime))
 	mux.HandleFunc("GET /api/admin/version", h.auth(h.getVersion))
+
+	// Heartbeat
+	mux.HandleFunc("GET /api/admin/heartbeat", h.auth(h.getHeartbeatConfig))
+	mux.HandleFunc("PUT /api/admin/heartbeat", h.auth(h.putHeartbeatConfig))
+	mux.HandleFunc("POST /api/admin/heartbeat/jobs", h.auth(h.createHeartbeatJob))
+	mux.HandleFunc("PUT /api/admin/heartbeat/jobs/{agentId}", h.auth(h.updateHeartbeatJob))
+	mux.HandleFunc("DELETE /api/admin/heartbeat/jobs/{agentId}", h.auth(h.deleteHeartbeatJob))
+	mux.HandleFunc("GET /api/admin/heartbeat/history", h.auth(h.listHeartbeatHistory))
+	mux.HandleFunc("GET /api/admin/heartbeat/history/{id}", h.auth(h.getHeartbeatHistory))
+	mux.HandleFunc("DELETE /api/admin/heartbeat/history/{id}", h.auth(h.deleteHeartbeatHistory))
+	mux.HandleFunc("DELETE /api/admin/heartbeat/history", h.auth(h.clearHeartbeatHistory))
 
 	// Workspaces
 	mux.HandleFunc("POST /api/admin/workspaces/bootstrap", h.auth(h.bootstrapWorkspace))

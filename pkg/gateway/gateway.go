@@ -43,13 +43,14 @@ const (
 )
 
 type services struct {
-	CronService      *cron.CronService
-	HeartbeatService *heartbeat.HeartbeatService
-	MediaStore       media.MediaStore
-	ChannelManager   *channels.Manager
-	DeviceService    *devices.Service
-	HealthServer     *health.Server
-	configPath       string
+	CronService           *cron.CronService
+	HeartbeatService      *heartbeat.HeartbeatService
+	HeartbeatHistoryStore *heartbeat.HistoryStore
+	MediaStore            media.MediaStore
+	ChannelManager        *channels.Manager
+	DeviceService         *devices.Service
+	HealthServer          *health.Server
+	configPath            string
 }
 
 type startupBlockedProvider struct {
@@ -228,8 +229,19 @@ func setupAndStartServices(
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
 	registerRuntimeHealthChecks(runningServices.HealthServer, agentLoop, runningServices.ChannelManager)
 
+	runningServices.HeartbeatHistoryStore = heartbeat.NewHistoryStore(cfg.WorkspacePath())
+	if err = runningServices.HeartbeatHistoryStore.Start(); err != nil {
+		return nil, fmt.Errorf("error starting heartbeat history store: %w", err)
+	}
+
 	if cfg.Gateway.RemoteAdminControl {
-		adminH := newAdminHandler(configPath, runningServices.CronService, cfg.Gateway.AdminSecret, agentLoop)
+		adminH := newAdminHandler(
+			configPath,
+			runningServices.CronService,
+			cfg.Gateway.AdminSecret,
+			agentLoop,
+			runningServices.HeartbeatHistoryStore,
+		)
 		adminH.registerRoutes(runningServices.ChannelManager.Mux())
 		fmt.Printf("✓ Admin API enabled at http://%s:%d/api/admin/*\n", cfg.Gateway.Host, cfg.Gateway.Port)
 	}
@@ -284,6 +296,9 @@ func stopAndCleanupServices(runningServices *services, shutdownTimeout time.Dura
 	}
 	if runningServices.HeartbeatService != nil {
 		runningServices.HeartbeatService.Stop()
+	}
+	if runningServices.HeartbeatHistoryStore != nil {
+		runningServices.HeartbeatHistoryStore.Stop()
 	}
 	if runningServices.MediaStore != nil {
 		if fms, ok := runningServices.MediaStore.(*media.FileMediaStore); ok {
@@ -426,8 +441,19 @@ func restartServices(
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer)
 	registerRuntimeHealthChecks(runningServices.HealthServer, al, runningServices.ChannelManager)
 
+	runningServices.HeartbeatHistoryStore = heartbeat.NewHistoryStore(cfg.WorkspacePath())
+	if err = runningServices.HeartbeatHistoryStore.Start(); err != nil {
+		return fmt.Errorf("error restarting heartbeat history store: %w", err)
+	}
+
 	if cfg.Gateway.RemoteAdminControl {
-		adminH := newAdminHandler(runningServices.configPath, runningServices.CronService, cfg.Gateway.AdminSecret, al)
+		adminH := newAdminHandler(
+			runningServices.configPath,
+			runningServices.CronService,
+			cfg.Gateway.AdminSecret,
+			al,
+			runningServices.HeartbeatHistoryStore,
+		)
 		adminH.registerRoutes(runningServices.ChannelManager.Mux())
 	}
 
