@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 
@@ -94,27 +96,104 @@ type Config struct {
 
 // HeartbeatConfig configures the periodic heartbeat awareness system.
 type HeartbeatConfig struct {
-	Enabled         bool   `json:"enabled"`
-	IntervalMinutes int    `json:"interval_minutes"`   // default: 30, min: 5
-	AgentID         string `json:"agent_id,omitempty"` // default: default agent
+	Enabled           bool                 `json:"enabled"`
+	MinimumGapMinutes int                  `json:"minimum_gap_minutes"`
+	Jobs              []HeartbeatJobConfig `json:"jobs"`
+}
+
+// HeartbeatJobConfig defines one heartbeat job for a specific agent.
+type HeartbeatJobConfig struct {
+	AgentID         string `json:"agent_id"`
+	IntervalMinutes int    `json:"interval_minutes"` // min: 5
 
 	// Token-saving features
 	IdleWindowMinutes int  `json:"idle_window_minutes"` // skip if user active within N min; 0=disabled
 	MaxTokensPerRun   int  `json:"max_tokens_per_run"`  // hard token budget; 0=unlimited
 	SkipIfUnchanged   bool `json:"skip_if_unchanged"`   // skip if HEARTBEAT.md unchanged
 
-	// Active hours
+	// Delivery
 	ActiveHoursStart string `json:"active_hours_start,omitempty"` // "08:00"
 	ActiveHoursEnd   string `json:"active_hours_end,omitempty"`   // "22:00"
 	Timezone         string `json:"timezone,omitempty"`           // IANA: "America/New_York"
-
-	// Delivery
-	ShowOk      bool `json:"show_ok"`       // deliver HEARTBEAT_OK; default false
-	AckMaxChars int  `json:"ack_max_chars"` // strip trailing ack up to N chars; default 60
+	ShowOk           bool   `json:"show_ok"`                      // deliver HEARTBEAT_OK; default false
+	AckMaxChars      int    `json:"ack_max_chars"`                // strip trailing ack up to N chars; default 60
 
 	// Adaptive backoff
 	AdaptiveBackoff    bool `json:"adaptive_backoff"`     // double interval on consecutive ok
 	MaxIntervalMinutes int  `json:"max_interval_minutes"` // backoff cap; default 120
+}
+
+var heartbeatHHMMPattern = regexp.MustCompile(`^\d{2}:\d{2}$`)
+
+func (h *HeartbeatConfig) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*h = HeartbeatConfig{}
+		return nil
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	allowed := map[string]struct{}{
+		"enabled":             {},
+		"minimum_gap_minutes": {},
+		"jobs":                {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("heartbeat: unknown field %q (legacy single-agent heartbeat config is not supported)", key)
+		}
+	}
+
+	type alias HeartbeatConfig
+	var tmp alias
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*h = HeartbeatConfig(tmp)
+	return nil
+}
+
+func (j *HeartbeatJobConfig) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*j = HeartbeatJobConfig{}
+		return nil
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	allowed := map[string]struct{}{
+		"agent_id":             {},
+		"interval_minutes":     {},
+		"idle_window_minutes":  {},
+		"max_tokens_per_run":   {},
+		"skip_if_unchanged":    {},
+		"active_hours_start":   {},
+		"active_hours_end":     {},
+		"timezone":             {},
+		"show_ok":              {},
+		"ack_max_chars":        {},
+		"adaptive_backoff":     {},
+		"max_interval_minutes": {},
+	}
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("heartbeat.jobs: unknown field %q", key)
+		}
+	}
+
+	type alias HeartbeatJobConfig
+	var tmp alias
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*j = HeartbeatJobConfig(tmp)
+	return nil
 }
 
 // BuildInfo contains build-time version information
@@ -854,6 +933,103 @@ func LoadConfig(path string) (*Config, error) {
 func (c *Config) validateAgentsConfig() error {
 	if c.Agents.MaxParallelRuns <= 0 {
 		return fmt.Errorf("agents.max_parallel_runs must be > 0, got %d", c.Agents.MaxParallelRuns)
+	}
+	if err := c.validateHeartbeatConfig(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Config) validateHeartbeatConfig() error {
+	hb := c.Heartbeat
+
+	if !hb.Enabled && len(hb.Jobs) == 0 {
+		return nil
+	}
+	if hb.MinimumGapMinutes <= 0 {
+		return fmt.Errorf("heartbeat.minimum_gap_minutes must be > 0, got %d", hb.MinimumGapMinutes)
+	}
+	if hb.Enabled && len(hb.Jobs) == 0 {
+		return fmt.Errorf("heartbeat.jobs must be non-empty when heartbeat is enabled")
+	}
+
+	knownAgents := c.knownAgentIDs()
+	seen := make(map[string]int, len(hb.Jobs))
+
+	for i, job := range hb.Jobs {
+		if job.AgentID == "" {
+			return fmt.Errorf("heartbeat.jobs[%d].agent_id is required", i)
+		}
+		if prev, exists := seen[job.AgentID]; exists {
+			return fmt.Errorf("heartbeat.jobs[%d].agent_id duplicates heartbeat.jobs[%d].agent_id (%q)", i, prev, job.AgentID)
+		}
+		seen[job.AgentID] = i
+
+		if _, ok := knownAgents[job.AgentID]; !ok {
+			return fmt.Errorf("heartbeat.jobs[%d].agent_id %q does not match a configured agent", i, job.AgentID)
+		}
+		if job.IntervalMinutes < 5 {
+			return fmt.Errorf("heartbeat.jobs[%d].interval_minutes must be at least 5 (got %d)", i, job.IntervalMinutes)
+		}
+		if job.IdleWindowMinutes < 0 {
+			return fmt.Errorf("heartbeat.jobs[%d].idle_window_minutes must be >= 0 (got %d)", i, job.IdleWindowMinutes)
+		}
+		if job.MaxTokensPerRun < 0 {
+			return fmt.Errorf("heartbeat.jobs[%d].max_tokens_per_run must be >= 0 (got %d)", i, job.MaxTokensPerRun)
+		}
+		if job.AckMaxChars < 0 {
+			return fmt.Errorf("heartbeat.jobs[%d].ack_max_chars must be >= 0 (got %d)", i, job.AckMaxChars)
+		}
+		if job.MaxIntervalMinutes < 0 {
+			return fmt.Errorf("heartbeat.jobs[%d].max_interval_minutes must be >= 0 (got %d)", i, job.MaxIntervalMinutes)
+		}
+		if job.MaxIntervalMinutes > 0 && job.MaxIntervalMinutes < job.IntervalMinutes {
+			return fmt.Errorf("heartbeat.jobs[%d].max_interval_minutes (%d) must be >= interval_minutes (%d)", i, job.MaxIntervalMinutes, job.IntervalMinutes)
+		}
+
+		hasStart := strings.TrimSpace(job.ActiveHoursStart) != ""
+		hasEnd := strings.TrimSpace(job.ActiveHoursEnd) != ""
+		if hasStart != hasEnd {
+			return fmt.Errorf("heartbeat.jobs[%d] must set both active_hours_start and active_hours_end together", i)
+		}
+		if hasStart {
+			if err := validateHeartbeatHHMM(job.ActiveHoursStart); err != nil {
+				return fmt.Errorf("heartbeat.jobs[%d].active_hours_start: %w", i, err)
+			}
+			if err := validateHeartbeatHHMM(job.ActiveHoursEnd); err != nil {
+				return fmt.Errorf("heartbeat.jobs[%d].active_hours_end: %w", i, err)
+			}
+		}
+		if tz := strings.TrimSpace(job.Timezone); tz != "" {
+			if _, err := time.LoadLocation(tz); err != nil {
+				return fmt.Errorf("heartbeat.jobs[%d].timezone %q is invalid: %w", i, job.Timezone, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *Config) knownAgentIDs() map[string]struct{} {
+	agents := make(map[string]struct{}, len(c.Agents.List)+1)
+	if len(c.Agents.List) == 0 {
+		agents["main"] = struct{}{}
+		return agents
+	}
+	for _, agentCfg := range c.Agents.List {
+		if id := strings.TrimSpace(agentCfg.ID); id != "" {
+			agents[id] = struct{}{}
+		}
+	}
+	return agents
+}
+
+func validateHeartbeatHHMM(value string) error {
+	if !heartbeatHHMMPattern.MatchString(value) {
+		return fmt.Errorf("must be in HH:MM format")
+	}
+	if _, err := time.Parse("15:04", value); err != nil {
+		return fmt.Errorf("must be a valid 24-hour HH:MM time")
 	}
 	return nil
 }

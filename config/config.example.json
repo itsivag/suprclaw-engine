@@ -455,6 +455,26 @@
   "voice": {
     "echo_transcription": false
   },
+  "heartbeat": {
+    "enabled": false,
+    "minimum_gap_minutes": 5,
+    "jobs": [
+      {
+        "agent_id": "main",
+        "interval_minutes": 30,
+        "idle_window_minutes": 15,
+        "max_tokens_per_run": 0,
+        "skip_if_unchanged": true,
+        "active_hours_start": "08:00",
+        "active_hours_end": "22:00",
+        "timezone": "UTC",
+        "show_ok": false,
+        "ack_max_chars": 60,
+        "adaptive_backoff": true,
+        "max_interval_minutes": 120
+      }
+    ]
+  },
   "gateway": {
     "host": "127.0.0.1",
     "port": 18790,

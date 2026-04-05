@@ -30,17 +30,17 @@ type HeartbeatExecutor interface {
 
 // HeartbeatRunConfig holds per-run configuration derived from config.HeartbeatConfig.
 type HeartbeatRunConfig struct {
-	AgentID             string
-	Workspace           string
-	IntervalMinutes     int
-	MaxIntervalMinutes  int
-	IdleWindowMinutes   int
-	MaxTokensPerRun     int
-	SkipIfUnchanged     bool
-	ShowOk              bool
-	AckMaxChars         int
-	AdaptiveBackoff     bool
-	ScheduleCfg         HeartbeatScheduleConfig
+	AgentID            string
+	Workspace          string
+	IntervalMinutes    int
+	MaxIntervalMinutes int
+	IdleWindowMinutes  int
+	MaxTokensPerRun    int
+	SkipIfUnchanged    bool
+	ShowOk             bool
+	AckMaxChars        int
+	AdaptiveBackoff    bool
+	ScheduleCfg        HeartbeatScheduleConfig
 }
 
 // RunnerDeps collects the external dependencies for a single heartbeat run.
@@ -138,9 +138,9 @@ func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatEvent {
 	// 7. Call agent loop.
 	logger.InfoCF("heartbeat", "Running heartbeat",
 		map[string]any{
-			"agent_id":    cfg.AgentID,
-			"max_tokens":  cfg.MaxTokensPerRun,
-			"deliver_to":  deliverChannel + ":" + deliverChatID,
+			"agent_id":   cfg.AgentID,
+			"max_tokens": cfg.MaxTokensPerRun,
+			"deliver_to": deliverChannel + ":" + deliverChatID,
 		})
 
 	response, runErr := deps.AgentLoop.ProcessHeartbeat(
@@ -287,23 +287,23 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
-// heartbeatRunConfigFromCfg builds a HeartbeatRunConfig from config.HeartbeatConfig.
-func heartbeatRunConfigFromCfg(cfg config.HeartbeatConfig, workspace string) HeartbeatRunConfig {
+// heartbeatRunConfigFromJob builds a HeartbeatRunConfig from one heartbeat job.
+func heartbeatRunConfigFromJob(job config.HeartbeatJobConfig, workspace string) HeartbeatRunConfig {
 	return HeartbeatRunConfig{
-		AgentID:            cfg.AgentID,
+		AgentID:            job.AgentID,
 		Workspace:          workspace,
-		IntervalMinutes:    cfg.IntervalMinutes,
-		MaxIntervalMinutes: cfg.MaxIntervalMinutes,
-		IdleWindowMinutes:  cfg.IdleWindowMinutes,
-		MaxTokensPerRun:    cfg.MaxTokensPerRun,
-		SkipIfUnchanged:    cfg.SkipIfUnchanged,
-		ShowOk:             cfg.ShowOk,
-		AckMaxChars:        cfg.AckMaxChars,
-		AdaptiveBackoff:    cfg.AdaptiveBackoff,
+		IntervalMinutes:    job.IntervalMinutes,
+		MaxIntervalMinutes: job.MaxIntervalMinutes,
+		IdleWindowMinutes:  job.IdleWindowMinutes,
+		MaxTokensPerRun:    job.MaxTokensPerRun,
+		SkipIfUnchanged:    job.SkipIfUnchanged,
+		ShowOk:             job.ShowOk,
+		AckMaxChars:        job.AckMaxChars,
+		AdaptiveBackoff:    job.AdaptiveBackoff,
 		ScheduleCfg: HeartbeatScheduleConfig{
-			ActiveHoursStart: cfg.ActiveHoursStart,
-			ActiveHoursEnd:   cfg.ActiveHoursEnd,
-			Timezone:         cfg.Timezone,
+			ActiveHoursStart: job.ActiveHoursStart,
+			ActiveHoursEnd:   job.ActiveHoursEnd,
+			Timezone:         job.Timezone,
 		},
 	}
 }

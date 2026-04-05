@@ -487,13 +487,9 @@ func DefaultConfig() *Config {
 			EchoTranscription: false,
 		},
 		Heartbeat: HeartbeatConfig{
-			Enabled:            false,
-			IntervalMinutes:    30,
-			SkipIfUnchanged:    true,
-			ShowOk:             false,
-			AckMaxChars:        60,
-			AdaptiveBackoff:    true,
-			MaxIntervalMinutes: 120,
+			Enabled:           false,
+			MinimumGapMinutes: 5,
+			Jobs:              []HeartbeatJobConfig{},
 		},
 		BuildInfo: BuildInfo{
 			Version:   Version,

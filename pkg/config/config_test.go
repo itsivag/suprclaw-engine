@@ -677,6 +677,158 @@ func TestLoadConfig_MaxParallelRunsInvalidReturnsError(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_HeartbeatSchema(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Heartbeat.MinimumGapMinutes != 5 {
+		t.Fatalf("Heartbeat.MinimumGapMinutes = %d, want 5", cfg.Heartbeat.MinimumGapMinutes)
+	}
+	if cfg.Heartbeat.Jobs == nil {
+		t.Fatal("Heartbeat.Jobs should be an initialized slice")
+	}
+}
+
+func TestLoadConfig_HeartbeatMultiJobValid(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "agents": {
+    "defaults": {"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20},
+    "list": [{"id":"main"},{"id":"ops"}]
+  },
+  "heartbeat": {
+    "enabled": true,
+    "minimum_gap_minutes": 5,
+    "jobs": [
+      {"agent_id":"main","interval_minutes": 5},
+      {"agent_id":"ops","interval_minutes": 10,"active_hours_start":"08:00","active_hours_end":"22:00","timezone":"UTC"}
+    ]
+  },
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if !cfg.Heartbeat.Enabled {
+		t.Fatal("Heartbeat.Enabled = false, want true")
+	}
+	if len(cfg.Heartbeat.Jobs) != 2 {
+		t.Fatalf("Heartbeat.Jobs len = %d, want 2", len(cfg.Heartbeat.Jobs))
+	}
+}
+
+func TestLoadConfig_HeartbeatRejectsLegacyShape(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "agents": {"defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20}},
+  "heartbeat": {
+    "enabled": true,
+    "agent_id": "main",
+    "interval_minutes": 5
+  },
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Fatal("expected LoadConfig() to fail for legacy heartbeat config shape")
+	}
+	if !strings.Contains(err.Error(), "legacy single-agent heartbeat config is not supported") {
+		t.Fatalf("error = %v, want legacy-shape validation error", err)
+	}
+}
+
+func TestLoadConfig_HeartbeatRejectsInvalidStates(t *testing.T) {
+	tests := []struct {
+		name      string
+		heartbeat string
+		wantErr   string
+	}{
+		{
+			name: "duplicate agent_id",
+			heartbeat: `{
+        "enabled": true,
+        "minimum_gap_minutes": 5,
+        "jobs": [
+          {"agent_id":"main","interval_minutes":5},
+          {"agent_id":"main","interval_minutes":5}
+        ]
+      }`,
+			wantErr: "duplicates",
+		},
+		{
+			name: "invalid minimum gap",
+			heartbeat: `{
+        "enabled": true,
+        "minimum_gap_minutes": 0,
+        "jobs": [{"agent_id":"main","interval_minutes":5}]
+      }`,
+			wantErr: "minimum_gap_minutes must be > 0",
+		},
+		{
+			name: "unknown agent",
+			heartbeat: `{
+        "enabled": true,
+        "minimum_gap_minutes": 5,
+        "jobs": [{"agent_id":"missing","interval_minutes":5}]
+      }`,
+			wantErr: "does not match a configured agent",
+		},
+		{
+			name: "invalid interval",
+			heartbeat: `{
+        "enabled": true,
+        "minimum_gap_minutes": 5,
+        "jobs": [{"agent_id":"main","interval_minutes":4}]
+      }`,
+			wantErr: "interval_minutes must be at least 5",
+		},
+		{
+			name: "invalid active hours",
+			heartbeat: `{
+        "enabled": true,
+        "minimum_gap_minutes": 5,
+        "jobs": [{"agent_id":"main","interval_minutes":5,"active_hours_start":"99:00","active_hours_end":"22:00"}]
+      }`,
+			wantErr: "active_hours_start",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.json")
+			configJSON := `{
+  "agents": {
+    "defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20},
+    "list": [{"id":"main"}]
+  },
+  "heartbeat": ` + tc.heartbeat + `,
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
+}`
+			if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+				t.Fatalf("os.WriteFile() error: %v", err)
+			}
+
+			_, err := LoadConfig(configPath)
+			if err == nil {
+				t.Fatalf("expected LoadConfig() to fail for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestDefaultConfig_DMScope(t *testing.T) {
 	cfg := DefaultConfig()
 
