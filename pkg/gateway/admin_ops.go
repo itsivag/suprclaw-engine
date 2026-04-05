@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -44,6 +45,15 @@ func validateAgentID(id string) error {
 	return nil
 }
 
+func writeAdminConfigMutationError(w http.ResponseWriter, err error) {
+	var badReqErr *adminBadRequestError
+	if errors.As(err, &badReqErr) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": badReqErr.Error()})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+}
+
 // --- POST /api/admin/agents ---
 
 type upsertAgentRequest struct {
@@ -51,6 +61,50 @@ type upsertAgentRequest struct {
 	WorkspacePath string `json:"workspacePath"`
 	Model         string `json:"model"`
 	DefaultAgent  bool   `json:"defaultAgent"`
+}
+
+func defaultHeartbeatJobForAgent(agentID string) config.HeartbeatJobConfig {
+	return config.HeartbeatJobConfig{
+		AgentID:            agentID,
+		IntervalMinutes:    30,
+		IdleWindowMinutes:  15,
+		MaxTokensPerRun:    0,
+		SkipIfUnchanged:    true,
+		ActiveHoursStart:   "08:00",
+		ActiveHoursEnd:     "22:00",
+		Timezone:           "UTC",
+		ShowOk:             false,
+		AckMaxChars:        60,
+		AdaptiveBackoff:    true,
+		MaxIntervalMinutes: 120,
+	}
+}
+
+func applyHeartbeatSyncOnAgentCreate(cfg *config.Config, agentID string) {
+	if cfg.Heartbeat.MinimumGapMinutes <= 0 {
+		cfg.Heartbeat.MinimumGapMinutes = 5
+	}
+	cfg.Heartbeat.Enabled = true
+	for _, job := range cfg.Heartbeat.Jobs {
+		if job.AgentID == agentID {
+			return
+		}
+	}
+	cfg.Heartbeat.Jobs = append(cfg.Heartbeat.Jobs, defaultHeartbeatJobForAgent(agentID))
+}
+
+func applyHeartbeatSyncOnAgentDelete(cfg *config.Config, agentID string) {
+	jobs := cfg.Heartbeat.Jobs[:0]
+	for _, job := range cfg.Heartbeat.Jobs {
+		if job.AgentID == agentID {
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	cfg.Heartbeat.Jobs = jobs
+	if len(cfg.Heartbeat.Jobs) == 0 {
+		cfg.Heartbeat.Enabled = false
+	}
 }
 
 func (h *adminHandler) upsertAgent(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +123,7 @@ func (h *adminHandler) upsertAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var result *config.AgentConfig
+	created := false
 	if err := h.mutateCfg(func(cfg *config.Config) error {
 		entry := config.AgentConfig{
 			ID:        req.AgentID,
@@ -88,14 +143,27 @@ func (h *adminHandler) upsertAgent(w http.ResponseWriter, r *http.Request) {
 			if a.ID == req.AgentID {
 				cfg.Agents.List[i] = entry
 				result = &cfg.Agents.List[i]
+				created = false
+				if err := cfg.Validate(); err != nil {
+					return &adminBadRequestError{msg: err.Error()}
+				}
 				return nil
 			}
 		}
 		cfg.Agents.List = append(cfg.Agents.List, entry)
 		result = &cfg.Agents.List[len(cfg.Agents.List)-1]
+		created = true
+
+		if created {
+			applyHeartbeatSyncOnAgentCreate(cfg, req.AgentID)
+		}
+
+		if err := cfg.Validate(); err != nil {
+			return &adminBadRequestError{msg: err.Error()}
+		}
 		return nil
 	}); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeAdminConfigMutationError(w, err)
 		return
 	}
 
@@ -133,9 +201,15 @@ func (h *adminHandler) deleteAgent(w http.ResponseWriter, r *http.Request) {
 			list = append(list, a)
 		}
 		cfg.Agents.List = list
+		if found {
+			applyHeartbeatSyncOnAgentDelete(cfg, agentID)
+		}
+		if err := cfg.Validate(); err != nil {
+			return &adminBadRequestError{msg: err.Error()}
+		}
 		return nil
 	}); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeAdminConfigMutationError(w, err)
 		return
 	}
 	if !found {

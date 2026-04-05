@@ -55,6 +55,24 @@ func TestAdminUpsertAgent_SyncsRuntimeRegistry(t *testing.T) {
 	if _, ok := loop.GetRegistry().GetAgent("writer"); !ok {
 		t.Fatal("writer should be present in runtime registry after upsert")
 	}
+
+	updated, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if !updated.Heartbeat.Enabled {
+		t.Fatal("heartbeat.enabled should be true after creating a new agent")
+	}
+	if updated.Heartbeat.MinimumGapMinutes != 5 {
+		t.Fatalf("heartbeat.minimum_gap_minutes = %d, want 5", updated.Heartbeat.MinimumGapMinutes)
+	}
+	job, found := findHeartbeatJobByAgentID(updated.Heartbeat.Jobs, "writer")
+	if !found {
+		t.Fatal("writer heartbeat job should be created on new agent add")
+	}
+	if job.IntervalMinutes != 30 || job.IdleWindowMinutes != 15 || job.Timezone != "UTC" {
+		t.Fatalf("unexpected default heartbeat job: %+v", job)
+	}
 }
 
 func TestAdminDeleteAgent_SyncsRuntimeRegistry(t *testing.T) {
@@ -72,6 +90,14 @@ func TestAdminDeleteAgent_SyncsRuntimeRegistry(t *testing.T) {
 			List: []config.AgentConfig{
 				{ID: "main", Default: true},
 				{ID: "writer"},
+			},
+		},
+		Heartbeat: config.HeartbeatConfig{
+			Enabled:           true,
+			MinimumGapMinutes: 5,
+			Jobs: []config.HeartbeatJobConfig{
+				{AgentID: "main", IntervalMinutes: 5},
+				{AgentID: "writer", IntervalMinutes: 5},
 			},
 		},
 	}
@@ -98,6 +124,180 @@ func TestAdminDeleteAgent_SyncsRuntimeRegistry(t *testing.T) {
 	}
 	if _, ok := loop.GetRegistry().GetAgent("main"); !ok {
 		t.Fatal("main agent should remain after deleting writer")
+	}
+
+	updated, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if !updated.Heartbeat.Enabled {
+		t.Fatal("heartbeat.enabled should remain true when other jobs remain")
+	}
+	if _, found := findHeartbeatJobByAgentID(updated.Heartbeat.Jobs, "writer"); found {
+		t.Fatal("writer heartbeat job should be removed on agent delete")
+	}
+	if _, found := findHeartbeatJobByAgentID(updated.Heartbeat.Jobs, "main"); !found {
+		t.Fatal("main heartbeat job should remain after deleting writer")
+	}
+}
+
+func TestAdminUpsertAgent_UpdateDoesNotDuplicateHeartbeatJob(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+				{ID: "writer"},
+			},
+		},
+		Heartbeat: config.HeartbeatConfig{
+			Enabled:           true,
+			MinimumGapMinutes: 5,
+			Jobs: []config.HeartbeatJobConfig{
+				{AgentID: "writer", IntervalMinutes: 5},
+			},
+		},
+	}
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{configPath: cfgPath, secret: "test-secret", agentLoop: loop}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer-updated","model":"test-model"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	count := 0
+	for _, job := range updated.Heartbeat.Jobs {
+		if job.AgentID == "writer" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("writer heartbeat job count = %d, want 1", count)
+	}
+}
+
+func TestAdminDeleteAgent_DisablesHeartbeatWhenLastJobRemoved(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "writer"},
+			},
+		},
+		Heartbeat: config.HeartbeatConfig{
+			Enabled:           true,
+			MinimumGapMinutes: 5,
+			Jobs: []config.HeartbeatJobConfig{
+				{AgentID: "writer", IntervalMinutes: 5},
+			},
+		},
+	}
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{configPath: cfgPath, secret: "test-secret", agentLoop: loop}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/admin/agents/writer", nil)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if updated.Heartbeat.Enabled {
+		t.Fatal("heartbeat.enabled should be false when no jobs remain")
+	}
+	if len(updated.Heartbeat.Jobs) != 0 {
+		t.Fatalf("heartbeat.jobs len = %d, want 0", len(updated.Heartbeat.Jobs))
+	}
+}
+
+func TestAdminUpsertAgent_RuntimeSyncFailurePersistsHeartbeatAutoSync(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+			},
+		},
+	}
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	h := &adminHandler{configPath: cfgPath, secret: "test-secret"}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer","model":"test-model"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503, body=%s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if !updated.Heartbeat.Enabled {
+		t.Fatal("heartbeat.enabled should be true after persisted new-agent sync")
+	}
+	if updated.Heartbeat.MinimumGapMinutes != 5 {
+		t.Fatalf("heartbeat.minimum_gap_minutes = %d, want 5", updated.Heartbeat.MinimumGapMinutes)
+	}
+	if _, found := findHeartbeatJobByAgentID(updated.Heartbeat.Jobs, "writer"); !found {
+		t.Fatal("writer heartbeat job should persist even when runtime reload fails")
 	}
 }
 
@@ -597,4 +797,13 @@ func decodeJSONMap(t *testing.T, raw string) map[string]any {
 		t.Fatalf("failed to decode JSON body %q: %v", raw, err)
 	}
 	return body
+}
+
+func findHeartbeatJobByAgentID(jobs []config.HeartbeatJobConfig, agentID string) (config.HeartbeatJobConfig, bool) {
+	for _, job := range jobs {
+		if job.AgentID == agentID {
+			return job, true
+		}
+	}
+	return config.HeartbeatJobConfig{}, false
 }
