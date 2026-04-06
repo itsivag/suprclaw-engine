@@ -15,10 +15,12 @@ import (
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/channels"
 	"github.com/itsivag/suprclaw/pkg/config"
+	mcppkg "github.com/itsivag/suprclaw/pkg/mcp"
 	"github.com/itsivag/suprclaw/pkg/media"
 	"github.com/itsivag/suprclaw/pkg/providers"
 	"github.com/itsivag/suprclaw/pkg/routing"
 	"github.com/itsivag/suprclaw/pkg/tools"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type fakeChannel struct{ id string }
@@ -31,6 +33,110 @@ func (f *fakeChannel) IsRunning() bool                                         {
 func (f *fakeChannel) IsAllowed(string) bool                                   { return true }
 func (f *fakeChannel) IsAllowedSender(sender bus.SenderInfo) bool              { return true }
 func (f *fakeChannel) ReasoningChannelID() string                              { return f.id }
+
+type fakeLoopMCPManager struct {
+	loadErr    error
+	loadCalls  int
+	closeCalls int
+	servers    map[string]*mcppkg.ServerConnection
+}
+
+func (m *fakeLoopMCPManager) LoadFromMCPConfig(
+	ctx context.Context,
+	mcpCfg config.MCPConfig,
+	workspacePath string,
+) error {
+	m.loadCalls++
+	return m.loadErr
+}
+
+func (m *fakeLoopMCPManager) GetServers() map[string]*mcppkg.ServerConnection {
+	if m.servers == nil {
+		return map[string]*mcppkg.ServerConnection{}
+	}
+	return m.servers
+}
+
+func (m *fakeLoopMCPManager) CallTool(
+	ctx context.Context,
+	serverName, toolName string,
+	arguments map[string]any,
+) (*sdkmcp.CallToolResult, error) {
+	return &sdkmcp.CallToolResult{}, nil
+}
+
+func (m *fakeLoopMCPManager) Close() error {
+	m.closeCalls++
+	return nil
+}
+
+func newFakeLoopMCPManagerWithSupabaseTool(toolName string) *fakeLoopMCPManager {
+	return &fakeLoopMCPManager{
+		servers: map[string]*mcppkg.ServerConnection{
+			"supabase": {
+				Name: "supabase",
+				Tools: []*sdkmcp.Tool{
+					{
+						Name:        toolName,
+						Description: "fake supabase tool",
+						InputSchema: map[string]any{
+							"type":       "object",
+							"properties": map[string]any{},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func newTestConfigWithEnabledMCP(workspace string) *config.Config {
+	return &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         workspace,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		Tools: config.ToolsConfig{
+			MCP: config.MCPConfig{
+				ToolConfig: config.ToolConfig{
+					Enabled: true,
+				},
+				Servers: map[string]config.MCPServerConfig{
+					"supabase": {
+						Enabled: true,
+						Command: "fake-mcp-command",
+					},
+				},
+			},
+		},
+	}
+}
+
+func newTestReloadConfigWithWriter(workspace string) *config.Config {
+	cfg := newTestConfigWithEnabledMCP(workspace)
+	cfg.Agents.List = []config.AgentConfig{
+		{
+			ID:        "main",
+			Default:   true,
+			Workspace: workspace,
+			Model: &config.AgentModelConfig{
+				Primary: "test-model",
+			},
+		},
+		{
+			ID:        "writer",
+			Workspace: filepath.Join(workspace, "writer"),
+			Model: &config.AgentModelConfig{
+				Primary: "test-model",
+			},
+		},
+	}
+	return cfg
+}
 
 type recordingProvider struct {
 	lastMessages []providers.Message
@@ -3082,6 +3188,194 @@ func TestProcessDirectWithChannel_TriggersMCPInitialization(t *testing.T) {
 	// Manager should not be initialized when no servers are configured
 	if al.mcp.hasManager() {
 		t.Fatal("expected MCP manager to be nil when no servers are configured")
+	}
+}
+
+func TestReloadProviderAndConfig_RebindsMCPTools(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := newTestConfigWithEnabledMCP(tmpDir)
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	defer al.Close()
+
+	firstManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	secondManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	managerQueue := []mcpManagerRuntime{firstManager, secondManager}
+	oldFactory := newMCPManagerRuntime
+	newMCPManagerRuntime = func() mcpManagerRuntime {
+		if len(managerQueue) == 0 {
+			t.Fatal("no fake MCP managers left in queue")
+		}
+		manager := managerQueue[0]
+		managerQueue = managerQueue[1:]
+		return manager
+	}
+	t.Cleanup(func() {
+		newMCPManagerRuntime = oldFactory
+	})
+
+	if _, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"hello",
+		"session-1",
+		"cli",
+		"direct",
+	); err != nil {
+		t.Fatalf("initial direct processing failed: %v", err)
+	}
+
+	initialDefault := al.GetRegistry().GetDefaultAgent()
+	if initialDefault == nil {
+		t.Fatal("expected default agent to exist")
+	}
+	if _, ok := initialDefault.Tools.Get("mcp_supabase_execute_sql"); !ok {
+		t.Fatal("expected MCP tool to be registered before reload")
+	}
+
+	reloadCfg := newTestReloadConfigWithWriter(tmpDir)
+	if err := al.ReloadProviderAndConfig(context.Background(), provider, reloadCfg); err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+
+	updatedDefault := al.GetRegistry().GetDefaultAgent()
+	if updatedDefault == nil {
+		t.Fatal("expected default agent after reload")
+	}
+	if _, ok := updatedDefault.Tools.Get("mcp_supabase_execute_sql"); !ok {
+		t.Fatal("expected MCP tool to remain registered after reload")
+	}
+
+	if firstManager.closeCalls != 1 {
+		t.Fatalf("expected first MCP manager to be closed once, got %d", firstManager.closeCalls)
+	}
+	if secondManager.closeCalls != 0 {
+		t.Fatalf("expected second MCP manager to remain active during test, got close count %d", secondManager.closeCalls)
+	}
+}
+
+func TestReloadProviderAndConfig_FailsWhenMCPInitializationFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := newTestConfigWithEnabledMCP(tmpDir)
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	defer al.Close()
+
+	firstManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	failingReloadManager := &fakeLoopMCPManager{
+		loadErr: fmt.Errorf("boom"),
+	}
+	managerQueue := []mcpManagerRuntime{firstManager, failingReloadManager}
+	oldFactory := newMCPManagerRuntime
+	newMCPManagerRuntime = func() mcpManagerRuntime {
+		if len(managerQueue) == 0 {
+			t.Fatal("no fake MCP managers left in queue")
+		}
+		manager := managerQueue[0]
+		managerQueue = managerQueue[1:]
+		return manager
+	}
+	t.Cleanup(func() {
+		newMCPManagerRuntime = oldFactory
+	})
+
+	if _, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"hello",
+		"session-1",
+		"cli",
+		"direct",
+	); err != nil {
+		t.Fatalf("initial direct processing failed: %v", err)
+	}
+
+	oldRegistry := al.GetRegistry()
+	reloadCfg := newTestReloadConfigWithWriter(tmpDir)
+	err := al.ReloadProviderAndConfig(context.Background(), provider, reloadCfg)
+	if err == nil {
+		t.Fatal("expected reload to fail when MCP initialization fails")
+	}
+	if !strings.Contains(err.Error(), "MCP initialization failed during reload") {
+		t.Fatalf("expected MCP initialization error, got: %v", err)
+	}
+
+	if currentRegistry := al.GetRegistry(); currentRegistry != oldRegistry {
+		t.Fatal("expected registry to stay unchanged after failed reload")
+	}
+
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("expected default agent to remain available")
+	}
+	if _, ok := defaultAgent.Tools.Get("mcp_supabase_execute_sql"); !ok {
+		t.Fatal("expected previously registered MCP tool to remain available after failed reload")
+	}
+
+	if firstManager.closeCalls != 0 {
+		t.Fatalf("expected active MCP manager to remain open after failed reload, got close count %d", firstManager.closeCalls)
+	}
+	if failingReloadManager.closeCalls != 1 {
+		t.Fatalf("expected failing reload MCP manager to be closed once, got %d", failingReloadManager.closeCalls)
+	}
+}
+
+func TestEnsureMCPInitialized_RetriesAfterFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := newTestConfigWithEnabledMCP(tmpDir)
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	defer al.Close()
+
+	failingManager := &fakeLoopMCPManager{
+		loadErr: fmt.Errorf("first load failure"),
+	}
+	successfulManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	managerQueue := []mcpManagerRuntime{failingManager, successfulManager}
+	oldFactory := newMCPManagerRuntime
+	newMCPManagerRuntime = func() mcpManagerRuntime {
+		if len(managerQueue) == 0 {
+			t.Fatal("no fake MCP managers left in queue")
+		}
+		manager := managerQueue[0]
+		managerQueue = managerQueue[1:]
+		return manager
+	}
+	t.Cleanup(func() {
+		newMCPManagerRuntime = oldFactory
+	})
+
+	if _, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"hello",
+		"session-1",
+		"cli",
+		"direct",
+	); err == nil {
+		t.Fatal("expected first MCP initialization attempt to fail")
+	}
+
+	if _, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"hello again",
+		"session-2",
+		"cli",
+		"direct",
+	); err != nil {
+		t.Fatalf("expected second MCP initialization attempt to succeed, got error: %v", err)
+	}
+
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("expected default agent")
+	}
+	if _, ok := defaultAgent.Tools.Get("mcp_supabase_execute_sql"); !ok {
+		t.Fatal("expected MCP tool to be registered after retry")
+	}
+
+	if failingManager.closeCalls != 1 {
+		t.Fatalf("expected failing MCP manager to be closed once, got %d", failingManager.closeCalls)
 	}
 }
 

@@ -549,6 +549,22 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 	// Ensure shared tools are re-registered on the new registry
 	registerSharedTools(cfg, al.bus, registry, provider)
 
+	// MCP tools are bound to the active registry and must be rebuilt on every
+	// reload to avoid stale/missing MCP tool registrations after config changes.
+	newMCPManager, err := al.buildAndRegisterMCPManager(ctx, cfg, registry)
+	if err != nil {
+		return fmt.Errorf("MCP initialization failed during reload: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		if newMCPManager != nil {
+			if closeErr := newMCPManager.Close(); closeErr != nil {
+				logger.ErrorCF("agent", "Failed to close MCP manager after canceled reload",
+					map[string]any{"error": closeErr.Error()})
+			}
+		}
+		return fmt.Errorf("context canceled before reload commit: %w", err)
+	}
+
 	// Atomically swap the config and registry under write lock
 	// This ensures readers see a consistent pair
 	al.mu.Lock()
@@ -562,6 +578,14 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker())
 
 	al.mu.Unlock()
+
+	oldMCPManager := al.mcp.swapManager(newMCPManager)
+	if oldMCPManager != nil {
+		if err := oldMCPManager.Close(); err != nil {
+			logger.ErrorCF("agent", "Failed to close previous MCP manager during reload",
+				map[string]any{"error": err.Error()})
+		}
+	}
 
 	// Close old provider after releasing the lock
 	// This prevents blocking readers while closing
