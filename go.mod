@@ -2,6 +2,8 @@ module github.com/itsivag/suprclaw
 
 go 1.25.7
 
+replace github.com/modelcontextprotocol/go-sdk => ./third_party/go-sdk
+
 require (
 	fyne.io/systray v1.12.0
 	github.com/adhocore/gronx v1.19.6

@@ -107,16 +107,21 @@ type ServerConnection struct {
 
 // Manager manages multiple MCP server connections
 type Manager struct {
-	servers map[string]*ServerConnection
-	mu      sync.RWMutex
-	closed  atomic.Bool    // changed from bool to atomic.Bool to avoid TOCTOU race
-	wg      sync.WaitGroup // tracks in-flight CallTool calls
+	servers       map[string]*ServerConnection
+	mu            sync.RWMutex
+	closed        atomic.Bool    // changed from bool to atomic.Bool to avoid TOCTOU race
+	wg            sync.WaitGroup // tracks in-flight CallTool calls
+	sessionCtx    context.Context
+	sessionCancel context.CancelFunc
 }
 
 // NewManager creates a new MCP manager
 func NewManager() *Manager {
+	sessionCtx, sessionCancel := context.WithCancel(context.Background())
 	return &Manager{
-		servers: make(map[string]*ServerConnection),
+		servers:       make(map[string]*ServerConnection),
+		sessionCtx:    sessionCtx,
+		sessionCancel: sessionCancel,
 	}
 }
 
@@ -312,8 +317,9 @@ func (m *Manager) ConnectServer(
 				"server":  name,
 				"command": cfg.Command,
 			})
-		// Create command with context
-		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
+		// Subprocess lifetime is owned by the MCP manager, not the caller's
+		// bootstrap context. Bootstrap cancellation still governs initialization.
+		cmd := exec.Command(cfg.Command, cfg.Args...)
 
 		// Build environment variables with proper override semantics
 		// Use a map to ensure config variables override file variables
@@ -364,7 +370,7 @@ func (m *Manager) ConnectServer(
 	}
 
 	// Connect to server
-	session, err := client.Connect(ctx, transport, nil)
+	session, err := client.ConnectWithSessionContext(ctx, m.sessionCtx, transport, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
@@ -487,6 +493,9 @@ func (m *Manager) Close() error {
 	// Wait for all in-flight CallTool calls to finish before closing sessions
 	// After closed=true is set, no new CallTool can start (they check closed first)
 	m.wg.Wait()
+	if m.sessionCancel != nil {
+		m.sessionCancel()
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

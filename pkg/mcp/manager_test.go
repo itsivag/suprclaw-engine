@@ -1,11 +1,20 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -305,4 +314,252 @@ func TestClose_IdempotentOnEmptyManager(t *testing.T) {
 	if err := mgr.Close(); err != nil {
 		t.Fatalf("second close should be idempotent, got: %v", err)
 	}
+}
+
+func TestLoadFromMCPConfig_StdioServerSurvivesBootstrapCancellation(t *testing.T) {
+	serverPath := buildTestMCPServerBinary(t)
+	pidFile := filepath.Join(t.TempDir(), "server.pid")
+	mgr := NewManager()
+	defer func() {
+		_ = mgr.Close()
+	}()
+
+	mcpCfg := config.MCPConfig{
+		ToolConfig: config.ToolConfig{
+			Enabled: true,
+		},
+		Servers: map[string]config.MCPServerConfig{
+			"test-server": {
+				Enabled: true,
+				Command: serverPath,
+				Env: map[string]string{
+					"SUPR_TEST_MCP_PID_FILE": pidFile,
+				},
+			},
+		},
+	}
+
+	bootstrapCtx, cancelBootstrap := context.WithCancel(context.Background())
+	if err := mgr.LoadFromMCPConfig(bootstrapCtx, mcpCfg, t.TempDir()); err != nil {
+		t.Fatalf("LoadFromMCPConfig() failed: %v", err)
+	}
+
+	pid := waitForPIDFile(t, pidFile)
+	cancelBootstrap()
+	time.Sleep(25 * time.Millisecond)
+
+	result, err := mgr.CallTool(
+		context.Background(),
+		"test-server",
+		"echo",
+		map[string]any{"message": "still-alive"},
+	)
+	if err != nil {
+		t.Fatalf("CallTool() failed after bootstrap cancellation: %v", err)
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("expected one content item, got %d", len(result.Content))
+	}
+	text, ok := result.Content[0].(*sdkmcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+	if text.Text != "still-alive" {
+		t.Fatalf("unexpected tool response %q", text.Text)
+	}
+	if !processExists(pid) {
+		t.Fatalf("expected stdio MCP server process %d to remain alive", pid)
+	}
+}
+
+func TestClose_StopsStdioServerProcess(t *testing.T) {
+	serverPath := buildTestMCPServerBinary(t)
+	pidFile := filepath.Join(t.TempDir(), "server.pid")
+	mgr := NewManager()
+
+	mcpCfg := config.MCPConfig{
+		ToolConfig: config.ToolConfig{
+			Enabled: true,
+		},
+		Servers: map[string]config.MCPServerConfig{
+			"test-server": {
+				Enabled: true,
+				Command: serverPath,
+				Env: map[string]string{
+					"SUPR_TEST_MCP_PID_FILE": pidFile,
+				},
+			},
+		},
+	}
+
+	if err := mgr.LoadFromMCPConfig(context.Background(), mcpCfg, t.TempDir()); err != nil {
+		t.Fatalf("LoadFromMCPConfig() failed: %v", err)
+	}
+	pid := waitForPIDFile(t, pidFile)
+	if !processExists(pid) {
+		t.Fatalf("expected stdio MCP server process %d to be running", pid)
+	}
+
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !processExists(pid) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("expected stdio MCP server process %d to stop after Close()", pid)
+}
+
+func TestLoadFromMCPConfig_StreamableServerFailsWhenBootstrapContextExpires(t *testing.T) {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "http-test", Version: "1.0.0"}, nil)
+	baseHandler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
+		return server
+	}, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		_ = r.Body.Close()
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		if bytes.Contains(body, []byte(`"method":"initialize"`)) {
+			time.Sleep(150 * time.Millisecond)
+		}
+		baseHandler.ServeHTTP(w, r)
+	})
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	mgr := NewManager()
+	defer func() {
+		_ = mgr.Close()
+	}()
+
+	mcpCfg := config.MCPConfig{
+		ToolConfig: config.ToolConfig{
+			Enabled: true,
+		},
+		Servers: map[string]config.MCPServerConfig{
+			"http-test": {
+				Enabled: true,
+				Type:    "http",
+				URL:     httpServer.URL,
+			},
+		},
+	}
+
+	bootstrapCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := mgr.LoadFromMCPConfig(bootstrapCtx, mcpCfg, t.TempDir())
+	if err == nil {
+		t.Fatal("expected LoadFromMCPConfig() to fail when bootstrap context expires")
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("expected bootstrap timeout error, got: %v", err)
+	}
+	if _, ok := mgr.GetServer("http-test"); ok {
+		t.Fatal("expected timed-out server to remain unregistered")
+	}
+}
+
+func buildTestMCPServerBinary(t *testing.T) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	sourcePath := filepath.Join(tmpDir, "main.go")
+	binaryPath := filepath.Join(tmpDir, "test-mcp-server")
+	source := `package main
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"os"
+	"strconv"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+func main() {
+	if pidFile := os.Getenv("SUPR_TEST_MCP_PID_FILE"); pidFile != "" {
+		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	server.AddTool(&mcp.Tool{
+		Name:        "echo",
+		InputSchema: json.RawMessage(` + "`" + `{"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}` + "`" + `),
+	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var args struct {
+			Message string ` + "`json:\"message\"`" + `
+		}
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: args.Message}},
+		}, nil
+	})
+
+	session, err := server.Connect(context.Background(), &mcp.StdioTransport{}, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := session.Wait(); err != nil {
+		return
+	}
+}
+`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
+		t.Fatalf("failed to write test MCP source: %v", err)
+	}
+
+	cmd := exec.Command("go", "build", "-o", binaryPath, sourcePath)
+	cmd.Dir = repoRootFromTestFile(t)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, output)
+	}
+	return binaryPath
+}
+
+func repoRootFromTestFile(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to resolve test file path")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func waitForPIDFile(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
+			if convErr != nil {
+				t.Fatalf("invalid pid file contents %q: %v", string(data), convErr)
+			}
+			return pid
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for pid file %s", path)
+	return 0
+}
+
+func processExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
 }

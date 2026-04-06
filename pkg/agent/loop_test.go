@@ -3254,6 +3254,68 @@ func TestReloadProviderAndConfig_RebindsMCPTools(t *testing.T) {
 	}
 }
 
+func TestReloadProviderAndConfig_RepeatedReloadsCloseOnlySupersededManagers(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := newTestConfigWithEnabledMCP(tmpDir)
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	defer al.Close()
+
+	firstManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	secondManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	thirdManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	managerQueue := []mcpManagerRuntime{firstManager, secondManager, thirdManager}
+	oldFactory := newMCPManagerRuntime
+	newMCPManagerRuntime = func() mcpManagerRuntime {
+		if len(managerQueue) == 0 {
+			t.Fatal("no fake MCP managers left in queue")
+		}
+		manager := managerQueue[0]
+		managerQueue = managerQueue[1:]
+		return manager
+	}
+	t.Cleanup(func() {
+		newMCPManagerRuntime = oldFactory
+	})
+
+	if _, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"hello",
+		"session-1",
+		"cli",
+		"direct",
+	); err != nil {
+		t.Fatalf("initial direct processing failed: %v", err)
+	}
+
+	reloadCfg := newTestReloadConfigWithWriter(tmpDir)
+	if err := al.ReloadProviderAndConfig(context.Background(), provider, reloadCfg); err != nil {
+		t.Fatalf("first reload failed: %v", err)
+	}
+	if err := al.ReloadProviderAndConfig(context.Background(), provider, reloadCfg); err != nil {
+		t.Fatalf("second reload failed: %v", err)
+	}
+
+	defaultAgent := al.GetRegistry().GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("expected default agent after repeated reloads")
+	}
+	if _, ok := defaultAgent.Tools.Get("mcp_supabase_execute_sql"); !ok {
+		t.Fatal("expected MCP tool to remain registered after repeated reloads")
+	}
+
+	if firstManager.closeCalls != 1 {
+		t.Fatalf("expected first MCP manager to be closed once, got %d", firstManager.closeCalls)
+	}
+	if secondManager.closeCalls != 1 {
+		t.Fatalf("expected second MCP manager to be closed once, got %d", secondManager.closeCalls)
+	}
+	if thirdManager.closeCalls != 0 {
+		t.Fatalf("expected third MCP manager to remain active, got close count %d", thirdManager.closeCalls)
+	}
+}
+
 func TestReloadProviderAndConfig_FailsWhenMCPInitializationFails(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := newTestConfigWithEnabledMCP(tmpDir)
