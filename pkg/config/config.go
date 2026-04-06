@@ -125,6 +125,22 @@ type HeartbeatJobConfig struct {
 
 var heartbeatHHMMPattern = regexp.MustCompile(`^\d{2}:\d{2}$`)
 
+func DefaultHeartbeatJobForAgent(agentID string) HeartbeatJobConfig {
+	return HeartbeatJobConfig{
+		AgentID:            agentID,
+		IntervalMinutes:    30,
+		IdleWindowMinutes:  15,
+		MaxTokensPerRun:    0,
+		SkipIfUnchanged:    true,
+		ActiveHoursStart:   "08:00",
+		ActiveHoursEnd:     "22:00",
+		ShowOk:             false,
+		AckMaxChars:        60,
+		AdaptiveBackoff:    true,
+		MaxIntervalMinutes: 120,
+	}
+}
+
 func (h *HeartbeatConfig) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" {
 		*h = HeartbeatConfig{}
@@ -936,10 +952,25 @@ func (c *Config) validateAgentsConfig() error {
 	if c.Agents.MaxParallelRuns <= 0 {
 		return fmt.Errorf("agents.max_parallel_runs must be > 0, got %d", c.Agents.MaxParallelRuns)
 	}
+	if err := c.validateMainAgentInvariant(); err != nil {
+		return err
+	}
 	if err := c.validateHeartbeatConfig(); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (c *Config) validateMainAgentInvariant() error {
+	if len(c.Agents.List) == 0 {
+		return nil
+	}
+	for _, agentCfg := range c.Agents.List {
+		if strings.TrimSpace(agentCfg.ID) == "main" {
+			return nil
+		}
+	}
+	return fmt.Errorf(`agents.list must include an agent with id "main"`)
 }
 
 func (c *Config) validateTimezone() error {

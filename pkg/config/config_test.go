@@ -677,6 +677,30 @@ func TestLoadConfig_MaxParallelRunsInvalidReturnsError(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_AgentsListMustIncludeMain(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "agents": {
+    "defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20},
+    "list": [{"id":"writer"}]
+  },
+  "timezone": "UTC",
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.4","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Fatal("expected LoadConfig() to fail when agents.list does not include main")
+	}
+	if !strings.Contains(err.Error(), `agents.list must include an agent with id "main"`) {
+		t.Fatalf("error = %v, want main-agent invariant error", err)
+	}
+}
+
 func TestDefaultConfig_HeartbeatSchema(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Timezone != "UTC" {
@@ -685,8 +709,15 @@ func TestDefaultConfig_HeartbeatSchema(t *testing.T) {
 	if cfg.Heartbeat.MinimumGapMinutes != 5 {
 		t.Fatalf("Heartbeat.MinimumGapMinutes = %d, want 5", cfg.Heartbeat.MinimumGapMinutes)
 	}
-	if cfg.Heartbeat.Jobs == nil {
-		t.Fatal("Heartbeat.Jobs should be an initialized slice")
+	if len(cfg.Heartbeat.Jobs) != 1 {
+		t.Fatalf("Heartbeat.Jobs len = %d, want 1", len(cfg.Heartbeat.Jobs))
+	}
+	job := cfg.Heartbeat.Jobs[0]
+	if job.AgentID != "main" {
+		t.Fatalf("Heartbeat.Jobs[0].AgentID = %q, want main", job.AgentID)
+	}
+	if job.IntervalMinutes != 30 || job.IdleWindowMinutes != 15 {
+		t.Fatalf("unexpected default heartbeat job: %+v", job)
 	}
 }
 

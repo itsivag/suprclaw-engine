@@ -211,6 +211,7 @@ func TestAdminDeleteAgent_DisablesHeartbeatWhenLastJobRemoved(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
+				{ID: "main", Default: true},
 				{ID: "writer"},
 			},
 		},
@@ -239,6 +240,9 @@ func TestAdminDeleteAgent_DisablesHeartbeatWhenLastJobRemoved(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
+	if _, ok := loop.GetRegistry().GetAgent("main"); !ok {
+		t.Fatal("main agent should remain after deleting writer")
+	}
 
 	updated, err := config.LoadConfig(cfgPath)
 	if err != nil {
@@ -249,6 +253,53 @@ func TestAdminDeleteAgent_DisablesHeartbeatWhenLastJobRemoved(t *testing.T) {
 	}
 	if len(updated.Heartbeat.Jobs) != 0 {
 		t.Fatalf("heartbeat.jobs len = %d, want 0", len(updated.Heartbeat.Jobs))
+	}
+}
+
+func TestAdminDeleteAgent_RejectsDeletingMain(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+				{ID: "writer"},
+			},
+		},
+	}
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{configPath: cfgPath, secret: "test-secret", agentLoop: loop}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/admin/agents/main", nil)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `agent \"main\" cannot be deleted`) {
+		t.Fatalf("response body = %s, want main-delete invariant error", rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if len(updated.Agents.List) != 2 {
+		t.Fatalf("agents.list len = %d, want 2", len(updated.Agents.List))
 	}
 }
 

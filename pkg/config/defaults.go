@@ -490,7 +490,9 @@ func DefaultConfig() *Config {
 		Heartbeat: HeartbeatConfig{
 			Enabled:           false,
 			MinimumGapMinutes: 5,
-			Jobs:              []HeartbeatJobConfig{},
+			Jobs: []HeartbeatJobConfig{
+				DefaultHeartbeatJobForAgent("main"),
+			},
 		},
 		BuildInfo: BuildInfo{
 			Version:   Version,

@@ -63,22 +63,6 @@ type upsertAgentRequest struct {
 	DefaultAgent  bool   `json:"defaultAgent"`
 }
 
-func defaultHeartbeatJobForAgent(agentID string) config.HeartbeatJobConfig {
-	return config.HeartbeatJobConfig{
-		AgentID:            agentID,
-		IntervalMinutes:    30,
-		IdleWindowMinutes:  15,
-		MaxTokensPerRun:    0,
-		SkipIfUnchanged:    true,
-		ActiveHoursStart:   "08:00",
-		ActiveHoursEnd:     "22:00",
-		ShowOk:             false,
-		AckMaxChars:        60,
-		AdaptiveBackoff:    true,
-		MaxIntervalMinutes: 120,
-	}
-}
-
 func applyHeartbeatSyncOnAgentCreate(cfg *config.Config, agentID string) {
 	if cfg.Heartbeat.MinimumGapMinutes <= 0 {
 		cfg.Heartbeat.MinimumGapMinutes = 5
@@ -89,7 +73,7 @@ func applyHeartbeatSyncOnAgentCreate(cfg *config.Config, agentID string) {
 			return
 		}
 	}
-	cfg.Heartbeat.Jobs = append(cfg.Heartbeat.Jobs, defaultHeartbeatJobForAgent(agentID))
+	cfg.Heartbeat.Jobs = append(cfg.Heartbeat.Jobs, config.DefaultHeartbeatJobForAgent(agentID))
 }
 
 func applyHeartbeatSyncOnAgentDelete(cfg *config.Config, agentID string) {
@@ -187,6 +171,10 @@ func (h *adminHandler) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	if err := validateAgentID(agentID); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if routing.NormalizeAgentID(agentID) == "main" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `agent "main" cannot be deleted`})
 		return
 	}
 	found := false
