@@ -15,12 +15,14 @@ import (
 
 // HeartbeatService manages the heartbeat lifecycle and scheduling loop.
 type HeartbeatService struct {
-	cfg       config.HeartbeatConfig
-	timezone  string
-	workspace string
-	agentLoop HeartbeatExecutor
-	msgBus    *bus.MessageBus
-	stateMgr  *state.Manager
+	cfg            config.HeartbeatConfig
+	timezone       string
+	stateWorkspace string
+	agentDefaults  config.AgentDefaults
+	agents         []config.AgentConfig
+	agentLoop      HeartbeatExecutor
+	msgBus         *bus.MessageBus
+	stateMgr       *state.Manager
 
 	mu       sync.Mutex
 	running  bool
@@ -30,28 +32,33 @@ type HeartbeatService struct {
 }
 
 type heartbeatJobRuntime struct {
-	index int
-	cfg   HeartbeatRunConfig
-	state *HeartbeatState
+	index     int
+	cfg       HeartbeatRunConfig
+	state     *HeartbeatState
+	nextDueAt time.Time
 }
 
 // NewHeartbeatService creates a new service. Call Start() to begin scheduling.
 func NewHeartbeatService(
 	cfg config.HeartbeatConfig,
 	timezone string,
-	workspace string,
+	stateWorkspace string,
+	agentDefaults config.AgentDefaults,
+	agents []config.AgentConfig,
 	agentLoop HeartbeatExecutor,
 	msgBus *bus.MessageBus,
 	stateMgr *state.Manager,
 ) *HeartbeatService {
 	return &HeartbeatService{
-		cfg:       cfg,
-		timezone:  timezone,
-		workspace: workspace,
-		agentLoop: agentLoop,
-		msgBus:    msgBus,
-		stateMgr:  stateMgr,
-		wakeChan:  make(chan struct{}, 1),
+		cfg:            cfg,
+		timezone:       timezone,
+		stateWorkspace: stateWorkspace,
+		agentDefaults:  agentDefaults,
+		agents:         append([]config.AgentConfig(nil), agents...),
+		agentLoop:      agentLoop,
+		msgBus:         msgBus,
+		stateMgr:       stateMgr,
+		wakeChan:       make(chan struct{}, 1),
 	}
 }
 
@@ -125,14 +132,15 @@ func (s *HeartbeatService) Wake() {
 }
 
 func (s *HeartbeatService) runLoop(ctx context.Context, stopChan chan struct{}) {
-	jobStates, err := LoadStates(s.workspace)
+	jobStates, err := LoadStates(s.stateWorkspace)
 	if err != nil {
 		logger.WarnCF("heartbeat", "Failed to load heartbeat state, starting fresh",
 			map[string]any{"error": err.Error()})
 		jobStates = map[string]*HeartbeatState{}
 	}
 
-	jobs := s.buildRuntimeJobs(jobStates)
+	serviceStart := time.Now()
+	jobs := s.buildRuntimeJobs(jobStates, serviceStart)
 	if len(jobs) == 0 {
 		logger.WarnCF("heartbeat", "Heartbeat enabled but no jobs available; orchestrator stopped", nil)
 		return
@@ -145,7 +153,7 @@ func (s *HeartbeatService) runLoop(ctx context.Context, stopChan chan struct{}) 
 	defer timer.Stop()
 
 	for {
-		jobIndex, scheduledAt := s.selectNextJob(jobs, time.Now(), nextAllowedStart)
+		jobIndex, scheduledAt := s.selectNextJob(jobs, nextAllowedStart)
 		if jobIndex < 0 {
 			return
 		}
@@ -173,7 +181,7 @@ func (s *HeartbeatService) runLoop(ctx context.Context, stopChan chan struct{}) 
 			// Run the selected due job.
 		}
 
-		job := jobs[jobIndex]
+		job := &jobs[jobIndex]
 		runStart := time.Now()
 		deps := RunnerDeps{
 			Cfg:       job.cfg,
@@ -184,9 +192,10 @@ func (s *HeartbeatService) runLoop(ctx context.Context, stopChan chan struct{}) 
 		}
 		evt := RunOnce(ctx, deps)
 		runFinishedAt := time.Now()
+		job.nextDueAt = runFinishedAt.Add(intervalDuration(job.cfg, job.state.ConsecutiveOk))
 		nextAllowedStart = runFinishedAt.Add(minGap)
 
-		if saveErr := SaveStates(s.workspace, jobStates); saveErr != nil {
+		if saveErr := SaveStates(s.stateWorkspace, jobStates); saveErr != nil {
 			logger.WarnCF("heartbeat", "Failed to save heartbeat state",
 				map[string]any{"error": saveErr.Error()})
 		}
@@ -201,7 +210,7 @@ func (s *HeartbeatService) runLoop(ctx context.Context, stopChan chan struct{}) 
 	}
 }
 
-func (s *HeartbeatService) buildRuntimeJobs(states map[string]*HeartbeatState) []heartbeatJobRuntime {
+func (s *HeartbeatService) buildRuntimeJobs(states map[string]*HeartbeatState, serviceStart time.Time) []heartbeatJobRuntime {
 	jobs := make([]heartbeatJobRuntime, 0, len(s.cfg.Jobs))
 	for i, jobCfg := range s.cfg.Jobs {
 		jobState, ok := states[jobCfg.AgentID]
@@ -209,60 +218,63 @@ func (s *HeartbeatService) buildRuntimeJobs(states map[string]*HeartbeatState) [
 			jobState = &HeartbeatState{}
 			states[jobCfg.AgentID] = jobState
 		}
-		jobs = append(jobs, heartbeatJobRuntime{
+		workspace := config.ResolveAgentWorkspaceByID(jobCfg.AgentID, s.agents, s.agentDefaults)
+		runtimeCfg := heartbeatRunConfigFromJob(jobCfg, workspace, s.timezone)
+		job := heartbeatJobRuntime{
 			index: i,
-			cfg:   heartbeatRunConfigFromJob(jobCfg, s.workspace, s.timezone),
+			cfg:   runtimeCfg,
 			state: jobState,
-		})
+		}
+		job.nextDueAt = s.initialDueAt(job, serviceStart)
+		jobs = append(jobs, job)
 	}
 	return jobs
 }
 
 func (s *HeartbeatService) selectNextJob(
 	jobs []heartbeatJobRuntime,
-	now time.Time,
 	nextAllowedStart time.Time,
 ) (int, time.Time) {
 	if len(jobs) == 0 {
-		return -1, now
+		return -1, time.Time{}
 	}
 
 	selectedIndex := -1
 	var selectedDue time.Time
 	for i, job := range jobs {
-		due := s.jobDueAt(job, now)
+		due := s.adjustToActiveHours(job.cfg.ScheduleCfg, job.nextDueAt)
+		if nextAllowedStart.After(due) {
+			due = nextAllowedStart
+		}
+		due = s.adjustToActiveHours(job.cfg.ScheduleCfg, due)
 		if selectedIndex == -1 || due.Before(selectedDue) {
 			selectedIndex = i
 			selectedDue = due
 		}
 	}
 
-	if nextAllowedStart.After(selectedDue) {
-		selectedDue = nextAllowedStart
-	}
 	return selectedIndex, selectedDue
 }
 
-func (s *HeartbeatService) jobDueAt(job heartbeatJobRuntime, now time.Time) time.Time {
-	interval := time.Duration(job.cfg.IntervalMinutes) * time.Minute
-	if job.cfg.AdaptiveBackoff {
-		interval = AdaptiveInterval(job.cfg.IntervalMinutes, job.cfg.MaxIntervalMinutes, job.state.ConsecutiveOk)
+func (s *HeartbeatService) initialDueAt(job heartbeatJobRuntime, serviceStart time.Time) time.Time {
+	if job.state.LastRunAtMs > 0 {
+		return time.UnixMilli(job.state.LastRunAtMs).Add(intervalDuration(job.cfg, job.state.ConsecutiveOk))
 	}
+	return serviceStart.Add(intervalDuration(job.cfg, job.state.ConsecutiveOk))
+}
 
-	var dueAt time.Time
-	if job.state.LastRunAtMs == 0 {
-		dueAt = now.Add(interval)
-	} else {
-		dueAt = time.UnixMilli(job.state.LastRunAtMs).Add(interval)
-		if dueAt.Before(now) {
-			dueAt = now
-		}
-	}
-
-	if inWindow, nextWindowStart := IsWithinActiveHours(job.cfg.ScheduleCfg, dueAt); !inWindow && !nextWindowStart.IsZero() {
+func (s *HeartbeatService) adjustToActiveHours(cfg HeartbeatScheduleConfig, dueAt time.Time) time.Time {
+	if inWindow, nextWindowStart := IsWithinActiveHours(cfg, dueAt); !inWindow && !nextWindowStart.IsZero() {
 		return nextWindowStart
 	}
 	return dueAt
+}
+
+func intervalDuration(cfg HeartbeatRunConfig, consecutiveOk int) time.Duration {
+	if cfg.AdaptiveBackoff {
+		return AdaptiveInterval(cfg.IntervalMinutes, cfg.MaxIntervalMinutes, consecutiveOk)
+	}
+	return time.Duration(cfg.IntervalMinutes) * time.Minute
 }
 
 // Validate returns an error if the config is invalid.

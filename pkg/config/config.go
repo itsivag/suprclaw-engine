@@ -124,6 +124,7 @@ type HeartbeatJobConfig struct {
 }
 
 var heartbeatHHMMPattern = regexp.MustCompile(`^\d{2}:\d{2}$`)
+var agentWorkspaceInvalidCharsRe = regexp.MustCompile(`[^a-z0-9_-]+`)
 
 func DefaultHeartbeatJobForAgent(agentID string) HeartbeatJobConfig {
 	return HeartbeatJobConfig{
@@ -1144,6 +1145,53 @@ func SaveConfig(path string, cfg *Config) error {
 
 func (c *Config) WorkspacePath() string {
 	return expandHome(c.Agents.Defaults.Workspace)
+}
+
+// ResolveAgentWorkspace returns the effective workspace path for an agent config.
+func ResolveAgentWorkspace(agentCfg *AgentConfig, defaults AgentDefaults) string {
+	if agentCfg != nil && strings.TrimSpace(agentCfg.Workspace) != "" {
+		return expandHome(strings.TrimSpace(agentCfg.Workspace))
+	}
+
+	defaultWorkspace := expandHome(defaults.Workspace)
+	if agentCfg == nil ||
+		agentCfg.Default ||
+		strings.TrimSpace(agentCfg.ID) == "" ||
+		normalizeAgentIDForWorkspace(agentCfg.ID) == "main" {
+		return defaultWorkspace
+	}
+
+	id := normalizeAgentIDForWorkspace(agentCfg.ID)
+	return filepath.Join(defaultWorkspace, "..", "workspace-"+id)
+}
+
+// ResolveAgentWorkspaceByID returns the effective workspace path for an agent id.
+// If the agent is not found in agents list, it falls back to the deterministic
+// default workspace convention for that id.
+func ResolveAgentWorkspaceByID(agentID string, agents []AgentConfig, defaults AgentDefaults) string {
+	normalizedID := normalizeAgentIDForWorkspace(agentID)
+	for i := range agents {
+		if normalizeAgentIDForWorkspace(agents[i].ID) == normalizedID {
+			return ResolveAgentWorkspace(&agents[i], defaults)
+		}
+	}
+	return ResolveAgentWorkspace(&AgentConfig{ID: normalizedID}, defaults)
+}
+
+func normalizeAgentIDForWorkspace(id string) string {
+	normalized := strings.ToLower(strings.TrimSpace(id))
+	if normalized == "" {
+		return "main"
+	}
+	normalized = agentWorkspaceInvalidCharsRe.ReplaceAllString(normalized, "-")
+	normalized = strings.Trim(normalized, "-")
+	if len(normalized) > 64 {
+		normalized = normalized[:64]
+	}
+	if normalized == "" {
+		return "main"
+	}
+	return normalized
 }
 
 func (c *Config) GetAPIKey() string {

@@ -222,6 +222,33 @@ func TestDefaultConfig_WorkspacePath(t *testing.T) {
 	}
 }
 
+func TestResolveAgentWorkspaceByID_ImplicitMain(t *testing.T) {
+	defaults := AgentDefaults{Workspace: "/tmp/workspace"}
+	got := ResolveAgentWorkspaceByID("main", nil, defaults)
+	if got != "/tmp/workspace" {
+		t.Fatalf("workspace = %q, want /tmp/workspace", got)
+	}
+}
+
+func TestResolveAgentWorkspaceByID_ConfiguredAgents(t *testing.T) {
+	defaults := AgentDefaults{Workspace: "/tmp/workspace"}
+	agents := []AgentConfig{
+		{ID: "main"},
+		{ID: "content-writer", Workspace: "/tmp/workspace-content-writer"},
+		{ID: "seo"},
+	}
+
+	if got := ResolveAgentWorkspaceByID("main", agents, defaults); got != "/tmp/workspace" {
+		t.Fatalf("main workspace = %q, want /tmp/workspace", got)
+	}
+	if got := ResolveAgentWorkspaceByID("content-writer", agents, defaults); got != "/tmp/workspace-content-writer" {
+		t.Fatalf("content-writer workspace = %q, want /tmp/workspace-content-writer", got)
+	}
+	if got := ResolveAgentWorkspaceByID("seo", agents, defaults); got != "/tmp/workspace-seo" {
+		t.Fatalf("seo workspace = %q, want /tmp/workspace-seo", got)
+	}
+}
+
 // TestDefaultConfig_Model verifies model is set
 func TestDefaultConfig_Model(t *testing.T) {
 	cfg := DefaultConfig()
