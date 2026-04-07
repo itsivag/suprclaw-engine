@@ -52,6 +52,61 @@ func TestSelectNextJob_RespectsGlobalMinimumGap(t *testing.T) {
 	}
 }
 
+func TestSelectNextJob_SkipsRunningJobs(t *testing.T) {
+	svc := &HeartbeatService{}
+	now := time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+
+	jobs := []heartbeatJobRuntime{
+		{
+			cfg:       HeartbeatRunConfig{AgentID: "a", IntervalMinutes: 5},
+			state:     &HeartbeatState{},
+			nextDueAt: now,
+			running:   true,
+		},
+		{
+			cfg:       HeartbeatRunConfig{AgentID: "b", IntervalMinutes: 5},
+			state:     &HeartbeatState{},
+			nextDueAt: now.Add(1 * time.Minute),
+		},
+	}
+
+	idx, at := svc.selectNextJob(jobs, time.Time{})
+	if idx != 1 {
+		t.Fatalf("selected job index = %d, want 1", idx)
+	}
+	if !at.Equal(now.Add(1 * time.Minute)) {
+		t.Fatalf("selected start = %s, want %s", at.Format(time.RFC3339), now.Add(1*time.Minute).Format(time.RFC3339))
+	}
+}
+
+func TestSelectNextJob_AllJobsRunningReturnsNone(t *testing.T) {
+	svc := &HeartbeatService{}
+	now := time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+
+	jobs := []heartbeatJobRuntime{
+		{
+			cfg:       HeartbeatRunConfig{AgentID: "a", IntervalMinutes: 5},
+			state:     &HeartbeatState{},
+			nextDueAt: now,
+			running:   true,
+		},
+		{
+			cfg:       HeartbeatRunConfig{AgentID: "b", IntervalMinutes: 5},
+			state:     &HeartbeatState{},
+			nextDueAt: now,
+			running:   true,
+		},
+	}
+
+	idx, at := svc.selectNextJob(jobs, time.Time{})
+	if idx != -1 {
+		t.Fatalf("selected job index = %d, want -1", idx)
+	}
+	if !at.IsZero() {
+		t.Fatalf("selected start = %s, want zero", at.Format(time.RFC3339))
+	}
+}
+
 func TestAdjustToActiveHours_RespectsActiveHours(t *testing.T) {
 	svc := &HeartbeatService{}
 	due := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)

@@ -32,10 +32,19 @@ type HeartbeatService struct {
 }
 
 type heartbeatJobRuntime struct {
-	index     int
-	cfg       HeartbeatRunConfig
-	state     *HeartbeatState
-	nextDueAt time.Time
+	index        int
+	cfg          HeartbeatRunConfig
+	state        *HeartbeatState
+	nextDueAt    time.Time
+	running      bool
+	runStartedAt time.Time
+}
+
+type heartbeatJobCompletion struct {
+	jobIndex     int
+	runStartedAt time.Time
+	runFinished  time.Time
+	result       HeartbeatRunResult
 }
 
 // NewHeartbeatService creates a new service. Call Start() to begin scheduling.
@@ -148,65 +157,132 @@ func (s *HeartbeatService) runLoop(ctx context.Context, stopChan chan struct{}) 
 
 	minGap := time.Duration(s.cfg.MinimumGapMinutes) * time.Minute
 	var nextAllowedStart time.Time
+	completions := make(chan heartbeatJobCompletion, len(jobs))
+	inFlight := 0
 
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
 	for {
 		jobIndex, scheduledAt := s.selectNextJob(jobs, nextAllowedStart)
-		if jobIndex < 0 {
-			return
-		}
-		wait := time.Until(scheduledAt)
-		if wait < 0 {
-			wait = 0
-		}
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
+		timerArmed := false
+		if jobIndex >= 0 {
+			wait := time.Until(scheduledAt)
+			if wait < 0 {
+				wait = 0
+			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(wait)
+			timerArmed = true
+		} else {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 		}
-		timer.Reset(wait)
 
 		select {
 		case <-stopChan:
+			s.drainInFlightCompletions(completions, inFlight, jobs, jobStates)
 			return
 		case <-ctx.Done():
+			s.drainInFlightCompletions(completions, inFlight, jobs, jobStates)
 			return
+		case completion := <-completions:
+			inFlight--
+			s.applyCompletion(completion, jobs, jobStates)
+			continue
 		case <-s.wakeChan:
 			// Re-evaluate scheduling immediately.
 			continue
 		case <-timer.C:
-			// Run the selected due job.
+			if !timerArmed || jobIndex < 0 {
+				continue
+			}
 		}
 
 		job := &jobs[jobIndex]
+		if job.running {
+			continue
+		}
 		runStart := time.Now()
+		job.running = true
+		job.runStartedAt = runStart
+		nextAllowedStart = runStart.Add(minGap)
+		inFlight++
+
 		deps := RunnerDeps{
 			Cfg:       job.cfg,
-			State:     job.state,
+			State:     *job.state,
 			AgentLoop: s.agentLoop,
 			Bus:       s.msgBus,
 			StateMgr:  s.stateMgr,
 		}
-		evt := RunOnce(ctx, deps)
-		runFinishedAt := time.Now()
-		job.nextDueAt = runFinishedAt.Add(intervalDuration(job.cfg, job.state.ConsecutiveOk))
-		nextAllowedStart = runFinishedAt.Add(minGap)
+		go func(selectedIndex int, startedAt time.Time, runDeps RunnerDeps) {
+			result := RunOnce(ctx, runDeps)
+			completions <- heartbeatJobCompletion{
+				jobIndex:     selectedIndex,
+				runStartedAt: startedAt,
+				runFinished:  time.Now(),
+				result:       result,
+			}
+		}(jobIndex, runStart, deps)
 
-		if saveErr := SaveStates(s.stateWorkspace, jobStates); saveErr != nil {
-			logger.WarnCF("heartbeat", "Failed to save heartbeat state",
-				map[string]any{"error": saveErr.Error()})
-		}
-
-		logger.DebugCF("heartbeat", "Heartbeat job completed",
+		logger.DebugCF("heartbeat", "Heartbeat job dispatched",
 			map[string]any{
 				"agent_id":           job.cfg.AgentID,
-				"status":             evt.Status,
-				"duration_ms":        time.Since(runStart).Milliseconds(),
 				"next_allowed_start": nextAllowedStart.Format(time.RFC3339),
+				"in_flight":          inFlight,
 			})
+	}
+}
+
+func (s *HeartbeatService) applyCompletion(
+	completion heartbeatJobCompletion,
+	jobs []heartbeatJobRuntime,
+	jobStates map[string]*HeartbeatState,
+) {
+	if completion.jobIndex < 0 || completion.jobIndex >= len(jobs) {
+		return
+	}
+	job := &jobs[completion.jobIndex]
+	job.running = false
+	job.runStartedAt = time.Time{}
+	*job.state = completion.result.NextState
+	job.nextDueAt = completion.runFinished.Add(intervalDuration(job.cfg, job.state.ConsecutiveOk))
+
+	if saveErr := SaveStates(s.stateWorkspace, jobStates); saveErr != nil {
+		logger.WarnCF("heartbeat", "Failed to save heartbeat state",
+			map[string]any{"error": saveErr.Error()})
+	}
+
+	logger.DebugCF("heartbeat", "Heartbeat job completed",
+		map[string]any{
+			"agent_id":       job.cfg.AgentID,
+			"status":         completion.result.Event.Status,
+			"duration_ms":    completion.result.Event.DurationMs,
+			"run_elapsed_ms": completion.runFinished.Sub(completion.runStartedAt).Milliseconds(),
+			"next_due_at":    job.nextDueAt.Format(time.RFC3339),
+		})
+}
+
+func (s *HeartbeatService) drainInFlightCompletions(
+	completions <-chan heartbeatJobCompletion,
+	inFlight int,
+	jobs []heartbeatJobRuntime,
+	jobStates map[string]*HeartbeatState,
+) {
+	for inFlight > 0 {
+		completion := <-completions
+		inFlight--
+		s.applyCompletion(completion, jobs, jobStates)
 	}
 }
 
@@ -242,6 +318,9 @@ func (s *HeartbeatService) selectNextJob(
 	selectedIndex := -1
 	var selectedDue time.Time
 	for i, job := range jobs {
+		if job.running {
+			continue
+		}
 		due := s.adjustToActiveHours(job.cfg.ScheduleCfg, job.nextDueAt)
 		if nextAllowedStart.After(due) {
 			due = nextAllowedStart
@@ -252,7 +331,9 @@ func (s *HeartbeatService) selectNextJob(
 			selectedDue = due
 		}
 	}
-
+	if selectedIndex == -1 {
+		return -1, time.Time{}
+	}
 	return selectedIndex, selectedDue
 }
 

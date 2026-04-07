@@ -47,6 +47,15 @@ func BuildAgentHeartbeatSessionKey(agentID string) string {
 	return fmt.Sprintf("agent:%s:%s", NormalizeAgentID(agentID), DefaultHeartbeatKey)
 }
 
+// BuildAgentHeartbeatRunSessionKey returns "agent:<agentId>:heartbeat:<runId>".
+func BuildAgentHeartbeatRunSessionKey(agentID, runID string) string {
+	normalizedRunID := strings.TrimSpace(strings.ToLower(runID))
+	if normalizedRunID == "" {
+		panic("heartbeat runID is required")
+	}
+	return fmt.Sprintf("agent:%s:%s:%s", NormalizeAgentID(agentID), DefaultHeartbeatKey, normalizedRunID)
+}
+
 // BuildAgentPeerSessionKey constructs a session key based on agent, channel, peer, and DM scope.
 func BuildAgentPeerSessionKey(params SessionKeyParams) string {
 	agentID := NormalizeAgentID(params.AgentID)
@@ -147,7 +156,8 @@ func IsHeartbeatSessionKey(sessionKey string) bool {
 	if parsed == nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(parsed.Rest), DefaultHeartbeatKey)
+	rest := strings.ToLower(strings.TrimSpace(parsed.Rest))
+	return rest == DefaultHeartbeatKey || strings.HasPrefix(rest, DefaultHeartbeatKey+":")
 }
 
 func normalizeChannel(channel string) string {

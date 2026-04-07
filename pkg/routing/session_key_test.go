@@ -26,6 +26,14 @@ func TestBuildAgentHeartbeatSessionKey(t *testing.T) {
 	}
 }
 
+func TestBuildAgentHeartbeatRunSessionKey(t *testing.T) {
+	got := BuildAgentHeartbeatRunSessionKey("sales", "run-123")
+	want := "agent:sales:heartbeat:run-123"
+	if got != want {
+		t.Errorf("BuildAgentHeartbeatRunSessionKey('sales','run-123') = %q, want %q", got, want)
+	}
+}
+
 func TestBuildAgentPeerSessionKey_DMScopeMain(t *testing.T) {
 	got := BuildAgentPeerSessionKey(SessionKeyParams{
 		AgentID: "main",
@@ -220,9 +228,12 @@ func TestIsHeartbeatSessionKey(t *testing.T) {
 		want  bool
 	}{
 		{"agent:main:heartbeat", true},
+		{"agent:main:heartbeat:run-1", true},
 		{"agent:writer:heartbeat", true},
+		{"agent:writer:heartbeat:abc:def", true},
 		{"agent:main:main", false},
 		{"agent:main:subagent:task-1", false},
+		{"agent:main:heartbeatx", false},
 		{"heartbeat:main", false},
 		{"", false},
 	}

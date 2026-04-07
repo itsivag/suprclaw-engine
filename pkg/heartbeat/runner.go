@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/logger"
@@ -21,6 +22,7 @@ type HeartbeatExecutor interface {
 	ProcessHeartbeat(
 		ctx context.Context,
 		agentID string,
+		sessionKey string,
 		prompt string,
 		deliverChannel, deliverChatID string,
 		maxTokens int,
@@ -47,30 +49,37 @@ type HeartbeatRunConfig struct {
 // RunnerDeps collects the external dependencies for a single heartbeat run.
 type RunnerDeps struct {
 	Cfg       HeartbeatRunConfig
-	State     *HeartbeatState
+	State     HeartbeatState
 	AgentLoop HeartbeatExecutor
 	Bus       *bus.MessageBus
 	StateMgr  *state.Manager // for last-activity detection
 }
 
-// RunOnce performs one complete heartbeat cycle and returns the emitted event.
-func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatEvent {
+// HeartbeatRunResult contains the emitted event and updated state for one run.
+type HeartbeatRunResult struct {
+	Event     HeartbeatEvent
+	NextState HeartbeatState
+}
+
+// RunOnce performs one complete heartbeat cycle and returns the emitted event and state.
+func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatRunResult {
 	start := time.Now()
 	cfg := deps.Cfg
+	state := deps.State
 
 	// Helper to build and emit a skipped event.
-	skip := func(reason string) HeartbeatEvent {
+	skip := func(reason string) HeartbeatRunResult {
 		evt := HeartbeatEvent{
 			Ts:                   start.UnixMilli(),
 			Status:               StatusSkipped,
 			AgentID:              cfg.AgentID,
 			DurationMs:           time.Since(start).Milliseconds(),
 			SkipReason:           reason,
-			ConsecutiveOk:        deps.State.ConsecutiveOk,
-			EffectiveIntervalMin: effectiveInterval(cfg, deps.State.ConsecutiveOk),
+			ConsecutiveOk:        state.ConsecutiveOk,
+			EffectiveIntervalMin: effectiveInterval(cfg, state.ConsecutiveOk),
 		}
 		EmitHeartbeatEvent(evt)
-		return evt
+		return HeartbeatRunResult{Event: evt, NextState: state}
 	}
 
 	// 1. Active hours check.
@@ -105,17 +114,17 @@ func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatEvent {
 			Status:               StatusFailed,
 			AgentID:              cfg.AgentID,
 			DurationMs:           time.Since(start).Milliseconds(),
-			ConsecutiveOk:        deps.State.ConsecutiveOk,
-			EffectiveIntervalMin: effectiveInterval(cfg, deps.State.ConsecutiveOk),
+			ConsecutiveOk:        state.ConsecutiveOk,
+			EffectiveIntervalMin: effectiveInterval(cfg, state.ConsecutiveOk),
 		}
 		EmitHeartbeatEvent(evt)
-		return evt
+		return HeartbeatRunResult{Event: evt, NextState: state}
 	}
 
 	hash := hashContent(fileContent)
 
 	// 4. Skip if file unchanged (and feature enabled).
-	if cfg.SkipIfUnchanged && hash == deps.State.LastFileHash {
+	if cfg.SkipIfUnchanged && hash == state.LastFileHash {
 		logger.DebugCF("heartbeat", "Skipping heartbeat: HEARTBEAT.md unchanged", nil)
 		return skip("unchanged_file")
 	}
@@ -143,18 +152,20 @@ func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatEvent {
 			"max_tokens": cfg.MaxTokensPerRun,
 			"deliver_to": deliverChannel + ":" + deliverChatID,
 		})
+	sessionKey := routing.BuildAgentHeartbeatRunSessionKey(cfg.AgentID, uuid.NewString())
 
 	response, runErr := deps.AgentLoop.ProcessHeartbeat(
 		ctx,
 		cfg.AgentID,
+		sessionKey,
 		prompt,
 		deliverChannel,
 		deliverChatID,
 		cfg.MaxTokensPerRun,
 	)
 
-	deps.State.LastFileHash = hash
-	deps.State.LastRunAtMs = time.Now().UnixMilli()
+	state.LastFileHash = hash
+	state.LastRunAtMs = time.Now().UnixMilli()
 
 	if runErr != nil {
 		logger.ErrorCF("heartbeat", "Heartbeat agent run failed",
@@ -164,11 +175,11 @@ func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatEvent {
 			Status:               StatusFailed,
 			AgentID:              cfg.AgentID,
 			DurationMs:           time.Since(start).Milliseconds(),
-			ConsecutiveOk:        deps.State.ConsecutiveOk,
-			EffectiveIntervalMin: effectiveInterval(cfg, deps.State.ConsecutiveOk),
+			ConsecutiveOk:        state.ConsecutiveOk,
+			EffectiveIntervalMin: effectiveInterval(cfg, state.ConsecutiveOk),
 		}
 		EmitHeartbeatEvent(evt)
-		return evt
+		return HeartbeatRunResult{Event: evt, NextState: state}
 	}
 
 	// 8. Evaluate response via policy.
@@ -185,12 +196,12 @@ func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatEvent {
 		}
 
 		// Prune the idle turn from session to avoid accumulation.
-		if err := pruneLastTurn(deps, cfg.AgentID); err != nil {
+		if err := pruneLastTurn(deps, cfg.AgentID, sessionKey); err != nil {
 			logger.WarnCF("heartbeat", "Failed to prune last turn",
 				map[string]any{"error": err.Error()})
 		}
 
-		deps.State.ConsecutiveOk++
+		state.ConsecutiveOk++
 
 		evt = HeartbeatEvent{
 			Ts:                   start.UnixMilli(),
@@ -198,8 +209,8 @@ func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatEvent {
 			AgentID:              cfg.AgentID,
 			DurationMs:           time.Since(start).Milliseconds(),
 			Preview:              truncate(stripped.Text, 80),
-			ConsecutiveOk:        deps.State.ConsecutiveOk,
-			EffectiveIntervalMin: effectiveInterval(cfg, deps.State.ConsecutiveOk),
+			ConsecutiveOk:        state.ConsecutiveOk,
+			EffectiveIntervalMin: effectiveInterval(cfg, state.ConsecutiveOk),
 		}
 
 		if cfg.ShowOk && deliverChannel != "" && deliverChatID != "" {
@@ -213,7 +224,7 @@ func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatEvent {
 		}
 	} else {
 		// Real content — deliver and reset backoff.
-		deps.State.ConsecutiveOk = 0
+		state.ConsecutiveOk = 0
 
 		evt = HeartbeatEvent{
 			Ts:                   start.UnixMilli(),
@@ -250,14 +261,13 @@ func RunOnce(ctx context.Context, deps RunnerDeps) HeartbeatEvent {
 	}
 
 	EmitHeartbeatEvent(evt)
-	return evt
+	return HeartbeatRunResult{Event: evt, NextState: state}
 }
 
-func pruneLastTurn(deps RunnerDeps, agentID string) error {
+func pruneLastTurn(deps RunnerDeps, agentID, sessionKey string) error {
 	if deps.AgentLoop == nil {
 		return nil
 	}
-	sessionKey := routing.BuildAgentHeartbeatSessionKey(agentID)
 	return deps.AgentLoop.PruneLastTurn(agentID, sessionKey)
 }
 

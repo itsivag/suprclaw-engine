@@ -833,12 +833,13 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 	return response, err
 }
 
-// ProcessHeartbeat runs the agent in its main session for a heartbeat turn.
+// ProcessHeartbeat runs one heartbeat turn in an explicit heartbeat-only session.
 // It bypasses channel routing; delivery is handled by the heartbeat runner after
 // policy evaluation (HEARTBEAT_OK suppression, adaptive backoff, etc.).
 func (al *AgentLoop) ProcessHeartbeat(
 	ctx context.Context,
 	agentID string,
+	sessionKey string,
 	prompt string,
 	deliverChannel, deliverChatID string,
 	maxTokens int,
@@ -860,10 +861,16 @@ func (al *AgentLoop) ProcessHeartbeat(
 		return "", fmt.Errorf("no agent available for heartbeat")
 	}
 
-	sessionKey := routing.BuildAgentHeartbeatSessionKey(agentInst.ID)
+	normalizedSessionKey := strings.TrimSpace(sessionKey)
+	if normalizedSessionKey == "" {
+		return "", fmt.Errorf("heartbeat session key is required")
+	}
+	if !routing.IsHeartbeatSessionKey(normalizedSessionKey) {
+		return "", fmt.Errorf("session key %q is outside heartbeat namespace", normalizedSessionKey)
+	}
 
 	content, _, err := al.runAgentLoop(ctx, agentInst, processOptions{
-		SessionKey:        sessionKey,
+		SessionKey:        normalizedSessionKey,
 		Channel:           deliverChannel,
 		ChatID:            deliverChatID,
 		UserMessage:       prompt,

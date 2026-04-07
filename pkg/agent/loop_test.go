@@ -1580,6 +1580,28 @@ func TestAgentLoopRun_RejectsReservedHeartbeatSessionKey(t *testing.T) {
 		t.Fatal("timed out waiting for invalid session key error")
 	}
 
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user-2",
+		ChatID:     "chat-2",
+		SessionKey: routing.BuildAgentHeartbeatRunSessionKey("main", "run-1"),
+		Content:    "hello again",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(run-session) error = %v", err)
+	}
+
+	select {
+	case out := <-msgBus.OutboundChan():
+		if out.ErrorCode != ErrCodeInvalidSessionKey {
+			t.Fatalf("ErrorCode(run-session) = %q, want %q", out.ErrorCode, ErrCodeInvalidSessionKey)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for invalid run-session key error")
+	}
+
 	cancel()
 	select {
 	case err := <-runDone:
@@ -1598,8 +1620,9 @@ func TestProcessHeartbeat_UsesHeartbeatSessionIsolation(t *testing.T) {
 	cfg.Agents.Defaults.ContextGuard.Enabled = false
 
 	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingProvider{})
+	heartbeatSession := routing.BuildAgentHeartbeatRunSessionKey("main", "test-run")
 
-	if _, err := al.ProcessHeartbeat(context.Background(), "main", "heartbeat prompt", "telegram", "chat-1", 0); err != nil {
+	if _, err := al.ProcessHeartbeat(context.Background(), "main", heartbeatSession, "heartbeat prompt", "telegram", "chat-1", 0); err != nil {
 		t.Fatalf("ProcessHeartbeat() error = %v", err)
 	}
 
@@ -1607,7 +1630,6 @@ func TestProcessHeartbeat_UsesHeartbeatSessionIsolation(t *testing.T) {
 	if agent == nil {
 		t.Fatal("default agent is nil")
 	}
-	heartbeatSession := routing.BuildAgentHeartbeatSessionKey(agent.ID)
 	mainSession := routing.BuildAgentMainSessionKey(agent.ID)
 
 	if got := len(agent.Sessions.GetHistory(heartbeatSession)); got == 0 {
@@ -1642,7 +1664,15 @@ func TestAgentLoopRun_HeartbeatAndChatSameAgentRunConcurrently(t *testing.T) {
 
 	heartbeatDone := make(chan error, 1)
 	go func() {
-		_, err := al.ProcessHeartbeat(context.Background(), "main", "heartbeat probe", "telegram", "chat-main", 0)
+		_, err := al.ProcessHeartbeat(
+			context.Background(),
+			"main",
+			routing.BuildAgentHeartbeatRunSessionKey("main", "hb-concurrent"),
+			"heartbeat probe",
+			"telegram",
+			"chat-main",
+			0,
+		)
 		heartbeatDone <- err
 	}()
 
@@ -1716,7 +1746,15 @@ func TestAgentLoopRunStop_OnlyCancelsChatWhenHeartbeatOverlaps(t *testing.T) {
 
 	heartbeatDone := make(chan error, 1)
 	go func() {
-		_, err := al.ProcessHeartbeat(context.Background(), "main", "heartbeat overlap", "supr", "supr:sess-shared", 0)
+		_, err := al.ProcessHeartbeat(
+			context.Background(),
+			"main",
+			routing.BuildAgentHeartbeatRunSessionKey("main", "hb-overlap"),
+			"heartbeat overlap",
+			"supr",
+			"supr:sess-shared",
+			0,
+		)
 		heartbeatDone <- err
 	}()
 
