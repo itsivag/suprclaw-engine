@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -72,6 +73,109 @@ func TestAdminUpsertAgent_SyncsRuntimeRegistry(t *testing.T) {
 	}
 	if job.IntervalMinutes != 30 || job.IdleWindowMinutes != 15 {
 		t.Fatalf("unexpected default heartbeat job: %+v", job)
+	}
+}
+
+func TestAdminWakeAgent_PassesPathAgentIDToCLI(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+				{ID: "writer"},
+			},
+		},
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	var capturedName string
+	var capturedArgs []string
+	h := &adminHandler{
+		secret:    "test-secret",
+		agentLoop: loop,
+		commandRunner: func(name string, args ...string) ([]byte, error) {
+			capturedName = name
+			capturedArgs = append([]string{}, args...)
+			return []byte("wake-output"), nil
+		},
+	}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"sessionKey":"agent:writer:writer","message":"hello"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents/writer/wake", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if capturedName == "" {
+		t.Fatal("expected command runner to be invoked")
+	}
+	if !slices.Contains(capturedArgs, "--agent-id") {
+		t.Fatalf("expected --agent-id flag in args, got %v", capturedArgs)
+	}
+	for i := 0; i < len(capturedArgs)-1; i++ {
+		if capturedArgs[i] == "--agent-id" {
+			if capturedArgs[i+1] != "writer" {
+				t.Fatalf("--agent-id value = %q, want %q", capturedArgs[i+1], "writer")
+			}
+			return
+		}
+	}
+	t.Fatalf("did not find --agent-id value in args: %v", capturedArgs)
+}
+
+func TestAdminWakeAgent_UnknownAgentReturnsNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+			},
+		},
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	called := false
+	h := &adminHandler{
+		secret:    "test-secret",
+		agentLoop: loop,
+		commandRunner: func(name string, args ...string) ([]byte, error) {
+			called = true
+			return []byte("unexpected"), nil
+		},
+	}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"sessionKey":"agent:missing:missing","message":"hello"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents/missing/wake", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
+	}
+	if called {
+		t.Fatal("command runner should not be invoked for unknown agent")
 	}
 }
 

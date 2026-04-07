@@ -18,7 +18,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/providers"
 )
 
-func agentCmd(message, sessionKey, model string, debug bool) error {
+func agentCmd(message, sessionKey, model, requestedAgentID string, debug bool) error {
 	if sessionKey == "" {
 		sessionKey = "cli:default"
 	}
@@ -63,7 +63,14 @@ func agentCmd(message, sessionKey, model string, debug bool) error {
 
 	if message != "" {
 		ctx := context.Background()
-		response, err := agentLoop.ProcessDirect(ctx, message, sessionKey)
+		response, err := agentLoop.ProcessDirectWithChannelAndAgent(
+			ctx,
+			message,
+			sessionKey,
+			"cli",
+			"direct",
+			requestedAgentID,
+		)
 		if err != nil {
 			return fmt.Errorf("error processing message: %w", err)
 		}

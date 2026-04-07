@@ -547,6 +547,78 @@ func TestProcessMessage_NoExplicitAgentUsesDefaultRoute(t *testing.T) {
 	}
 }
 
+func TestProcessDirectWithChannelAndAgent_RoutesToRequestedAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Workspace: tmpDir},
+				{ID: "writer", Workspace: filepath.Join(tmpDir, "writer")},
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	sessionKey := "agent:writer:route-writer-session"
+	_, err := al.ProcessDirectWithChannelAndAgent(
+		context.Background(),
+		"hello",
+		sessionKey,
+		"cli",
+		"direct",
+		"writer",
+	)
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannelAndAgent() error = %v", err)
+	}
+
+	mainAgent, ok := al.GetRegistry().GetAgent("main")
+	if !ok {
+		t.Fatal("main agent not found")
+	}
+	writerAgent, ok := al.GetRegistry().GetAgent("writer")
+	if !ok {
+		t.Fatal("writer agent not found")
+	}
+
+	if got := len(writerAgent.Sessions.GetHistory(sessionKey)); got == 0 {
+		t.Fatal("writer session history should be populated for explicit route")
+	}
+	if got := len(mainAgent.Sessions.GetHistory(sessionKey)); got != 0 {
+		t.Fatalf("main session history len = %d, want 0 for explicit writer route", got)
+	}
+}
+
+func TestProcessDirectWithChannelAndAgent_UnknownAgentReturnsTypedError(t *testing.T) {
+	al, _, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	_, err := al.ProcessDirectWithChannelAndAgent(
+		context.Background(),
+		"hello",
+		"unknown-agent-session",
+		"cli",
+		"direct",
+		"missing-agent",
+	)
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("error type = %T, want *RequestError", err)
+	}
+	if reqErr.Code != ErrCodeAgentNotFound {
+		t.Fatalf("request error code = %q, want %q", reqErr.Code, ErrCodeAgentNotFound)
+	}
+}
+
 func TestProcessMessage_ToolStatusEmitsEvenWhenStatusUpdatesDisabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{

@@ -817,6 +817,13 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 	ctx context.Context,
 	content, sessionKey, channel, chatID string,
 ) (string, error) {
+	return al.ProcessDirectWithChannelAndAgent(ctx, content, sessionKey, channel, chatID, "")
+}
+
+func (al *AgentLoop) ProcessDirectWithChannelAndAgent(
+	ctx context.Context,
+	content, sessionKey, channel, chatID, requestedAgentID string,
+) (string, error) {
 	if err := al.ensureMCPInitialized(ctx); err != nil {
 		return "", err
 	}
@@ -827,6 +834,11 @@ func (al *AgentLoop) ProcessDirectWithChannel(
 		ChatID:     chatID,
 		Content:    content,
 		SessionKey: sessionKey,
+	}
+	if agentID := strings.TrimSpace(requestedAgentID); agentID != "" {
+		msg.Metadata = map[string]string{
+			metadataKeyRequestedAgentID: agentID,
+		}
 	}
 
 	response, _, err := al.processMessage(ctx, msg)

@@ -232,6 +232,14 @@ func (h *adminHandler) wakeAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if h.agentLoop == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "agent loop not initialized"})
+		return
+	}
+	if _, ok := h.agentLoop.GetRegistry().GetAgent(agentID); !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("agent %q not found", agentID)})
+		return
+	}
 	var req wakeAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
@@ -252,7 +260,16 @@ func (h *adminHandler) wakeAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := exec.Command(exe, "agent", "--session", req.SessionKey, "--message", req.Message).CombinedOutput()
+	out, err := h.runCombinedOutput(
+		exe,
+		"agent",
+		"--session",
+		req.SessionKey,
+		"--message",
+		req.Message,
+		"--agent-id",
+		agentID,
+	)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error":  err.Error(),
@@ -261,6 +278,13 @@ func (h *adminHandler) wakeAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"output": string(out)})
+}
+
+func (h *adminHandler) runCombinedOutput(name string, args ...string) ([]byte, error) {
+	if h.commandRunner != nil {
+		return h.commandRunner(name, args...)
+	}
+	return exec.Command(name, args...).CombinedOutput()
 }
 
 type sessionOpRequest struct {

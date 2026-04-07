@@ -18,6 +18,7 @@ type adminHandler struct {
 	mu                    sync.Mutex // serialises all config mutations
 	agentLoop             *agent.AgentLoop
 	heartbeatHistoryStore *heartbeat.HistoryStore
+	commandRunner         func(name string, args ...string) ([]byte, error)
 }
 
 func newAdminHandler(
@@ -33,6 +34,7 @@ func newAdminHandler(
 		secret:                secret,
 		agentLoop:             al,
 		heartbeatHistoryStore: hs,
+		commandRunner:         nil,
 	}
 }
 

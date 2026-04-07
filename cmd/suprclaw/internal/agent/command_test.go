@@ -30,4 +30,23 @@ func TestNewAgentCommand(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup("message"))
 	assert.NotNil(t, cmd.Flags().Lookup("session"))
 	assert.NotNil(t, cmd.Flags().Lookup("model"))
+	assert.NotNil(t, cmd.Flags().Lookup("agent-id"))
+}
+
+func TestNewAgentCommand_ForwardsAgentIDFlag(t *testing.T) {
+	originalRunner := runAgentCommand
+	t.Cleanup(func() { runAgentCommand = originalRunner })
+
+	capturedAgentID := ""
+	runAgentCommand = func(message, sessionKey, model, requestedAgentID string, debug bool) error {
+		capturedAgentID = requestedAgentID
+		return nil
+	}
+
+	cmd := NewAgentCommand()
+	cmd.SetArgs([]string{"--message", "hello", "--session", "test-session", "--agent-id", "writer"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Equal(t, "writer", capturedAgentID)
 }
