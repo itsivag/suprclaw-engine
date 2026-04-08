@@ -17,6 +17,15 @@ The service is structured as a monorepo containing both the backend and frontend
 *   Go 1.25+
 *   Node.js 20+ with pnpm
 
+### System Requirements
+
+*   **Web launcher runtime (minimum):** 1 vCPU, 512MB RAM
+*   **Web launcher runtime (recommended):** 2 vCPU, 1GB RAM
+*   **Web launcher development/build:** 2 vCPU, 2GB RAM recommended
+
+> [!NOTE]
+> Actual usage varies based on active channels, tool/MCP load, and concurrent sessions.
+
 ### Development
 
 Run both the frontend dev server and the Go backend simultaneously:

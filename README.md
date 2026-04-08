@@ -2,11 +2,11 @@
 
 **Ultra-lightweight personal AI assistant written in Go.**
 
-Runs on $10 hardware with <10MB RAM. Single binary, 1-second boot, works across x86_64, ARM64, MIPS, and RISC-V.
+Single-binary, self-hosted assistant with broad architecture support (x86_64, ARM64, MIPS, and RISC-V).
 
 Originally forked from `picoclaw`, but it has diverged heavily feature-wise, so the fork relationship was cut.
 
-![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/license-Elastic%20License%202.0-blue)
 
 **[Documentation](https://itsivag.github.io/suprclaw-engine/)**
@@ -19,8 +19,8 @@ Originally forked from `picoclaw`, but it has diverged heavily feature-wise, so 
 
 ## Features
 
-- **<10MB RAM** — 99% lighter than Electron-based alternatives
-- **1s boot** — even on 0.6GHz single-core hardware
+- **Light runtime footprint** — optimized Go core with no Electron runtime
+- **Fast startup** — optimized for quick CLI and gateway startup
 - **Single binary** — no runtime dependencies, drop-in deployment
 - **Multi-arch** — x86_64, ARM64, MIPS, RISC-V
 - **Self-hosted** — no telemetry, no tracking, all data stays local
@@ -28,6 +28,20 @@ Originally forked from `picoclaw`, but it has diverged heavily feature-wise, so 
 - **Scheduled tasks** — built-in cron
 - **Sandboxed** — agent restricted to workspace by default
 - **Checkpoints** — git-like session + workspace rollback with full audit log
+
+---
+
+## System Requirements
+
+- **Runtime (CLI/Gateway, minimum):** 1 vCPU, 256MB RAM
+- **Runtime (recommended):** 1 vCPU, 512MB RAM (or higher for heavy tool/MCP usage)
+- **Web launcher development/build:** 2 vCPU, 2GB RAM recommended
+- **From source:** Go 1.25+ (module currently targets Go 1.25.7)
+- **Web frontend tooling:** Node.js 20+ with pnpm
+- **Containerized deployments:** Docker + Docker Compose
+
+> [!NOTE]
+> Actual CPU/RAM usage depends on model provider, tool mix, channel load, and concurrency.
 
 ---
 
