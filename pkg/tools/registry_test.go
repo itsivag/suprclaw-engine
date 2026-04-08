@@ -222,10 +222,11 @@ func TestToolRegistry_ExecuteWithContext_AsyncCallback(t *testing.T) {
 func TestToolRegistry_GetDefinitions(t *testing.T) {
 	r := NewToolRegistry()
 	r.Register(newMockTool("alpha", "tool A"))
+	r.RegisterHidden(newMockTool("hidden_alpha", "hidden tool A"))
 
 	defs := r.GetDefinitions()
 	if len(defs) != 1 {
-		t.Fatalf("expected 1 definition, got %d", len(defs))
+		t.Fatalf("expected 1 core definition, got %d", len(defs))
 	}
 	if defs[0]["type"] != "function" {
 		t.Errorf("expected type 'function', got %v", defs[0]["type"])
@@ -241,6 +242,11 @@ func TestToolRegistry_GetDefinitions(t *testing.T) {
 	if fn["description"] != expectedDescription {
 		t.Errorf("expected description %q, got %v", expectedDescription, fn["description"])
 	}
+
+	allowlisted := r.GetDefinitionsWithHiddenAllowlist(map[string]struct{}{"hidden_alpha": {}})
+	if len(allowlisted) != 2 {
+		t.Fatalf("expected 2 definitions with allowlisted hidden tool, got %d", len(allowlisted))
+	}
 }
 
 func TestToolRegistry_ToProviderDefs(t *testing.T) {
@@ -253,10 +259,11 @@ func TestToolRegistry_ToProviderDefs(t *testing.T) {
 		params: params,
 		result: SilentResult("ok"),
 	})
+	r.RegisterHidden(newMockTool("hidden_beta", "hidden tool B"))
 
 	defs := r.ToProviderDefs()
 	if len(defs) != 1 {
-		t.Fatalf("expected 1 provider def, got %d", len(defs))
+		t.Fatalf("expected 1 provider def (core only), got %d", len(defs))
 	}
 
 	want := providers.ToolDefinition{
@@ -276,6 +283,26 @@ func TestToolRegistry_ToProviderDefs(t *testing.T) {
 	}
 	if got.Function.Description != want.Function.Description {
 		t.Errorf("Description: want %q, got %q", want.Function.Description, got.Function.Description)
+	}
+
+	withHidden := r.ToProviderDefsWithHiddenAllowlist(map[string]struct{}{"hidden_beta": {}})
+	if len(withHidden) != 2 {
+		t.Fatalf("expected 2 provider defs with allowlisted hidden tool, got %d", len(withHidden))
+	}
+}
+
+func TestToolRegistry_SnapshotHiddenToolNames(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(newMockTool("core_a", "core A"))
+	r.RegisterHidden(newMockTool("hidden_b", "hidden B"))
+	r.RegisterHidden(newMockTool("hidden_a", "hidden A"))
+
+	names := r.SnapshotHiddenToolNames()
+	if len(names) != 2 {
+		t.Fatalf("expected 2 hidden tool names, got %d", len(names))
+	}
+	if names[0] != "hidden_a" || names[1] != "hidden_b" {
+		t.Fatalf("expected sorted hidden names [hidden_a hidden_b], got %v", names)
 	}
 }
 

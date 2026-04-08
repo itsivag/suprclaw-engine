@@ -85,6 +85,23 @@ func TestJSONLBackend_Summary(t *testing.T) {
 	}
 }
 
+func TestJSONLBackend_DiscoveredTools(t *testing.T) {
+	b := newBackend(t)
+
+	if got := b.GetDiscoveredTools("s1"); len(got) != 0 {
+		t.Fatalf("expected empty discovered tools, got %v", got)
+	}
+
+	b.SetDiscoveredTools("s1", []string{"mcp_b", "mcp_a", "mcp_a", ""})
+	got := b.GetDiscoveredTools("s1")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 discovered tools, got %d (%v)", len(got), got)
+	}
+	if got[0] != "mcp_a" || got[1] != "mcp_b" {
+		t.Fatalf("expected sorted discovered tools [mcp_a mcp_b], got %v", got)
+	}
+}
+
 func TestJSONLBackend_TruncateAndSave(t *testing.T) {
 	b := newBackend(t)
 

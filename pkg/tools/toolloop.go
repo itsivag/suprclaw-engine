@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/itsivag/suprclaw/pkg/logger"
@@ -56,6 +57,14 @@ func RunToolLoop(
 		var providerToolDefs []providers.ToolDefinition
 		if config.Tools != nil {
 			providerToolDefs = config.Tools.ToProviderDefs()
+		}
+		exposedToolNames := make(map[string]struct{}, len(providerToolDefs))
+		for _, def := range providerToolDefs {
+			name := strings.TrimSpace(def.Function.Name)
+			if name == "" {
+				continue
+			}
+			exposedToolNames[name] = struct{}{}
 		}
 
 		// 2. Set default LLM options
@@ -147,7 +156,12 @@ func RunToolLoop(
 					})
 
 				var toolResult *ToolResult
-				if config.Tools != nil {
+				if _, ok := exposedToolNames[tc.Name]; !ok {
+					toolResult = ErrorResult(fmt.Sprintf(
+						"tool %q is not exposed in this request; discover it first",
+						tc.Name,
+					))
+				} else if config.Tools != nil {
 					toolResult = config.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, channel, chatID, nil)
 				} else {
 					toolResult = ErrorResult("No tools available")

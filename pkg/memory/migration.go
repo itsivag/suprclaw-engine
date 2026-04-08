@@ -15,11 +15,12 @@ import (
 
 // jsonSession mirrors pkg/session.Session for migration purposes.
 type jsonSession struct {
-	Key      string              `json:"key"`
-	Messages []providers.Message `json:"messages"`
-	Summary  string              `json:"summary,omitempty"`
-	Created  time.Time           `json:"created"`
-	Updated  time.Time           `json:"updated"`
+	Key             string              `json:"key"`
+	Messages        []providers.Message `json:"messages"`
+	Summary         string              `json:"summary,omitempty"`
+	DiscoveredTools []string            `json:"discovered_tools,omitempty"`
+	Created         time.Time           `json:"created"`
+	Updated         time.Time           `json:"updated"`
 }
 
 // MigrateFromJSON reads legacy sessions/*.json files from sessionsDir,
@@ -97,6 +98,14 @@ func MigrateFromJSON(
 				return migrated, fmt.Errorf(
 					"memory: migrate %s: set summary: %w",
 					name, sumErr,
+				)
+			}
+		}
+		if len(sess.DiscoveredTools) > 0 {
+			if discErr := store.SetDiscoveredTools(ctx, key, sess.DiscoveredTools); discErr != nil {
+				return migrated, fmt.Errorf(
+					"memory: migrate %s: set discovered tools: %w",
+					name, discErr,
 				)
 			}
 		}

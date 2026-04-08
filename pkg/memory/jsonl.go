@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,12 +37,13 @@ const (
 
 // sessionMeta holds per-session metadata stored in a .meta.json file.
 type sessionMeta struct {
-	Key       string    `json:"key"`
-	Summary   string    `json:"summary"`
-	Skip      int       `json:"skip"`
-	Count     int       `json:"count"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Key             string    `json:"key"`
+	Summary         string    `json:"summary"`
+	DiscoveredTools []string  `json:"discovered_tools,omitempty"`
+	Skip            int       `json:"skip"`
+	Count           int       `json:"count"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // JSONLStore implements Store using append-only JSONL files.
@@ -337,6 +339,66 @@ func (s *JSONLStore) SetSummary(
 	meta.Summary = summary
 	meta.UpdatedAt = now
 
+	return s.writeMeta(sessionKey, meta)
+}
+
+func normalizeDiscoveredTools(names []string) []string {
+	if len(names) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(names))
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *JSONLStore) GetDiscoveredTools(
+	_ context.Context, sessionKey string,
+) ([]string, error) {
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	meta, err := s.readMeta(sessionKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(meta.DiscoveredTools) == 0 {
+		return []string{}, nil
+	}
+	out := make([]string, len(meta.DiscoveredTools))
+	copy(out, meta.DiscoveredTools)
+	return out, nil
+}
+
+func (s *JSONLStore) SetDiscoveredTools(
+	_ context.Context, sessionKey string, names []string,
+) error {
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	meta, err := s.readMeta(sessionKey)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	if meta.CreatedAt.IsZero() {
+		meta.CreatedAt = now
+	}
+	meta.DiscoveredTools = normalizeDiscoveredTools(names)
+	meta.UpdatedAt = now
 	return s.writeMeta(sessionKey, meta)
 }
 

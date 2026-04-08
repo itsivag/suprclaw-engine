@@ -126,7 +126,7 @@ func (cb *ContextBuilder) getDiscoveryRule() string {
 	}
 
 	return fmt.Sprintf(
-		`5. **Tool Discovery** - Your visible tools are limited to save memory, but a vast hidden library exists. If you lack the right tool for a task, BEFORE giving up, you MUST search using the %s tool. Do not refuse a request unless the search returns nothing. Found tools will temporarily unlock for your next turn.`,
+		`5. **Tool Discovery** - Your visible tools are limited to save memory, but a vast hidden library exists. If you lack the right tool for a task, BEFORE giving up, you MUST search using %s. Do not refuse a request unless the search returns nothing. Search results are machine-readable references; discovered tools become available on the next turn and persist for this session.`,
 		strings.Join(toolNames, " or "),
 	)
 }

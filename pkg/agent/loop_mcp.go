@@ -188,18 +188,13 @@ func (al *AgentLoop) buildAndRegisterMCPManager(
 			)
 		}
 
-		ttl := cfg.Tools.MCP.Discovery.TTL
-		if ttl <= 0 {
-			ttl = 5 // Default value.
-		}
-
 		maxSearchResults := cfg.Tools.MCP.Discovery.MaxSearchResults
 		if maxSearchResults <= 0 {
 			maxSearchResults = 5 // Default value.
 		}
 
 		logger.InfoCF("agent", "Initializing tool discovery", map[string]any{
-			"bm25": useBM25, "regex": useRegex, "ttl": ttl, "max_results": maxSearchResults,
+			"bm25": useBM25, "regex": useRegex, "max_results": maxSearchResults,
 		})
 
 		for _, agentID := range agentIDs {
@@ -209,10 +204,10 @@ func (al *AgentLoop) buildAndRegisterMCPManager(
 			}
 
 			if useRegex {
-				agent.Tools.Register(tools.NewRegexSearchTool(agent.Tools, ttl, maxSearchResults))
+				agent.Tools.Register(tools.NewRegexSearchTool(agent.Tools, maxSearchResults))
 			}
 			if useBM25 {
-				agent.Tools.Register(tools.NewBM25SearchTool(agent.Tools, ttl, maxSearchResults))
+				agent.Tools.Register(tools.NewBM25SearchTool(agent.Tools, maxSearchResults))
 			}
 		}
 	}

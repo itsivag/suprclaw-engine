@@ -249,6 +249,31 @@ func TestSetSummary_GetSummary(t *testing.T) {
 	}
 }
 
+func TestSetDiscoveredTools_GetDiscoveredTools(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	got, err := store.GetDiscoveredTools(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetDiscoveredTools: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected empty discovered tools, got %v", got)
+	}
+
+	if err := store.SetDiscoveredTools(ctx, "s1", []string{"mcp_b", "mcp_a", "mcp_a", ""}); err != nil {
+		t.Fatalf("SetDiscoveredTools: %v", err)
+	}
+
+	got, err = store.GetDiscoveredTools(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetDiscoveredTools: %v", err)
+	}
+	if len(got) != 2 || got[0] != "mcp_a" || got[1] != "mcp_b" {
+		t.Fatalf("expected sorted discovered tools [mcp_a mcp_b], got %v", got)
+	}
+}
+
 func TestReadMeta_CorruptMetaRecovers(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
