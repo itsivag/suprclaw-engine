@@ -3,8 +3,12 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
+	"github.com/itsivag/suprclaw/pkg/skills"
 )
 
 func TestContextBuilderDynamicSkillActivation(t *testing.T) {
@@ -59,5 +63,49 @@ func TestContextBuilderSectionedBoundaryMarker(t *testing.T) {
 	prompt := cb.BuildSystemPrompt()
 	if !strings.Contains(prompt, systemPromptDynamicBoundary) {
 		t.Fatalf("expected system prompt to include dynamic boundary marker")
+	}
+}
+
+func TestRenderSkillsSummaryTokenBudgetPressure(t *testing.T) {
+	workspace := t.TempDir()
+	cb := NewContextBuilderWithSkillDirs(workspace, "", "")
+
+	longDesc := strings.Repeat("detailed-description ", 120)
+	skillsIn := []skills.SkillInfo{
+		{Name: "alpha-skill", Description: longDesc, Path: "/tmp/alpha", Source: "workspace"},
+		{Name: "beta-skill", Description: longDesc, Path: "/tmp/beta", Source: "workspace"},
+	}
+
+	t.Setenv("SUPRCLAW_SKILLS_SUMMARY_TOKEN_BUDGET", "5000")
+	highBudgetSummary := cb.renderSkillsSummary(skillsIn)
+	highSummaryTokens := providerscommon.EstimateTokenCount(
+		[]providerscommon.Message{{Role: "system", Content: highBudgetSummary}},
+		nil,
+		"skills-summary",
+		nil,
+	)
+	if highSummaryTokens <= 300 {
+		t.Fatalf("unexpected baseline token estimate too small: %d", highSummaryTokens)
+	}
+
+	lowBudget := highSummaryTokens - 80
+	t.Setenv("SUPRCLAW_SKILLS_SUMMARY_TOKEN_BUDGET", strconv.Itoa(lowBudget))
+	lowBudgetSummary := cb.renderSkillsSummary(skillsIn)
+
+	if !strings.Contains(lowBudgetSummary, "alpha-skill") || !strings.Contains(lowBudgetSummary, "beta-skill") {
+		t.Fatalf("token budget truncation must keep all skill names visible")
+	}
+
+	lowSummaryTokens := providerscommon.EstimateTokenCount(
+		[]providerscommon.Message{{Role: "system", Content: lowBudgetSummary}},
+		nil,
+		"skills-summary",
+		nil,
+	)
+	if lowSummaryTokens > lowBudget {
+		t.Fatalf("expected low-budget summary tokens <= %d, got %d", lowBudget, lowSummaryTokens)
+	}
+	if lowSummaryTokens >= highSummaryTokens {
+		t.Fatalf("expected token-budget pressure to reduce summary tokens: high=%d low=%d", highSummaryTokens, lowSummaryTokens)
 	}
 }

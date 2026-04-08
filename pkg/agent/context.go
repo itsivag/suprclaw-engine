@@ -19,6 +19,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/logger"
 	"github.com/itsivag/suprclaw/pkg/providers"
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 	"github.com/itsivag/suprclaw/pkg/skills"
 	"github.com/itsivag/suprclaw/pkg/utils"
 )
@@ -58,6 +59,7 @@ type ContextBuilder struct {
 const (
 	systemPromptDynamicBoundary = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
 	defaultSkillsCharBudget     = 8000
+	defaultSkillsTokenBudget    = 2400
 	minSkillDescChars           = 20
 	maxSkillDescChars           = 250
 )
@@ -184,6 +186,45 @@ func normalizeSkillInfos(skillsIn []skills.SkillInfo) []skills.SkillInfo {
 	return out
 }
 
+func renderSkillsSummaryWithDescBudget(skillsList []skills.SkillInfo, descBudget int) string {
+	lines := make([]string, 0, len(skillsList)*6+2)
+	lines = append(lines, "<skills>")
+	for _, s := range skillsList {
+		escapedName := xmlEscape(s.Name)
+		escapedDesc := xmlEscape(truncateSkillDescription(s.Description, descBudget))
+		escapedPath := xmlEscape(s.Path)
+
+		lines = append(lines, "  <skill>")
+		lines = append(lines, fmt.Sprintf("    <name>%s</name>", escapedName))
+		lines = append(lines, fmt.Sprintf("    <description>%s</description>", escapedDesc))
+		lines = append(lines, fmt.Sprintf("    <location>%s</location>", escapedPath))
+		lines = append(lines, fmt.Sprintf("    <source>%s</source>", s.Source))
+		lines = append(lines, "  </skill>")
+	}
+	lines = append(lines, "</skills>")
+	return strings.Join(lines, "\n")
+}
+
+func skillsSummaryTokenBudget() int {
+	budget := defaultSkillsTokenBudget
+	if envBudget := strings.TrimSpace(os.Getenv("SUPRCLAW_SKILLS_SUMMARY_TOKEN_BUDGET")); envBudget != "" {
+		if parsed, err := strconv.Atoi(envBudget); err == nil && parsed >= 256 {
+			budget = parsed
+		}
+	}
+	return budget
+}
+
+func estimateSkillsSummaryTokens(summary string) int {
+	msgs := []providers.Message{
+		{
+			Role:    "system",
+			Content: summary,
+		},
+	}
+	return providerscommon.EstimateTokenCount(msgs, nil, "skills-summary", nil)
+}
+
 func (cb *ContextBuilder) renderSkillsSummary(skillsIn []skills.SkillInfo) string {
 	skillsList := normalizeSkillInfos(skillsIn)
 	if len(skillsList) == 0 {
@@ -217,22 +258,21 @@ func (cb *ContextBuilder) renderSkillsSummary(skillsIn []skills.SkillInfo) strin
 		descBudget = perSkill
 	}
 
-	lines := make([]string, 0, len(skillsList)*6+2)
-	lines = append(lines, "<skills>")
-	for _, s := range skillsList {
-		escapedName := xmlEscape(s.Name)
-		escapedDesc := xmlEscape(truncateSkillDescription(s.Description, descBudget))
-		escapedPath := xmlEscape(s.Path)
-
-		lines = append(lines, "  <skill>")
-		lines = append(lines, fmt.Sprintf("    <name>%s</name>", escapedName))
-		lines = append(lines, fmt.Sprintf("    <description>%s</description>", escapedDesc))
-		lines = append(lines, fmt.Sprintf("    <location>%s</location>", escapedPath))
-		lines = append(lines, fmt.Sprintf("    <source>%s</source>", s.Source))
-		lines = append(lines, "  </skill>")
+	summary := renderSkillsSummaryWithDescBudget(skillsList, descBudget)
+	tokenBudget := skillsSummaryTokenBudget()
+	if estimateSkillsSummaryTokens(summary) <= tokenBudget {
+		return summary
 	}
-	lines = append(lines, "</skills>")
-	return strings.Join(lines, "\n")
+
+	for descBudget > minSkillDescChars {
+		descBudget--
+		summary = renderSkillsSummaryWithDescBudget(skillsList, descBudget)
+		if estimateSkillsSummaryTokens(summary) <= tokenBudget {
+			return summary
+		}
+	}
+
+	return summary
 }
 
 func (cb *ContextBuilder) staticSkillInfos() []skills.SkillInfo {
