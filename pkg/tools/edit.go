@@ -35,6 +35,18 @@ func (t *EditFileTool) Description() string {
 	return "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
 }
 
+func (t *EditFileTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need a precise in-place replacement of one exact text occurrence in an existing file.",
+		DoNotUseWhen: "you need to append content, replace an entire file, or perform fuzzy edits.",
+		HardRequirements: []string{
+			"path, old_text, and new_text must all be provided.",
+			"old_text must exist in the target file exactly once.",
+			"Treat missing or ambiguous old_text matches as hard failures.",
+		},
+	}
+}
+
 func (t *EditFileTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -99,6 +111,18 @@ func (t *AppendFileTool) SideEffectType() string { return "local" }
 
 func (t *AppendFileTool) Description() string {
 	return "Append content to the end of a file"
+}
+
+func (t *AppendFileTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to add new content to the end of a file while preserving existing content.",
+		DoNotUseWhen: "you need to replace existing text or overwrite the full file contents.",
+		HardRequirements: []string{
+			"path and content must both be provided.",
+			"Appends must be treated as end-of-file writes only.",
+			"File-system write errors must surface as explicit failures.",
+		},
+	}
 }
 
 func (t *AppendFileTool) Parameters() map[string]any {

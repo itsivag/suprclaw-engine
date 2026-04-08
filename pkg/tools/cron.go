@@ -80,6 +80,18 @@ func (t *CronTool) Description() string {
 	return "Schedule reminders, tasks, or system commands. IMPORTANT: When user asks to be reminded or scheduled, you MUST call this tool. Use 'at_seconds' for one-time reminders (e.g., 'remind me in 10 minutes' → at_seconds=600). Use 'every_seconds' ONLY for recurring tasks (e.g., 'every 2 hours' → every_seconds=7200). Use 'cron_expr' for complex recurring schedules. Use 'command' to execute shell commands directly."
 }
 
+func (t *CronTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to create, list, remove, enable, or disable scheduled reminders or jobs.",
+		DoNotUseWhen: "you need immediate execution with no scheduling semantics.",
+		HardRequirements: []string{
+			"action must be one of add, list, remove, enable, or disable.",
+			"For action=add, message and exactly one schedule input (at_seconds, every_seconds, or cron_expr) must be valid.",
+			"Command scheduling must satisfy execution enablement and internal-channel safety checks.",
+		},
+	}
+}
+
 // Parameters returns the tool parameters schema
 func (t *CronTool) Parameters() map[string]any {
 	return map[string]any{

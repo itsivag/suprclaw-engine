@@ -286,6 +286,18 @@ func (t *ReadFileTool) Description() string {
 	return "Read the contents of a file. Supports pagination via `offset` and `length`."
 }
 
+func (t *ReadFileTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need file contents for analysis, including partial reads via byte offsets.",
+		DoNotUseWhen: "you need to modify files or list directory entries.",
+		HardRequirements: []string{
+			"path must be provided.",
+			"offset must be greater than or equal to 0.",
+			"length must be greater than 0 and is capped by the configured read limit.",
+		},
+	}
+}
+
 func (t *ReadFileTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -505,6 +517,18 @@ func (t *WriteFileTool) Description() string {
 	return "Write content to a file"
 }
 
+func (t *WriteFileTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to create or fully overwrite a file with exact content.",
+		DoNotUseWhen: "you need targeted in-place edits or append-only writes.",
+		HardRequirements: []string{
+			"path and content must be provided.",
+			"The operation writes full file content, not partial patches.",
+			"Any file-system write failure must be treated as a hard error.",
+		},
+	}
+}
+
 func (t *WriteFileTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -561,6 +585,18 @@ func (t *ListDirTool) SideEffectType() string { return "none" }
 
 func (t *ListDirTool) Description() string {
 	return "List files and directories in a path"
+}
+
+func (t *ListDirTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to inspect directory entries before selecting files for follow-up actions.",
+		DoNotUseWhen: "you need file contents or any file modifications.",
+		HardRequirements: []string{
+			"Provide path explicitly when possible; default is current directory if omitted at execution time.",
+			"Return both files and directories from the target path.",
+			"Directory read errors must be returned as explicit failures.",
+		},
+	}
 }
 
 func (t *ListDirTool) Parameters() map[string]any {

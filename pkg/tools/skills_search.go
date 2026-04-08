@@ -32,6 +32,18 @@ func (t *FindSkillsTool) Description() string {
 	return "Search for installable skills from skill registries. Returns skill slugs, descriptions, versions, and relevance scores. Use this to discover skills before installing them with install_skill."
 }
 
+func (t *FindSkillsTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to discover available installable skills by capability keywords.",
+		DoNotUseWhen: "you already know the exact slug and just need to install it.",
+		HardRequirements: []string{
+			"query must be a non-empty string.",
+			"limit, when provided, must be between 1 and 20.",
+			"Search failures from registries must be returned as explicit errors.",
+		},
+	}
+}
+
 func (t *FindSkillsTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

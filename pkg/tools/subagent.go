@@ -273,6 +273,18 @@ func (t *SubagentTool) Description() string {
 	return "Execute a subagent task synchronously and return the result. Use this for delegating specific tasks to an independent agent instance. Returns execution summary to user and full details to LLM."
 }
 
+func (t *SubagentTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need synchronous delegation where the current flow must wait for subagent completion.",
+		DoNotUseWhen: "background async delegation via spawn is sufficient.",
+		HardRequirements: []string{
+			"task must be provided.",
+			"Subagent manager must be configured.",
+			"Tool call returns after subagent execution finishes or fails.",
+		},
+	}
+}
+
 func (t *SubagentTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

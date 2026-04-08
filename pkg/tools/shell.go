@@ -173,6 +173,18 @@ func (t *ExecTool) Description() string {
 	return "Execute a shell command and return its output. Use with caution."
 }
 
+func (t *ExecTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need terminal command execution that cannot be completed via specialized tools.",
+		DoNotUseWhen: "a safer, purpose-built tool already covers the operation.",
+		HardRequirements: []string{
+			"command must be provided.",
+			"Commands must pass deny-pattern and workspace/path safety guards.",
+			"Respect channel restrictions when remote execution is disabled.",
+		},
+	}
+}
+
 func (t *ExecTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

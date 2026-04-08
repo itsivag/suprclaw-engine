@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 )
 
@@ -9,6 +10,7 @@ import (
 type Tool interface {
 	Name() string
 	Description() string
+	UsageContract() ToolUsageContract
 	Parameters() map[string]any
 	Execute(ctx context.Context, args map[string]any) *ToolResult
 }
@@ -136,11 +138,14 @@ type SideEffectClassifier interface {
 }
 
 func ToolToSchema(tool Tool) map[string]any {
+	if err := ValidateToolContract(tool); err != nil {
+		panic(fmt.Errorf("tool schema build failed: %w", err))
+	}
 	return map[string]any{
 		"type": "function",
 		"function": map[string]any{
 			"name":        tool.Name(),
-			"description": tool.Description(),
+			"description": FormatToolDescription(tool.Description(), tool.UsageContract()),
 			"parameters":  tool.Parameters(),
 		},
 	}

@@ -28,6 +28,18 @@ func (t *SpawnTool) Description() string {
 	return "Spawn a subagent to handle a task in the background. Use this for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done."
 }
 
+func (t *SpawnTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to delegate an independent task that can run asynchronously in the background.",
+		DoNotUseWhen: "you need immediate synchronous results within the current tool call.",
+		HardRequirements: []string{
+			"task must be a non-empty string.",
+			"Subagent manager must be configured.",
+			"If agent_id is provided, it must pass allowlist checks before spawning.",
+		},
+	}
+}
+
 func (t *SpawnTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

@@ -24,6 +24,18 @@ func (t *SPITool) Description() string {
 	return "Interact with SPI bus devices for high-speed peripheral communication. Actions: list (find SPI devices), transfer (full-duplex send/receive), read (receive bytes). Linux only."
 }
 
+func (t *SPITool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need Linux SPI operations such as listing devices or executing read/transfer actions.",
+		DoNotUseWhen: "the runtime is non-Linux or the task does not involve SPI hardware communication.",
+		HardRequirements: []string{
+			"action must be provided and valid for SPI operations.",
+			"The tool is Linux-only and requires /dev/spidev* device access.",
+			"Transfer operations require explicit confirmation and valid device arguments.",
+		},
+	}
+}
+
 func (t *SPITool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

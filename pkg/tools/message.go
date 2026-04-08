@@ -26,6 +26,18 @@ func (t *MessageTool) Description() string {
 	return "Send a message to user on a chat channel. Use this when you want to communicate something."
 }
 
+func (t *MessageTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to send a direct user-facing message to the active conversation target.",
+		DoNotUseWhen: "normal assistant response text is sufficient and no direct outbound send is needed.",
+		HardRequirements: []string{
+			"content must be provided.",
+			"Target channel and chat_id must resolve from args or execution context.",
+			"Message sending must be configured via send callback.",
+		},
+	}
+}
+
 func (t *MessageTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

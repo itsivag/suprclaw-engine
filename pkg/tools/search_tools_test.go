@@ -15,6 +15,15 @@ type mockSearchableTool struct {
 
 func (m *mockSearchableTool) Name() string        { return m.name }
 func (m *mockSearchableTool) Description() string { return m.desc }
+func (m *mockSearchableTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "test hidden tool usage",
+		DoNotUseWhen: "test hidden tool non-usage",
+		HardRequirements: []string{
+			"test requirement",
+		},
+	}
+}
 func (m *mockSearchableTool) Parameters() map[string]any {
 	return map[string]any{"type": "object"}
 }

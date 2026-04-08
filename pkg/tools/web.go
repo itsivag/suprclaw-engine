@@ -731,6 +731,18 @@ func (t *WebSearchTool) Description() string {
 	return "Search the web for current information. Returns titles, URLs, and snippets from search results."
 }
 
+func (t *WebSearchTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need broad web discovery for current information, references, or sources.",
+		DoNotUseWhen: "you already have a specific URL and need to fetch its content directly.",
+		HardRequirements: []string{
+			"query must be provided.",
+			"count, when provided, must stay within 1 to 10.",
+			"Provider/API failures must be returned as explicit errors.",
+		},
+	}
+}
+
 func (t *WebSearchTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -860,6 +872,18 @@ func (t *WebFetchTool) Name() string {
 
 func (t *WebFetchTool) Description() string {
 	return "Fetch a URL and extract readable content (HTML to text). Use this to get weather info, news, articles, or any web content."
+}
+
+func (t *WebFetchTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to read content from a specific http or https URL.",
+		DoNotUseWhen: "you need search result discovery across multiple pages.",
+		HardRequirements: []string{
+			"url must be provided and use http or https.",
+			"Private/local network hosts are blocked unless explicitly whitelisted by configuration.",
+			"Response extraction must respect configured fetch byte limits.",
+		},
+	}
 }
 
 func (t *WebFetchTool) Parameters() map[string]any {

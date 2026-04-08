@@ -134,6 +134,18 @@ func (t *MCPTool) Description() string {
 	return fmt.Sprintf("[MCP:%s] %s", t.serverName, desc)
 }
 
+func (t *MCPTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need this specific MCP server capability and have arguments that match the MCP input schema.",
+		DoNotUseWhen: "a native non-MCP tool can complete the task with less external dependency.",
+		HardRequirements: []string{
+			"Arguments must conform to the MCP tool input schema.",
+			"Treat MCP transport or server-side errors as hard failures.",
+			"Use the wrapped server/tool identity exactly as provided by this wrapper.",
+		},
+	}
+}
+
 // Parameters returns the tool parameters schema
 func (t *MCPTool) Parameters() map[string]any {
 	// The InputSchema is already a JSON Schema object

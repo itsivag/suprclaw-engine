@@ -34,6 +34,18 @@ func (t *SpawnStatusTool) Description() string {
 		"(e.g. direct programmatic calls via Execute)."
 }
 
+func (t *SpawnStatusTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to inspect status or results of previously spawned subagent tasks.",
+		DoNotUseWhen: "you need to launch a new task instead of querying existing ones.",
+		HardRequirements: []string{
+			"Subagent manager must be configured.",
+			"If task_id is provided, it must be a string.",
+			"Results must remain scoped to the current channel/chat context when available.",
+		},
+	}
+}
+
 func (t *SpawnStatusTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
