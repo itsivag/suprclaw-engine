@@ -418,7 +418,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 	data := probe[:min(int64(n), length)]
 
 	if len(data) == 0 {
-		return NewToolResult("[END OF FILE - no content at this offset]")
+		return NewToolResult("[END OF FILE - no content at this offset]").WithTouchedPaths(path)
 	}
 
 	// Build metadata header.
@@ -459,7 +459,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 			"has_more":   hasMore,
 		})
 
-	return NewToolResult(header + "\n\n" + string(data))
+	return NewToolResult(header + "\n\n" + string(data)).WithTouchedPaths(path)
 }
 
 // getInt64Arg extracts an integer argument from the args map, returning the
@@ -561,7 +561,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) *ToolR
 		return ErrorResult(err.Error())
 	}
 
-	return SilentResult(fmt.Sprintf("File written: %s", path))
+	return SilentResult(fmt.Sprintf("File written: %s", path)).WithTouchedPaths(path)
 }
 
 type ListDirTool struct {
@@ -622,7 +622,7 @@ func (t *ListDirTool) Execute(ctx context.Context, args map[string]any) *ToolRes
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read directory: %v", err))
 	}
-	return formatDirEntries(entries)
+	return formatDirEntries(entries).WithTouchedPaths(path)
 }
 
 func formatDirEntries(entries []os.DirEntry) *ToolResult {

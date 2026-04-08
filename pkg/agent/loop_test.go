@@ -18,10 +18,43 @@ import (
 	mcppkg "github.com/itsivag/suprclaw/pkg/mcp"
 	"github.com/itsivag/suprclaw/pkg/media"
 	"github.com/itsivag/suprclaw/pkg/providers"
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 	"github.com/itsivag/suprclaw/pkg/routing"
 	"github.com/itsivag/suprclaw/pkg/tools"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func withLoopTestUsage(
+	resp *providers.LLMResponse,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) *providers.LLMResponse {
+	if resp.Usage != nil {
+		return resp
+	}
+
+	promptTokens := providerscommon.EstimateTokenCount(messages, tools, model, options)
+	if promptTokens <= 0 {
+		promptTokens = 1
+	}
+	completionTokens := 0
+	if strings.TrimSpace(resp.Content) != "" {
+		completionTokens = providerscommon.EstimateTokenCount(
+			[]providers.Message{{Role: "assistant", Content: resp.Content}},
+			nil,
+			model,
+			nil,
+		)
+	}
+	resp.Usage = &providers.UsageInfo{
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      promptTokens + completionTokens,
+	}
+	return resp
+}
 
 type fakeChannel struct{ id string }
 
@@ -150,14 +183,25 @@ func (r *recordingProvider) Chat(
 	opts map[string]any,
 ) (*providers.LLMResponse, error) {
 	r.lastMessages = append([]providers.Message(nil), messages...)
-	return &providers.LLMResponse{
+	return withLoopTestUsage(&providers.LLMResponse{
 		Content:   "Mock response",
 		ToolCalls: []providers.ToolCall{},
-	}, nil
+	}, messages, tools, model, opts), nil
 }
 
 func (r *recordingProvider) GetDefaultModel() string {
 	return "mock-model"
+}
+
+func (r *recordingProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 type toolCallThenFinalProvider struct {
@@ -173,7 +217,7 @@ func (p *toolCallThenFinalProvider) Chat(
 ) (*providers.LLMResponse, error) {
 	p.callCount++
 	if p.callCount == 1 {
-		return &providers.LLMResponse{
+		return withLoopTestUsage(&providers.LLMResponse{
 			ToolCalls: []providers.ToolCall{
 				{
 					ID:   "tc-1",
@@ -183,15 +227,25 @@ func (p *toolCallThenFinalProvider) Chat(
 					},
 				},
 			},
-		}, nil
+		}, messages, tools, model, opts), nil
 	}
-	return &providers.LLMResponse{
+	return withLoopTestUsage(&providers.LLMResponse{
 		Content:   "done",
 		ToolCalls: []providers.ToolCall{},
-	}, nil
+	}, messages, tools, model, opts), nil
 }
 
 func (p *toolCallThenFinalProvider) GetDefaultModel() string { return "mock-model" }
+func (p *toolCallThenFinalProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
+}
 
 type messageToolThenDoneProvider struct {
 	callCount int
@@ -206,7 +260,7 @@ func (p *messageToolThenDoneProvider) Chat(
 ) (*providers.LLMResponse, error) {
 	p.callCount++
 	if p.callCount == 1 {
-		return &providers.LLMResponse{
+		return withLoopTestUsage(&providers.LLMResponse{
 			ToolCalls: []providers.ToolCall{
 				{
 					ID:   "tc-message-1",
@@ -216,15 +270,25 @@ func (p *messageToolThenDoneProvider) Chat(
 					},
 				},
 			},
-		}, nil
+		}, messages, tools, model, opts), nil
 	}
-	return &providers.LLMResponse{
+	return withLoopTestUsage(&providers.LLMResponse{
 		Content:   "",
 		ToolCalls: []providers.ToolCall{},
-	}, nil
+	}, messages, tools, model, opts), nil
 }
 
 func (p *messageToolThenDoneProvider) GetDefaultModel() string { return "mock-model" }
+func (p *messageToolThenDoneProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
+}
 
 type noopTool struct{}
 
@@ -287,6 +351,16 @@ func (p *alwaysFailProvider) Chat(
 }
 
 func (p *alwaysFailProvider) GetDefaultModel() string { return "mock-model" }
+func (p *alwaysFailProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
+}
 
 func collectActivityEventsUntilTerminal(t *testing.T, msgBus *bus.MessageBus, timeout time.Duration) []bus.OutboundActivityEvent {
 	t.Helper()
@@ -2194,14 +2268,25 @@ func (m *simpleMockProvider) Chat(
 	model string,
 	opts map[string]any,
 ) (*providers.LLMResponse, error) {
-	return &providers.LLMResponse{
+	return withLoopTestUsage(&providers.LLMResponse{
 		Content:   m.response,
 		ToolCalls: []providers.ToolCall{},
-	}, nil
+	}, messages, tools, model, opts), nil
 }
 
 func (m *simpleMockProvider) GetDefaultModel() string {
 	return "mock-model"
+}
+
+func (m *simpleMockProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 type countingMockProvider struct {
@@ -2217,14 +2302,25 @@ func (m *countingMockProvider) Chat(
 	opts map[string]any,
 ) (*providers.LLMResponse, error) {
 	m.calls++
-	return &providers.LLMResponse{
+	return withLoopTestUsage(&providers.LLMResponse{
 		Content:   m.response,
 		ToolCalls: []providers.ToolCall{},
-	}, nil
+	}, messages, tools, model, opts), nil
 }
 
 func (m *countingMockProvider) GetDefaultModel() string {
 	return "counting-mock-model"
+}
+
+func (m *countingMockProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 type thinkingCaptureProvider struct {
@@ -2248,10 +2344,10 @@ func (m *thinkingCaptureProvider) Chat(
 	for k, v := range opts {
 		m.lastOpts[k] = v
 	}
-	return &providers.LLMResponse{
+	return withLoopTestUsage(&providers.LLMResponse{
 		Content:   m.response,
 		ToolCalls: []providers.ToolCall{},
-	}, nil
+	}, messages, tools, model, opts), nil
 }
 
 func (m *thinkingCaptureProvider) GetDefaultModel() string {
@@ -2260,6 +2356,17 @@ func (m *thinkingCaptureProvider) GetDefaultModel() string {
 
 func (m *thinkingCaptureProvider) SupportsThinking() bool {
 	return m.supportsThinking
+}
+
+func (m *thinkingCaptureProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 type blockingCancelProvider struct {
@@ -2280,6 +2387,17 @@ func (p *blockingCancelProvider) Chat(
 
 func (p *blockingCancelProvider) GetDefaultModel() string {
 	return "blocking-cancel-model"
+}
+
+func (p *blockingCancelProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 type gatedProvider struct {
@@ -2309,14 +2427,25 @@ func (p *gatedProvider) Chat(
 		return nil, ctx.Err()
 	}
 
-	return &providers.LLMResponse{
+	return withLoopTestUsage(&providers.LLMResponse{
 		Content:   "ok",
 		ToolCalls: []providers.ToolCall{},
-	}, nil
+	}, messages, tools, model, opts), nil
 }
 
 func (p *gatedProvider) GetDefaultModel() string {
 	return "gated-provider-model"
+}
+
+func (p *gatedProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 func waitForStartedMessage(t *testing.T, started <-chan string, want string, timeout time.Duration) {
@@ -2356,7 +2485,7 @@ func (p *messageStateIsolationProvider) Chat(
 
 	if strings.Contains(lastUser, "use-message") {
 		if !hasToolResult {
-			return &providers.LLMResponse{
+			return withLoopTestUsage(&providers.LLMResponse{
 				ToolCalls: []providers.ToolCall{
 					{
 						ID:   "tc-msg-state",
@@ -2366,22 +2495,33 @@ func (p *messageStateIsolationProvider) Chat(
 						},
 					},
 				},
-			}, nil
+			}, messages, tools, model, opts), nil
 		}
-		return &providers.LLMResponse{
+		return withLoopTestUsage(&providers.LLMResponse{
 			Content:   "",
 			ToolCalls: []providers.ToolCall{},
-		}, nil
+		}, messages, tools, model, opts), nil
 	}
 
-	return &providers.LLMResponse{
+	return withLoopTestUsage(&providers.LLMResponse{
 		Content:   "plain-final",
 		ToolCalls: []providers.ToolCall{},
-	}, nil
+	}, messages, tools, model, opts), nil
 }
 
 func (p *messageStateIsolationProvider) GetDefaultModel() string {
 	return "message-state-isolation-model"
+}
+
+func (p *messageStateIsolationProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 // mockCustomTool is a simple mock tool for registration testing
@@ -3179,14 +3319,25 @@ func (m *failFirstMockProvider) Chat(
 	if m.currentCall <= m.failures {
 		return nil, m.failError
 	}
-	return &providers.LLMResponse{
+	return withLoopTestUsage(&providers.LLMResponse{
 		Content:   m.successResp,
 		ToolCalls: []providers.ToolCall{},
-	}, nil
+	}, messages, tools, model, opts), nil
 }
 
 func (m *failFirstMockProvider) GetDefaultModel() string {
 	return "mock-fail-model"
+}
+
+func (m *failFirstMockProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 // TestAgentLoop_ContextExhaustionRetry verify that the agent retries on context errors

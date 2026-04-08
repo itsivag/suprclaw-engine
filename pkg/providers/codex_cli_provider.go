@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 )
 
 // CodexCliProvider implements LLMProvider by wrapping the codex CLI as a subprocess.
@@ -64,6 +66,7 @@ func (p *CodexCliProvider) Chat(
 	if stdoutStr := stdout.String(); stdoutStr != "" {
 		resp, parseErr := p.parseJSONLEvents(stdoutStr)
 		if parseErr == nil && resp != nil && (resp.Content != "" || len(resp.ToolCalls) > 0) {
+			ensureUsageContract(resp, messages, tools, model, options)
 			return resp, nil
 		}
 	}
@@ -78,12 +81,28 @@ func (p *CodexCliProvider) Chat(
 		return nil, fmt.Errorf("codex cli error: %w", err)
 	}
 
-	return p.parseJSONLEvents(stdout.String())
+	resp, parseErr := p.parseJSONLEvents(stdout.String())
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	ensureUsageContract(resp, messages, tools, model, options)
+	return resp, nil
 }
 
 // GetDefaultModel returns the default model identifier.
 func (p *CodexCliProvider) GetDefaultModel() string {
 	return "codex-cli"
+}
+
+func (p *CodexCliProvider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }
 
 // buildPrompt converts messages to a prompt string for the Codex CLI.

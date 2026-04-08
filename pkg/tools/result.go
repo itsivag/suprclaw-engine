@@ -34,6 +34,11 @@ type ToolResult struct {
 	// Media contains media store refs produced by this tool.
 	// When non-empty, the agent will publish these as OutboundMediaMessage.
 	Media []string `json:"media,omitempty"`
+
+	// TouchedPaths contains file paths explicitly touched by this tool call.
+	// This is the only contract used for path-conditional skill activation.
+	// Heuristic path extraction from tool arguments is intentionally unsupported.
+	TouchedPaths []string `json:"touched_paths,omitempty"`
 }
 
 // NewToolResult creates a basic ToolResult with content for the LLM.
@@ -156,5 +161,34 @@ func (tr *ToolResult) MarshalJSON() ([]byte, error) {
 //	result := ErrorResult("Operation failed").WithError(err)
 func (tr *ToolResult) WithError(err error) *ToolResult {
 	tr.Err = err
+	return tr
+}
+
+// WithTouchedPaths sets explicit touched paths metadata for this tool result.
+// Empty strings are ignored and duplicate paths are removed in-order.
+func (tr *ToolResult) WithTouchedPaths(paths ...string) *ToolResult {
+	if tr == nil || len(paths) == 0 {
+		return tr
+	}
+
+	if tr.TouchedPaths == nil {
+		tr.TouchedPaths = make([]string, 0, len(paths))
+	}
+
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		seen := false
+		for _, existing := range tr.TouchedPaths {
+			if existing == p {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			tr.TouchedPaths = append(tr.TouchedPaths, p)
+		}
+	}
 	return tr
 }

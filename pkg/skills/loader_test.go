@@ -149,7 +149,7 @@ func createSkillDir(t *testing.T, base, dirName, name, description string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644))
 }
 
-func TestListSkillsWorkspaceOverridesGlobal(t *testing.T) {
+func TestValidateSkillNameCollisions_WorkspaceGlobalConflict(t *testing.T) {
 	tmp := t.TempDir()
 	ws := filepath.Join(tmp, "workspace")
 	global := filepath.Join(tmp, "global")
@@ -158,14 +158,14 @@ func TestListSkillsWorkspaceOverridesGlobal(t *testing.T) {
 	createSkillDir(t, global, "my-skill", "my-skill", "global version")
 
 	sl := NewSkillsLoader(ws, global, "")
-	skills := sl.ListSkills()
-
-	assert.Len(t, skills, 1)
-	assert.Equal(t, "workspace", skills[0].Source)
-	assert.Equal(t, "workspace version", skills[0].Description)
+	err := sl.ValidateSkillNameCollisions()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "duplicate skill names detected")
+	assert.ErrorContains(t, err, filepath.Join(ws, "skills", "my-skill", "SKILL.md"))
+	assert.ErrorContains(t, err, filepath.Join(global, "my-skill", "SKILL.md"))
 }
 
-func TestListSkillsGlobalOverridesBuiltin(t *testing.T) {
+func TestValidateSkillNameCollisions_GlobalBuiltinConflict(t *testing.T) {
 	tmp := t.TempDir()
 	ws := filepath.Join(tmp, "workspace")
 	global := filepath.Join(tmp, "global")
@@ -175,14 +175,13 @@ func TestListSkillsGlobalOverridesBuiltin(t *testing.T) {
 	createSkillDir(t, builtin, "my-skill", "my-skill", "builtin version")
 
 	sl := NewSkillsLoader(ws, global, builtin)
-	skills := sl.ListSkills()
-
-	assert.Len(t, skills, 1)
-	assert.Equal(t, "global", skills[0].Source)
-	assert.Equal(t, "global version", skills[0].Description)
+	err := sl.ValidateSkillNameCollisions()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, filepath.Join(global, "my-skill", "SKILL.md"))
+	assert.ErrorContains(t, err, filepath.Join(builtin, "my-skill", "SKILL.md"))
 }
 
-func TestListSkillsMetadataNameDedup(t *testing.T) {
+func TestValidateSkillNameCollisions_MetadataNameConflict(t *testing.T) {
 	tmp := t.TempDir()
 	ws := filepath.Join(tmp, "workspace")
 	global := filepath.Join(tmp, "global")
@@ -192,11 +191,11 @@ func TestListSkillsMetadataNameDedup(t *testing.T) {
 	createSkillDir(t, global, "dir-b", "shared-name", "global version")
 
 	sl := NewSkillsLoader(ws, global, "")
-	skills := sl.ListSkills()
-
-	assert.Len(t, skills, 1)
-	assert.Equal(t, "shared-name", skills[0].Name)
-	assert.Equal(t, "workspace", skills[0].Source)
+	err := sl.ValidateSkillNameCollisions()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "shared-name")
+	assert.ErrorContains(t, err, filepath.Join(ws, "skills", "dir-a", "SKILL.md"))
+	assert.ErrorContains(t, err, filepath.Join(global, "dir-b", "SKILL.md"))
 }
 
 func TestListSkillsMultipleDistinctSkills(t *testing.T) {

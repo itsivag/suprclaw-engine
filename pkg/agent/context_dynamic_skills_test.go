@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
@@ -34,7 +35,7 @@ func TestContextBuilderDynamicSkillActivation(t *testing.T) {
 
 	cb := NewContextBuilderWithSkillDirs(workspace, "", "")
 
-	initialMsgs := cb.BuildMessages(nil, "", "hi", nil, "cli", "chat-1", "", "")
+	initialMsgs := cb.BuildMessages(nil, "", "hi", nil, "chat-1", "cli", "chat-1", "", "")
 	if len(initialMsgs) == 0 {
 		t.Fatalf("expected system message")
 	}
@@ -45,14 +46,22 @@ func TestContextBuilderDynamicSkillActivation(t *testing.T) {
 		t.Fatalf("conditional skill should not appear before activation")
 	}
 
-	activated := cb.ActivateSkillsForPaths("cli", "chat-1", []string{filepath.Join(workspace, "src", "main.go")})
+	activated, deactivated := cb.RecomputeSessionSkills("chat-1", []string{filepath.Join(workspace, "src", "main.go")})
 	if len(activated) != 1 || activated[0] != "go-skill" {
 		t.Fatalf("expected go-skill activation, got %v", activated)
 	}
+	if len(deactivated) != 0 {
+		t.Fatalf("expected no deactivations, got %v", deactivated)
+	}
 
-	updatedMsgs := cb.BuildMessages(nil, "", "hi again", nil, "cli", "chat-1", "", "")
+	updatedMsgs := cb.BuildMessages(nil, "", "hi again", nil, "chat-1", "cli", "chat-1", "", "")
 	if !strings.Contains(updatedMsgs[0].Content, "go-skill") {
 		t.Fatalf("activated conditional skill should appear in session skills section")
+	}
+
+	_, deactivated = cb.RecomputeSessionSkills("chat-1", nil)
+	if len(deactivated) != 1 || deactivated[0] != "go-skill" {
+		t.Fatalf("expected go-skill deactivation when evidence is absent, got %v", deactivated)
 	}
 }
 
@@ -64,6 +73,67 @@ func TestContextBuilderSectionedBoundaryMarker(t *testing.T) {
 	if !strings.Contains(prompt, systemPromptDynamicBoundary) {
 		t.Fatalf("expected system prompt to include dynamic boundary marker")
 	}
+}
+
+func TestContextBuilderClearSessionSkillState(t *testing.T) {
+	workspace := t.TempDir()
+
+	conditionalDir := filepath.Join(workspace, "skills", "go-skill")
+	if err := os.MkdirAll(conditionalDir, 0o755); err != nil {
+		t.Fatalf("mkdir conditional skill: %v", err)
+	}
+	conditionalContent := "---\nname: go-skill\ndescription: go files helper\npaths:\n  - src/**/*.go\n---\n\n# Go Skill"
+	if err := os.WriteFile(filepath.Join(conditionalDir, "SKILL.md"), []byte(conditionalContent), 0o644); err != nil {
+		t.Fatalf("write conditional skill: %v", err)
+	}
+
+	cb := NewContextBuilderWithSkillDirs(workspace, "", "")
+	activated, _ := cb.RecomputeSessionSkills("session-1", []string{filepath.Join(workspace, "src", "main.go")})
+	if len(activated) != 1 || activated[0] != "go-skill" {
+		t.Fatalf("expected activation, got %v", activated)
+	}
+
+	cb.ClearSessionSkillState("session-1")
+	msgs := cb.BuildMessages(nil, "", "hello", nil, "session-1", "cli", "chat", "", "")
+	if strings.Contains(msgs[0].Content, "go-skill") {
+		t.Fatalf("expected cleared session state to remove activated skill section")
+	}
+}
+
+func TestContextBuilderRecomputeSessionSkills_ConcurrentSessions(t *testing.T) {
+	workspace := t.TempDir()
+	conditionalDir := filepath.Join(workspace, "skills", "go-skill")
+	if err := os.MkdirAll(conditionalDir, 0o755); err != nil {
+		t.Fatalf("mkdir conditional skill: %v", err)
+	}
+	conditionalContent := "---\nname: go-skill\ndescription: go files helper\npaths:\n  - src/**/*.go\n---\n\n# Go Skill"
+	if err := os.WriteFile(filepath.Join(conditionalDir, "SKILL.md"), []byte(conditionalContent), 0o644); err != nil {
+		t.Fatalf("write conditional skill: %v", err)
+	}
+
+	cb := NewContextBuilderWithSkillDirs(workspace, "", "")
+	const workers = 24
+	const iterations = 64
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for w := 0; w < workers; w++ {
+		go func(worker int) {
+			defer wg.Done()
+			session := "session-a"
+			if worker%2 == 0 {
+				session = "session-b"
+			}
+			for i := 0; i < iterations; i++ {
+				if i%3 == 0 {
+					cb.RecomputeSessionSkills(session, nil)
+					continue
+				}
+				cb.RecomputeSessionSkills(session, []string{filepath.Join(workspace, "src", "main.go")})
+			}
+		}(w)
+	}
+	wg.Wait()
 }
 
 func TestRenderSkillsSummaryTokenBudgetPressure(t *testing.T) {

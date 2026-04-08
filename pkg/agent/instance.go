@@ -115,6 +115,12 @@ func NewAgentInstance(
 		mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseRegex,
 	)
 
+	tokenCounter, ok := provider.(providers.TokenCountCapable)
+	if !ok {
+		panic(fmt.Errorf("provider %T does not satisfy strict token-count contract", provider))
+	}
+	contextBuilder.SetSkillsTokenCounter(tokenCounter, model)
+
 	agentID := routing.DefaultAgentID
 	agentName := ""
 	var subagents *config.SubagentsConfig

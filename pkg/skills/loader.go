@@ -40,6 +40,35 @@ type SkillInfo struct {
 	Paths       []string `json:"paths,omitempty"`
 }
 
+type SkillCollision struct {
+	Name     string
+	Winner   SkillInfo
+	Conflict SkillInfo
+}
+
+type SkillCollisionError struct {
+	Collisions []SkillCollision
+}
+
+func (e *SkillCollisionError) Error() string {
+	if e == nil || len(e.Collisions) == 0 {
+		return "duplicate skill names detected"
+	}
+	var b strings.Builder
+	b.WriteString("duplicate skill names detected:\n")
+	for _, collision := range e.Collisions {
+		b.WriteString(fmt.Sprintf(
+			"  - %s: winner=%s (%s), conflict=%s (%s)\n",
+			collision.Name,
+			collision.Winner.Path,
+			collision.Winner.Source,
+			collision.Conflict.Path,
+			collision.Conflict.Source,
+		))
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func (info SkillInfo) validate() error {
 	var errs error
 	if info.Name == "" {
@@ -100,7 +129,116 @@ func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string
 	}
 }
 
+func sourcePriority(source string) int {
+	switch source {
+	case "workspace":
+		return 0
+	case "global":
+		return 1
+	case "builtin":
+		return 2
+	default:
+		return 3
+	}
+}
+
+func pickCollisionWinner(a, b SkillInfo) (winner SkillInfo, conflict SkillInfo) {
+	pa := sourcePriority(a.Source)
+	pb := sourcePriority(b.Source)
+	switch {
+	case pa < pb:
+		return a, b
+	case pb < pa:
+		return b, a
+	case a.Path <= b.Path:
+		return a, b
+	default:
+		return b, a
+	}
+}
+
+func (sl *SkillsLoader) ValidateSkillNameCollisions() error {
+	all := make([]SkillInfo, 0)
+
+	addSkills := func(dir, source string) {
+		if dir == "" {
+			return
+		}
+		dirs, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		sort.Slice(dirs, func(i, j int) bool {
+			return dirs[i].Name() < dirs[j].Name()
+		})
+		for _, d := range dirs {
+			if !d.IsDir() {
+				continue
+			}
+			skillFile := filepath.Join(dir, d.Name(), "SKILL.md")
+			if _, err := os.Stat(skillFile); err != nil {
+				continue
+			}
+
+			info := SkillInfo{
+				Name:   d.Name(),
+				Path:   skillFile,
+				Source: source,
+			}
+			metadata := sl.getSkillMetadata(skillFile)
+			if metadata != nil {
+				info.Description = metadata.Description
+				info.Name = metadata.Name
+				info.Paths = append(info.Paths[:0], metadata.Paths...)
+			}
+			if err := info.validate(); err != nil {
+				slog.Warn("invalid skill from "+source, "name", info.Name, "error", err)
+				continue
+			}
+			all = append(all, info)
+		}
+	}
+
+	addSkills(sl.workspaceSkills, "workspace")
+	addSkills(sl.globalSkills, "global")
+	addSkills(sl.builtinSkills, "builtin")
+
+	seen := make(map[string]SkillInfo, len(all))
+	collisions := make([]SkillCollision, 0)
+	for _, info := range all {
+		existing, exists := seen[info.Name]
+		if !exists {
+			seen[info.Name] = info
+			continue
+		}
+
+		winner, conflict := pickCollisionWinner(existing, info)
+		seen[info.Name] = winner
+		collisions = append(collisions, SkillCollision{
+			Name:     info.Name,
+			Winner:   winner,
+			Conflict: conflict,
+		})
+	}
+
+	if len(collisions) == 0 {
+		return nil
+	}
+
+	sort.Slice(collisions, func(i, j int) bool {
+		if collisions[i].Name == collisions[j].Name {
+			return collisions[i].Conflict.Path < collisions[j].Conflict.Path
+		}
+		return collisions[i].Name < collisions[j].Name
+	})
+	return &SkillCollisionError{Collisions: collisions}
+}
+
 func (sl *SkillsLoader) ListSkills() []SkillInfo {
+	if err := sl.ValidateSkillNameCollisions(); err != nil {
+		panic(fmt.Errorf("skill collision validation failed: %w", err))
+	}
+
 	skills := make([]SkillInfo, 0)
 	seen := make(map[string]bool)
 

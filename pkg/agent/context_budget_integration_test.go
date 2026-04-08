@@ -47,6 +47,17 @@ func (p *budgetRecordingProvider) GetDefaultModel() string {
 	return "mock-budget-model"
 }
 
+func (p *budgetRecordingProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return estimateMessageTokens(messages), nil
+}
+
 type requiresNonSystemProvider struct {
 	calls int
 }
@@ -73,7 +84,14 @@ func (p *requiresNonSystemProvider) Chat(
 	p.calls++
 	for _, m := range messages {
 		if m.Role != "system" {
-			return &providers.LLMResponse{Content: "ok"}, nil
+			return &providers.LLMResponse{
+				Content: "ok",
+				Usage: &providers.UsageInfo{
+					PromptTokens:     80,
+					CompletionTokens: 10,
+					TotalTokens:      90,
+				},
+			}, nil
 		}
 	}
 	return nil, fmt.Errorf("provider requires at least one non-system message")
@@ -81,6 +99,17 @@ func (p *requiresNonSystemProvider) Chat(
 
 func (p *requiresNonSystemProvider) GetDefaultModel() string {
 	return "mock-nonsystem-model"
+}
+
+func (p *requiresNonSystemProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return estimateMessageTokens(messages), nil
 }
 
 func (p *budgetCountAwareProvider) Chat(
@@ -169,6 +198,17 @@ func (p *toolThenFinalUsageProvider) Chat(
 
 func (p *toolThenFinalUsageProvider) GetDefaultModel() string {
 	return "mock-tool-usage-model"
+}
+
+func (p *toolThenFinalUsageProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return estimateMessageTokens(messages), nil
 }
 
 func estimateMessageTokens(messages []providers.Message) int {

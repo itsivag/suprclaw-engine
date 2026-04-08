@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -30,6 +31,9 @@ type ContextBuilder struct {
 	memory             *MemoryStore
 	toolDiscoveryBM25  bool
 	toolDiscoveryRegex bool
+	skillsBudgetMu     sync.RWMutex
+	skillsTokenCounter providers.TokenCountCapable
+	skillsTokenModel   string
 
 	// Cache for system prompt to avoid rebuilding on every call.
 	// This fixes issue #607: repeated reprocessing of the entire context.
@@ -51,9 +55,35 @@ type ContextBuilder struct {
 
 	// sessionActivatedSkills tracks conditional skill activations keyed by session.
 	sessionActivatedSkills map[string]map[string]struct{}
+	sessionSkillEvidence   map[string]SkillActivationState
 	skillsStateMu          sync.RWMutex
 	skillStateEpoch        atomic.Uint64
 	cacheInvalidationEpoch atomic.Uint64
+}
+
+type SkillActivationEntry struct {
+	SkillName string   `json:"skill_name"`
+	Patterns  []string `json:"patterns"`
+	Paths     []string `json:"paths"`
+}
+
+type SkillActivationState struct {
+	EvidencePaths []string               `json:"evidence_paths"`
+	Activated     []SkillActivationEntry `json:"activated"`
+	Deactivated   []string               `json:"deactivated"`
+}
+
+type deterministicEstimatorCounter struct{}
+
+func (deterministicEstimatorCounter) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }
 
 const (
@@ -94,12 +124,29 @@ func NewContextBuilderWithSkillDirs(workspace, globalSkillsDir, builtinSkillsDir
 		builtinSkillsDir = defaultBuiltinSkillsDir()
 	}
 
-	return &ContextBuilder{
+	loader := skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir)
+	if err := loader.ValidateSkillNameCollisions(); err != nil {
+		panic(fmt.Errorf("skill loader collision error: %w", err))
+	}
+
+	builder := &ContextBuilder{
 		workspace:              workspace,
-		skillsLoader:           skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
+		skillsLoader:           loader,
 		memory:                 NewMemoryStore(workspace),
 		sessionActivatedSkills: make(map[string]map[string]struct{}),
+		sessionSkillEvidence:   make(map[string]SkillActivationState),
 	}
+	// Deterministic default counter for direct ContextBuilder usage.
+	// Agent runtime overrides this with provider-native token counting.
+	builder.SetSkillsTokenCounter(deterministicEstimatorCounter{}, "skills-summary")
+	return builder
+}
+
+func (cb *ContextBuilder) SetSkillsTokenCounter(counter providers.TokenCountCapable, model string) {
+	cb.skillsBudgetMu.Lock()
+	defer cb.skillsBudgetMu.Unlock()
+	cb.skillsTokenCounter = counter
+	cb.skillsTokenModel = strings.TrimSpace(model)
 }
 
 func (cb *ContextBuilder) getIdentity() string {
@@ -151,13 +198,12 @@ func (cb *ContextBuilder) getDiscoveryRule() string {
 	)
 }
 
-func (cb *ContextBuilder) skillsSessionKey(channel, chatID string) string {
-	channel = strings.TrimSpace(channel)
-	chatID = strings.TrimSpace(chatID)
-	if channel == "" && chatID == "" {
+func normalizeSkillSessionKey(sessionKey string) string {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
 		return "default"
 	}
-	return channel + ":" + chatID
+	return sessionKey
 }
 
 func truncateSkillDescription(s string, max int) string {
@@ -215,14 +261,34 @@ func skillsSummaryTokenBudget() int {
 	return budget
 }
 
-func estimateSkillsSummaryTokens(summary string) int {
+func (cb *ContextBuilder) countSkillsSummaryTokens(summary string) int {
 	msgs := []providers.Message{
 		{
 			Role:    "system",
 			Content: summary,
 		},
 	}
-	return providerscommon.EstimateTokenCount(msgs, nil, "skills-summary", nil)
+
+	cb.skillsBudgetMu.RLock()
+	counter := cb.skillsTokenCounter
+	model := cb.skillsTokenModel
+	cb.skillsBudgetMu.RUnlock()
+
+	if counter == nil {
+		panic("skills token counter is not configured")
+	}
+	if strings.TrimSpace(model) == "" {
+		panic("skills token model is not configured")
+	}
+
+	count, err := counter.CountTokens(context.Background(), msgs, nil, model, nil)
+	if err != nil {
+		panic(fmt.Errorf("skills token counter failed: %w", err))
+	}
+	if count <= 0 {
+		panic(fmt.Errorf("skills token counter returned invalid count: %d", count))
+	}
+	return count
 }
 
 func (cb *ContextBuilder) renderSkillsSummary(skillsIn []skills.SkillInfo) string {
@@ -260,14 +326,14 @@ func (cb *ContextBuilder) renderSkillsSummary(skillsIn []skills.SkillInfo) strin
 
 	summary := renderSkillsSummaryWithDescBudget(skillsList, descBudget)
 	tokenBudget := skillsSummaryTokenBudget()
-	if estimateSkillsSummaryTokens(summary) <= tokenBudget {
+	if cb.countSkillsSummaryTokens(summary) <= tokenBudget {
 		return summary
 	}
 
 	for descBudget > minSkillDescChars {
 		descBudget--
 		summary = renderSkillsSummaryWithDescBudget(skillsList, descBudget)
-		if estimateSkillsSummaryTokens(summary) <= tokenBudget {
+		if cb.countSkillsSummaryTokens(summary) <= tokenBudget {
 			return summary
 		}
 	}
@@ -286,8 +352,8 @@ func (cb *ContextBuilder) staticSkillInfos() []skills.SkillInfo {
 	return always
 }
 
-func (cb *ContextBuilder) activatedSessionSkillInfos(channel, chatID string) []skills.SkillInfo {
-	sessionKey := cb.skillsSessionKey(channel, chatID)
+func (cb *ContextBuilder) activatedSessionSkillInfos(sessionKey string) []skills.SkillInfo {
+	sessionKey = normalizeSkillSessionKey(sessionKey)
 	cb.skillsStateMu.RLock()
 	activeSet := cb.sessionActivatedSkills[sessionKey]
 	cb.skillsStateMu.RUnlock()
@@ -696,17 +762,14 @@ func matchesAnySkillPath(paths []string, relativePaths []string) bool {
 	return false
 }
 
-// ActivateSkillsForPaths activates session-scoped conditional skills whose
-// frontmatter paths match the touched file paths.
-func (cb *ContextBuilder) ActivateSkillsForPaths(channel, chatID string, touchedPaths []string) []string {
+func normalizeAndUniqueTouchedPaths(workspace string, touchedPaths []string) []string {
 	if len(touchedPaths) == 0 {
 		return nil
 	}
-
 	relative := make([]string, 0, len(touchedPaths))
 	seen := make(map[string]struct{}, len(touchedPaths))
 	for _, p := range touchedPaths {
-		rel, ok := normalizeRelativeSkillPath(cb.workspace, p)
+		rel, ok := normalizeRelativeSkillPath(workspace, p)
 		if !ok {
 			continue
 		}
@@ -716,41 +779,126 @@ func (cb *ContextBuilder) ActivateSkillsForPaths(channel, chatID string, touched
 		seen[rel] = struct{}{}
 		relative = append(relative, rel)
 	}
-	if len(relative) == 0 {
-		return nil
+	sort.Strings(relative)
+	return relative
+}
+
+func (cb *ContextBuilder) evaluateConditionalSkills(
+	relativePaths []string,
+) (map[string]struct{}, []SkillActivationEntry) {
+	if len(relativePaths) == 0 {
+		return map[string]struct{}{}, nil
 	}
 
-	sessionKey := cb.skillsSessionKey(channel, chatID)
 	allSkills := cb.skillsLoader.ListSkills()
+	activeSet := make(map[string]struct{})
+	entries := make([]SkillActivationEntry, 0)
 
-	cb.skillsStateMu.Lock()
-	defer cb.skillsStateMu.Unlock()
-
-	activatedSet, ok := cb.sessionActivatedSkills[sessionKey]
-	if !ok {
-		activatedSet = make(map[string]struct{})
-		cb.sessionActivatedSkills[sessionKey] = activatedSet
-	}
-
-	activated := make([]string, 0)
 	for _, s := range allSkills {
 		if len(s.Paths) == 0 {
 			continue
 		}
-		if _, already := activatedSet[s.Name]; already {
+
+		matched := make([]string, 0)
+		for _, pattern := range s.Paths {
+			re, err := wildcardPatternToRegexp(pattern)
+			if err != nil {
+				continue
+			}
+			for _, relPath := range relativePaths {
+				if re.MatchString(relPath) {
+					matched = appendUniqueString(matched, relPath)
+				}
+			}
+		}
+		if len(matched) == 0 {
 			continue
 		}
-		if matchesAnySkillPath(s.Paths, relative) {
-			activatedSet[s.Name] = struct{}{}
-			activated = append(activated, s.Name)
-		}
+
+		activeSet[s.Name] = struct{}{}
+		sort.Strings(matched)
+		entries = append(entries, SkillActivationEntry{
+			SkillName: s.Name,
+			Patterns:  append([]string(nil), s.Paths...),
+			Paths:     matched,
+		})
 	}
 
-	if len(activated) > 0 {
-		sort.Strings(activated)
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].SkillName < entries[j].SkillName
+	})
+	return activeSet, entries
+}
+
+// RecomputeSessionSkills deterministically rebuilds conditional skill activation
+// for a session from explicit touched-path evidence.
+func (cb *ContextBuilder) RecomputeSessionSkills(
+	sessionKey string,
+	touchedPaths []string,
+) (activated []string, deactivated []string) {
+	sessionKey = normalizeSkillSessionKey(sessionKey)
+	relative := normalizeAndUniqueTouchedPaths(cb.workspace, touchedPaths)
+
+	nextSet, activationEntries := cb.evaluateConditionalSkills(relative)
+
+	cb.skillsStateMu.Lock()
+	defer cb.skillsStateMu.Unlock()
+
+	prevSet := cb.sessionActivatedSkills[sessionKey]
+	if prevSet == nil {
+		prevSet = map[string]struct{}{}
+	}
+
+	for name := range nextSet {
+		if _, exists := prevSet[name]; !exists {
+			activated = append(activated, name)
+		}
+	}
+	for name := range prevSet {
+		if _, exists := nextSet[name]; !exists {
+			deactivated = append(deactivated, name)
+		}
+	}
+	sort.Strings(activated)
+	sort.Strings(deactivated)
+
+	if len(nextSet) == 0 {
+		delete(cb.sessionActivatedSkills, sessionKey)
+	} else {
+		cb.sessionActivatedSkills[sessionKey] = nextSet
+	}
+	cb.sessionSkillEvidence[sessionKey] = SkillActivationState{
+		EvidencePaths: relative,
+		Activated:     activationEntries,
+		Deactivated:   append([]string(nil), deactivated...),
+	}
+
+	if len(activated) > 0 || len(deactivated) > 0 {
 		cb.skillStateEpoch.Add(1)
 	}
-	return activated
+	return activated, deactivated
+}
+
+func (cb *ContextBuilder) ClearSessionSkillState(sessionKey string) {
+	sessionKey = normalizeSkillSessionKey(sessionKey)
+
+	cb.skillsStateMu.Lock()
+	defer cb.skillsStateMu.Unlock()
+
+	_, hadActive := cb.sessionActivatedSkills[sessionKey]
+	delete(cb.sessionActivatedSkills, sessionKey)
+	delete(cb.sessionSkillEvidence, sessionKey)
+	if hadActive {
+		cb.skillStateEpoch.Add(1)
+	}
+}
+
+func (cb *ContextBuilder) SessionSkillActivationState(sessionKey string) (SkillActivationState, bool) {
+	sessionKey = normalizeSkillSessionKey(sessionKey)
+	cb.skillsStateMu.RLock()
+	defer cb.skillsStateMu.RUnlock()
+	state, ok := cb.sessionSkillEvidence[sessionKey]
+	return state, ok
 }
 
 func (cb *ContextBuilder) SkillStateEpoch() uint64 {
@@ -826,6 +974,7 @@ func (cb *ContextBuilder) BuildMessages(
 	summary string,
 	currentMessage string,
 	media []string,
+	sessionKey string,
 	channel, chatID, senderID, senderDisplayName string,
 ) []providers.Message {
 	messages := []providers.Message{}
@@ -843,7 +992,7 @@ func (cb *ContextBuilder) BuildMessages(
 
 	// Build short dynamic context (time, runtime, session) — changes per request
 	dynamicCtx := cb.buildDynamicContext(channel, chatID, senderID, senderDisplayName)
-	activatedSkills := cb.activatedSessionSkillInfos(channel, chatID)
+	activatedSkills := cb.activatedSessionSkillInfos(sessionKey)
 	activatedSkillsSection := ""
 	if len(activatedSkills) > 0 {
 		activatedSkillsSummary := cb.renderSkillsSummary(activatedSkills)
@@ -1127,6 +1276,21 @@ func (cb *ContextBuilder) GetSkillsInfo() map[string]any {
 	}
 	cb.skillsStateMu.RLock()
 	activeSessions := len(cb.sessionActivatedSkills)
+	sessionKeys := make([]string, 0, len(cb.sessionSkillEvidence))
+	for sessionKey := range cb.sessionSkillEvidence {
+		sessionKeys = append(sessionKeys, sessionKey)
+	}
+	sort.Strings(sessionKeys)
+	dynamicState := make([]map[string]any, 0, len(sessionKeys))
+	for _, sessionKey := range sessionKeys {
+		state := cb.sessionSkillEvidence[sessionKey]
+		dynamicState = append(dynamicState, map[string]any{
+			"session_key":    sessionKey,
+			"evidence_paths": state.EvidencePaths,
+			"activated":      state.Activated,
+			"deactivated":    state.Deactivated,
+		})
+	}
 	cb.skillsStateMu.RUnlock()
 	return map[string]any{
 		"total":               len(allSkills),
@@ -1134,6 +1298,7 @@ func (cb *ContextBuilder) GetSkillsInfo() map[string]any {
 		"names":               skillNames,
 		"conditional_pending": conditional,
 		"dynamic_sessions":    activeSessions,
+		"dynamic_state":       dynamicState,
 		"skill_state_epoch":   cb.SkillStateEpoch(),
 		"cache_invalidations": cb.CacheInvalidationEpoch(),
 	}

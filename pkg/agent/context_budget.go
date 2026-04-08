@@ -426,6 +426,7 @@ func (al *AgentLoop) summarizeAndRebuildMessages(
 		afterSummary,
 		"",
 		nil,
+		opts.SessionKey,
 		opts.Channel,
 		opts.ChatID,
 		opts.SenderID,

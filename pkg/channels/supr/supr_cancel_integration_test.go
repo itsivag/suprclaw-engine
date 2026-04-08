@@ -16,6 +16,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/providers"
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 )
 
 type blockingProvider struct {
@@ -36,6 +37,17 @@ func (p *blockingProvider) Chat(
 
 func (p *blockingProvider) GetDefaultModel() string {
 	return "blocking-model"
+}
+
+func (p *blockingProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 func waitForCanonicalEvent(t *testing.T, conn *websocket.Conn, timeout time.Duration) map[string]any {

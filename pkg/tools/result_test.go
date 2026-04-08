@@ -227,3 +227,13 @@ func TestToolResultJSONStructure(t *testing.T) {
 		t.Errorf("Expected silent false, got %v", parsed["silent"])
 	}
 }
+
+func TestToolResultWithTouchedPaths(t *testing.T) {
+	result := SilentResult("ok").WithTouchedPaths("a.txt", "b.txt", "a.txt", "")
+	if len(result.TouchedPaths) != 2 {
+		t.Fatalf("expected 2 touched paths, got %d", len(result.TouchedPaths))
+	}
+	if result.TouchedPaths[0] != "a.txt" || result.TouchedPaths[1] != "b.txt" {
+		t.Fatalf("unexpected touched paths order/content: %v", result.TouchedPaths)
+	}
+}

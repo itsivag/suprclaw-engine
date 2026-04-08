@@ -12,6 +12,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/providers"
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 )
 
 type gatewayMockProvider struct {
@@ -28,11 +29,27 @@ func (m *gatewayMockProvider) Chat(
 	return &providers.LLMResponse{
 		Content:   m.response,
 		ToolCalls: []providers.ToolCall{},
+		Usage: &providers.UsageInfo{
+			PromptTokens:     10,
+			CompletionTokens: 5,
+			TotalTokens:      15,
+		},
 	}, nil
 }
 
 func (m *gatewayMockProvider) GetDefaultModel() string {
 	return "mock-model"
+}
+
+func (m *gatewayMockProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, opts), nil
 }
 
 func newTestAdminHandler(t *testing.T) (*adminHandler, *agent.AgentLoop, *http.ServeMux) {

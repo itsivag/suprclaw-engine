@@ -14,6 +14,7 @@ import (
 
 	"github.com/itsivag/suprclaw/pkg/auth"
 	"github.com/itsivag/suprclaw/pkg/logger"
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 )
 
 const (
@@ -144,12 +145,24 @@ func (p *AntigravityProvider) Chat(
 		)
 	}
 
+	ensureUsageContract(llmResp, messages, tools, model, options)
 	return llmResp, nil
 }
 
 // GetDefaultModel returns the default model identifier.
 func (p *AntigravityProvider) GetDefaultModel() string {
 	return antigravityDefaultModel
+}
+
+func (p *AntigravityProvider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }
 
 // --- Request building ---

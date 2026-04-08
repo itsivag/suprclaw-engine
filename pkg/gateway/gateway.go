@@ -71,6 +71,16 @@ func (p *startupBlockedProvider) GetDefaultModel() string {
 	return ""
 }
 
+func (p *startupBlockedProvider) CountTokens(
+	_ context.Context,
+	_ []providers.Message,
+	_ []providers.ToolDefinition,
+	_ string,
+	_ map[string]any,
+) (int, error) {
+	return 0, fmt.Errorf("%s", p.reason)
+}
+
 // Run starts the gateway runtime using the configuration loaded from configPath.
 func Run(debug bool, configPath string, allowEmptyStartup bool) error {
 	if debug {

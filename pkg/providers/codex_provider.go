@@ -13,6 +13,7 @@ import (
 
 	"github.com/itsivag/suprclaw/pkg/auth"
 	"github.com/itsivag/suprclaw/pkg/logger"
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 )
 
 const (
@@ -150,11 +151,24 @@ func (p *CodexProvider) Chat(
 		return nil, fmt.Errorf("codex API call: stream ended without completed response")
 	}
 
-	return parseCodexResponse(resp), nil
+	out := parseCodexResponse(resp)
+	ensureUsageContract(out, messages, tools, resolvedModel, options)
+	return out, nil
 }
 
 func (p *CodexProvider) GetDefaultModel() string {
 	return codexDefaultModel
+}
+
+func (p *CodexProvider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }
 
 func resolveCodexModel(model string) (string, string) {

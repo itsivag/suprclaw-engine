@@ -6,6 +6,7 @@ import (
 
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/providers"
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 )
 
 type mockRegistryProvider struct{}
@@ -17,11 +18,30 @@ func (m *mockRegistryProvider) Chat(
 	model string,
 	options map[string]any,
 ) (*providers.LLMResponse, error) {
-	return &providers.LLMResponse{Content: "mock", FinishReason: "stop"}, nil
+	return &providers.LLMResponse{
+		Content:      "mock",
+		FinishReason: "stop",
+		Usage: &providers.UsageInfo{
+			PromptTokens:     10,
+			CompletionTokens: 5,
+			TotalTokens:      15,
+		},
+	}, nil
 }
 
 func (m *mockRegistryProvider) GetDefaultModel() string {
 	return "mock-model"
+}
+
+func (m *mockRegistryProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }
 
 func testCfg(agents []config.AgentConfig) *config.Config {

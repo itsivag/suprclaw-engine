@@ -67,6 +67,7 @@ type AgentLoop struct {
 	// point-3 caching/diagnostics
 	toolSchemaCache     *ToolSchemaCache
 	promptCacheDetector *PromptCacheBreakDetector
+	toolTopologyVersion sync.Map
 }
 
 type routeMetadata struct {
@@ -597,6 +598,15 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 		}
 	}
 
+	if al.toolSchemaCache != nil {
+		removed := al.toolSchemaCache.InvalidateAll()
+		if removed > 0 {
+			logger.DebugCF("agent", "Invalidated tool schema cache after provider/config reload",
+				map[string]any{"removed_entries": removed})
+		}
+	}
+	al.toolTopologyVersion = sync.Map{}
+
 	// Close old provider after releasing the lock
 	// This prevents blocking readers while closing
 	if oldProvider, ok := extractProvider(oldRegistry); ok {
@@ -959,6 +969,10 @@ func (al *AgentLoop) ResetSession(agentID, sessionKey string) error {
 	agentInst.Sessions.SetHistory(sessionKey, make([]providers.Message, 0))
 	agentInst.Sessions.SetSummary(sessionKey, "")
 	agentInst.Sessions.SetDiscoveredTools(sessionKey, nil)
+	agentInst.ContextBuilder.ClearSessionSkillState(sessionKey)
+	if al.toolSchemaCache != nil {
+		al.toolSchemaCache.InvalidateSession(sessionKey)
+	}
 	return agentInst.Sessions.Save(sessionKey)
 }
 
@@ -1287,6 +1301,13 @@ func (al *AgentLoop) runAgentLoop(
 	// 1. Build messages
 	var history []providers.Message
 	var summary string
+	modelForSkillsBudget := agent.Model
+	if strings.TrimSpace(opts.ModelOverride) != "" {
+		modelForSkillsBudget = strings.TrimSpace(opts.ModelOverride)
+	}
+	if tokenCounter, ok := agent.Provider.(providers.TokenCountCapable); ok {
+		agent.ContextBuilder.SetSkillsTokenCounter(tokenCounter, modelForSkillsBudget)
+	}
 	history = agent.Sessions.GetHistory(opts.SessionKey)
 	summary = agent.Sessions.GetSummary(opts.SessionKey)
 	messages := agent.ContextBuilder.BuildMessages(
@@ -1294,6 +1315,7 @@ func (al *AgentLoop) runAgentLoop(
 		summary,
 		opts.UserMessage,
 		opts.Media,
+		opts.SessionKey,
 		opts.Channel,
 		opts.ChatID,
 		opts.SenderID,
@@ -1542,38 +1564,6 @@ func appendUniqueString(dst []string, v string) []string {
 	return append(dst, v)
 }
 
-func collectLikelyPathsFromArgs(args map[string]any) []string {
-	if len(args) == 0 {
-		return nil
-	}
-	out := make([]string, 0)
-	var walk func(key string, value any)
-	walk = func(key string, value any) {
-		switch v := value.(type) {
-		case string:
-			lk := strings.ToLower(strings.TrimSpace(key))
-			if strings.Contains(lk, "path") || strings.Contains(lk, "file") || lk == "target" {
-				trimmed := strings.TrimSpace(v)
-				if trimmed != "" {
-					out = appendUniqueString(out, trimmed)
-				}
-			}
-		case []any:
-			for _, item := range v {
-				walk(key, item)
-			}
-		case map[string]any:
-			for nestedKey, nestedVal := range v {
-				walk(nestedKey, nestedVal)
-			}
-		}
-	}
-	for k, v := range args {
-		walk(k, v)
-	}
-	return out
-}
-
 // runLLMIteration executes the LLM call loop with tool handling.
 func (al *AgentLoop) runLLMIteration(
 	ctx context.Context,
@@ -1586,6 +1576,10 @@ func (al *AgentLoop) runLLMIteration(
 	iteration := 0
 	var finalContent string
 	var finalUsage *providers.UsageInfo
+	turnTouchedPaths := make([]string, 0)
+	pendingDiscoveredToolsMutation := false
+	pendingSkillSetMutation := false
+	pendingExplicitInvalidation := false
 
 	// Determine effective model tier for this conversation turn.
 	// selectCandidates evaluates routing once and the decision is sticky for
@@ -1679,6 +1673,26 @@ func (al *AgentLoop) runLLMIteration(
 
 		// Build tool definitions for this exact request:
 		// core tools + discovered hidden tools that still exist.
+		currentTopologyVersion := agent.Tools.Version()
+		if previousVersionRaw, ok := al.toolTopologyVersion.Load(agent.ID); ok {
+			if previousVersion, castOK := previousVersionRaw.(uint64); castOK && previousVersion != currentTopologyVersion {
+				if al.toolSchemaCache != nil {
+					removed := al.toolSchemaCache.InvalidateAgent(agent.ID)
+					if removed > 0 {
+						pendingExplicitInvalidation = true
+						logger.DebugCF("agent", "Invalidated tool schema cache due tool topology revision",
+							map[string]any{
+								"agent_id":         agent.ID,
+								"previous_version": previousVersion,
+								"current_version":  currentTopologyVersion,
+								"removed_entries":  removed,
+							})
+					}
+				}
+			}
+		}
+		al.toolTopologyVersion.Store(agent.ID, currentTopologyVersion)
+
 		storedDiscovered := agent.Sessions.GetDiscoveredTools(opts.SessionKey)
 		hiddenSnapshot := agent.Tools.SnapshotHiddenToolNames()
 		hiddenSet := make(map[string]struct{}, len(hiddenSnapshot))
@@ -1688,6 +1702,12 @@ func (al *AgentLoop) runLLMIteration(
 		validDiscovered := intersectToolNames(storedDiscovered, hiddenSet)
 		if !equalToolNameSlices(validDiscovered, storedDiscovered) {
 			agent.Sessions.SetDiscoveredTools(opts.SessionKey, validDiscovered)
+			pendingDiscoveredToolsMutation = true
+			if al.toolSchemaCache != nil {
+				if removed := al.toolSchemaCache.InvalidateSession(opts.SessionKey); removed > 0 {
+					pendingExplicitInvalidation = true
+				}
+			}
 			if err := agent.Sessions.Save(opts.SessionKey); err != nil {
 				logger.WarnCF("agent", "Failed to persist pruned discovered tools", map[string]any{
 					"agent_id": agent.ID, "session_key": opts.SessionKey, "error": err.Error(),
@@ -1909,6 +1929,7 @@ func (al *AgentLoop) runLLMIteration(
 				systemPromptText = messages[0].Content
 			}
 			promptSnapshot = NewPromptStateSnapshot(
+				activeProviderName,
 				systemPromptText,
 				providerToolDefs,
 				activeModel,
@@ -2009,16 +2030,29 @@ func (al *AgentLoop) runLLMIteration(
 			return "", nil, iteration, activeModel, err
 		}
 
+		if usageErr := validateUsageContract(promptSnapshot, response.Usage); usageErr != nil {
+			return "", nil, iteration, activeModel, usageErr
+		}
+
 		if al.promptCacheDetector != nil {
 			detectorKey := agent.ID + ":" + opts.SessionKey
-			al.promptCacheDetector.Analyze(
+			_, analyzeErr := al.promptCacheDetector.Analyze(
 				detectorKey,
 				promptSnapshot,
 				response.Usage,
 				PromptMutators{
-					ConfigChanged: opts.ModelOverride != "" || opts.ThinkingOverride != "",
+					DiscoveredToolsChanged: pendingDiscoveredToolsMutation,
+					SkillSetChanged:        pendingSkillSetMutation,
+					ConfigChanged:          opts.ModelOverride != "" || opts.ThinkingOverride != "",
+					ExplicitInvalidation:   pendingExplicitInvalidation,
 				},
 			)
+			if analyzeErr != nil {
+				return "", nil, iteration, activeModel, analyzeErr
+			}
+			pendingDiscoveredToolsMutation = false
+			pendingSkillSetMutation = false
+			pendingExplicitInvalidation = false
 		}
 
 		go al.handleReasoning(
@@ -2040,6 +2074,21 @@ func (al *AgentLoop) runLLMIteration(
 			})
 		// Check if no tool calls - then check reasoning content if any
 		if len(response.ToolCalls) == 0 {
+			activated, deactivated := agent.ContextBuilder.RecomputeSessionSkills(opts.SessionKey, turnTouchedPaths)
+			if len(activated) > 0 || len(deactivated) > 0 {
+				pendingSkillSetMutation = true
+				activationState, _ := agent.ContextBuilder.SessionSkillActivationState(opts.SessionKey)
+				logger.InfoCF("agent", "Recomputed conditional skills from explicit path evidence",
+					map[string]any{
+						"agent_id":         agent.ID,
+						"session_key":      opts.SessionKey,
+						"activated":        activated,
+						"deactivated":      deactivated,
+						"evidence_paths":   turnTouchedPaths,
+						"activation_state": activationState,
+						"iteration":        iteration,
+					})
+			}
 			if activity != nil && iterationStepID != "" {
 				activity.emit("step.updated", map[string]any{
 					"step_id":  iterationStepID,
@@ -2077,12 +2126,6 @@ func (al *AgentLoop) runLLMIteration(
 		normalizedToolCalls := make([]providers.ToolCall, 0, len(response.ToolCalls))
 		for _, tc := range response.ToolCalls {
 			normalizedToolCalls = append(normalizedToolCalls, providers.NormalizeToolCall(tc))
-		}
-		touchedPaths := make([]string, 0, len(normalizedToolCalls))
-		for _, tc := range normalizedToolCalls {
-			for _, p := range collectLikelyPathsFromArgs(tc.Arguments) {
-				touchedPaths = appendUniqueString(touchedPaths, p)
-			}
 		}
 
 		// Log tool calls
@@ -2305,6 +2348,9 @@ func (al *AgentLoop) runLLMIteration(
 			if r.result == nil {
 				r.result = tools.ErrorResult("tool returned nil result")
 			}
+			for _, touchedPath := range r.result.TouchedPaths {
+				turnTouchedPaths = appendUniqueString(turnTouchedPaths, touchedPath)
+			}
 			if activity != nil && idx < len(toolStepIDs) && idx < len(toolCallIDs) {
 				durationMS := int64(0)
 				if idx < len(toolStartedAt) && !toolStartedAt[idx].IsZero() {
@@ -2413,6 +2459,12 @@ func (al *AgentLoop) runLLMIteration(
 					merged := mergeToolNames(validDiscovered, discoveredFromResult)
 					validDiscovered = intersectToolNames(merged, hiddenSet)
 					agent.Sessions.SetDiscoveredTools(opts.SessionKey, validDiscovered)
+					pendingDiscoveredToolsMutation = true
+					if al.toolSchemaCache != nil {
+						if removed := al.toolSchemaCache.InvalidateSession(opts.SessionKey); removed > 0 {
+							pendingExplicitInvalidation = true
+						}
+					}
 					if err := agent.Sessions.Save(opts.SessionKey); err != nil {
 						logger.WarnCF("agent", "Failed to persist discovered tools", map[string]any{
 							"agent_id": agent.ID, "session_key": opts.SessionKey, "error": err.Error(),
@@ -2432,18 +2484,20 @@ func (al *AgentLoop) runLLMIteration(
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
 		}
 
-		if len(touchedPaths) > 0 {
-			activated := agent.ContextBuilder.ActivateSkillsForPaths(opts.Channel, opts.ChatID, touchedPaths)
-			if len(activated) > 0 {
-				logger.InfoCF("agent", "Activated conditional skills",
-					map[string]any{
-						"agent_id":      agent.ID,
-						"session_key":   opts.SessionKey,
-						"activated":     activated,
-						"touched_paths": touchedPaths,
-						"iteration":     iteration,
-					})
-			}
+		activated, deactivated := agent.ContextBuilder.RecomputeSessionSkills(opts.SessionKey, turnTouchedPaths)
+		if len(activated) > 0 || len(deactivated) > 0 {
+			pendingSkillSetMutation = true
+			activationState, _ := agent.ContextBuilder.SessionSkillActivationState(opts.SessionKey)
+			logger.InfoCF("agent", "Recomputed conditional skills from explicit path evidence",
+				map[string]any{
+					"agent_id":         agent.ID,
+					"session_key":      opts.SessionKey,
+					"activated":        activated,
+					"deactivated":      deactivated,
+					"evidence_paths":   turnTouchedPaths,
+					"activation_state": activationState,
+					"iteration":        iteration,
+				})
 		}
 
 		if activity != nil && iterationStepID != "" {
@@ -2652,6 +2706,9 @@ func (al *AgentLoop) GetStartupInfo() map[string]any {
 
 	// Skills info
 	info["skills"] = agent.ContextBuilder.GetSkillsInfo()
+	if al.promptCacheDetector != nil {
+		info["cache_break_diagnostics"] = al.promptCacheDetector.SnapshotDiagnostics()
+	}
 
 	// Agents info
 	info["agents"] = map[string]any{
@@ -3082,6 +3139,10 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			agent.Sessions.SetHistory(opts.SessionKey, make([]providers.Message, 0))
 			agent.Sessions.SetSummary(opts.SessionKey, "")
 			agent.Sessions.SetDiscoveredTools(opts.SessionKey, nil)
+			agent.ContextBuilder.ClearSessionSkillState(opts.SessionKey)
+			if al.toolSchemaCache != nil {
+				al.toolSchemaCache.InvalidateSession(opts.SessionKey)
+			}
 			agent.Sessions.Save(opts.SessionKey)
 			return nil
 		}

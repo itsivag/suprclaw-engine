@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 )
 
 // ClaudeCliProvider implements LLMProvider using the claude CLI as a subprocess.
@@ -64,12 +66,28 @@ func (p *ClaudeCliProvider) Chat(
 		}
 	}
 
-	return p.parseClaudeCliResponse(stdout.String())
+	resp, err := p.parseClaudeCliResponse(stdout.String())
+	if err != nil {
+		return nil, err
+	}
+	ensureUsageContract(resp, messages, tools, model, options)
+	return resp, nil
 }
 
 // GetDefaultModel returns the default model identifier.
 func (p *ClaudeCliProvider) GetDefaultModel() string {
 	return "claude-code"
+}
+
+func (p *ClaudeCliProvider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }
 
 // messagesToPrompt converts messages to a CLI-compatible prompt string.

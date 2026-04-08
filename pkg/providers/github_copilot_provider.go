@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	copilot "github.com/github/copilot-sdk/go"
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 )
 
 type GitHubCopilotProvider struct {
@@ -116,12 +117,25 @@ func (p *GitHubCopilotProvider) Chat(
 	}
 	content := *resp.Data.Content
 
-	return &LLMResponse{
+	respOut := &LLMResponse{
 		FinishReason: "stop",
 		Content:      content,
-	}, nil
+	}
+	ensureUsageContract(respOut, messages, tools, model, options)
+	return respOut, nil
 }
 
 func (p *GitHubCopilotProvider) GetDefaultModel() string {
 	return "gpt-4.1"
+}
+
+func (p *GitHubCopilotProvider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }

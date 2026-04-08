@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/itsivag/suprclaw/pkg/providers"
@@ -79,4 +80,65 @@ func (c *ToolSchemaCache) GetOrSet(
 	c.mu.Unlock()
 
 	return normalized, fingerprint, false
+}
+
+func (c *ToolSchemaCache) invalidateIf(predicate func(toolSchemaCacheKey) bool) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	removed := 0
+	for key := range c.entries {
+		if !predicate(key) {
+			continue
+		}
+		delete(c.entries, key)
+		removed++
+	}
+	return removed
+}
+
+func (c *ToolSchemaCache) InvalidateSession(sessionKey string) int {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return 0
+	}
+	return c.invalidateIf(func(key toolSchemaCacheKey) bool {
+		return key.SessionKey == sessionKey
+	})
+}
+
+func (c *ToolSchemaCache) InvalidateAgentProviderModel(
+	agentID, providerName, model string,
+) int {
+	agentID = strings.TrimSpace(agentID)
+	providerName = strings.TrimSpace(providerName)
+	model = strings.TrimSpace(model)
+	if agentID == "" || providerName == "" || model == "" {
+		return 0
+	}
+	return c.invalidateIf(func(key toolSchemaCacheKey) bool {
+		return key.AgentID == agentID &&
+			key.ProviderName == providerName &&
+			key.Model == model
+	})
+}
+
+func (c *ToolSchemaCache) InvalidateAgent(agentID string) int {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return 0
+	}
+	return c.invalidateIf(func(key toolSchemaCacheKey) bool {
+		return key.AgentID == agentID
+	})
+}
+
+func (c *ToolSchemaCache) InvalidateAll() int {
+	return c.invalidateIf(func(toolSchemaCacheKey) bool { return true })
+}
+
+func (c *ToolSchemaCache) Len() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.entries)
 }

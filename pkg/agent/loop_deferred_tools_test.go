@@ -11,9 +11,41 @@ import (
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/providers"
+	providerscommon "github.com/itsivag/suprclaw/pkg/providers/common"
 	"github.com/itsivag/suprclaw/pkg/routing"
 	"github.com/itsivag/suprclaw/pkg/tools"
 )
+
+func testUsageResponse(
+	resp *providers.LLMResponse,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) *providers.LLMResponse {
+	if resp.Usage != nil {
+		return resp
+	}
+	promptTokens := providerscommon.EstimateTokenCount(messages, tools, model, options)
+	if promptTokens <= 0 {
+		promptTokens = 1
+	}
+	completionTokens := 0
+	if strings.TrimSpace(resp.Content) != "" {
+		completionTokens = providerscommon.EstimateTokenCount(
+			[]providers.Message{{Role: "assistant", Content: resp.Content}},
+			nil,
+			model,
+			nil,
+		)
+	}
+	resp.Usage = &providers.UsageInfo{
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      promptTokens + completionTokens,
+	}
+	return resp
+}
 
 type deferredHiddenTool struct {
 	name  string
@@ -57,12 +89,22 @@ func (p *captureToolsProvider) Chat(
 	p.mu.Lock()
 	p.snapshots = append(p.snapshots, toolDefNames(toolDefs))
 	p.mu.Unlock()
-	return &providers.LLMResponse{
+	return testUsageResponse(&providers.LLMResponse{
 		Content: "done",
-	}, nil
+	}, messages, toolDefs, model, opts), nil
 }
 
 func (p *captureToolsProvider) GetDefaultModel() string { return "capture-tools-provider" }
+func (p *captureToolsProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
+}
 
 type discoveryThenHiddenProvider struct {
 	mu        sync.Mutex
@@ -85,7 +127,7 @@ func (p *discoveryThenHiddenProvider) Chat(
 
 	switch call {
 	case 1:
-		return &providers.LLMResponse{
+		return testUsageResponse(&providers.LLMResponse{
 			ToolCalls: []providers.ToolCall{
 				{
 					ID:   "tc-discovery",
@@ -95,9 +137,9 @@ func (p *discoveryThenHiddenProvider) Chat(
 					},
 				},
 			},
-		}, nil
+		}, messages, toolDefs, model, opts), nil
 	case 2:
-		return &providers.LLMResponse{
+		return testUsageResponse(&providers.LLMResponse{
 			ToolCalls: []providers.ToolCall{
 				{
 					ID:   "tc-hidden",
@@ -107,14 +149,24 @@ func (p *discoveryThenHiddenProvider) Chat(
 					},
 				},
 			},
-		}, nil
+		}, messages, toolDefs, model, opts), nil
 	default:
-		return &providers.LLMResponse{Content: "done"}, nil
+		return testUsageResponse(&providers.LLMResponse{Content: "done"}, messages, toolDefs, model, opts), nil
 	}
 }
 
 func (p *discoveryThenHiddenProvider) GetDefaultModel() string {
 	return "discovery-then-hidden-provider"
+}
+func (p *discoveryThenHiddenProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }
 
 type hiddenWithoutExposureProvider struct {
@@ -136,7 +188,7 @@ func (p *hiddenWithoutExposureProvider) Chat(
 	p.mu.Unlock()
 
 	if call == 1 {
-		return &providers.LLMResponse{
+		return testUsageResponse(&providers.LLMResponse{
 			ToolCalls: []providers.ToolCall{
 				{
 					ID:        "tc-hidden-direct",
@@ -144,7 +196,7 @@ func (p *hiddenWithoutExposureProvider) Chat(
 					Arguments: map[string]any{},
 				},
 			},
-		}, nil
+		}, messages, toolDefs, model, opts), nil
 	}
 
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -158,11 +210,21 @@ func (p *hiddenWithoutExposureProvider) Chat(
 			}
 		}
 	}
-	return &providers.LLMResponse{Content: "done"}, nil
+	return testUsageResponse(&providers.LLMResponse{Content: "done"}, messages, toolDefs, model, opts), nil
 }
 
 func (p *hiddenWithoutExposureProvider) GetDefaultModel() string {
 	return "hidden-without-exposure-provider"
+}
+func (p *hiddenWithoutExposureProvider) CountTokens(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	_ = ctx
+	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }
 
 func containsAll(haystack string, needles ...string) bool {

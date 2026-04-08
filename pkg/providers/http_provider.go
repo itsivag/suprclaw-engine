@@ -90,7 +90,12 @@ func (p *HTTPProvider) Chat(
 	model string,
 	options map[string]any,
 ) (*LLMResponse, error) {
-	return p.delegate.Chat(ctx, messages, tools, model, options)
+	resp, err := p.delegate.Chat(ctx, messages, tools, model, options)
+	if err != nil {
+		return nil, err
+	}
+	ensureUsageContract(resp, messages, tools, model, options)
+	return resp, nil
 }
 
 func (p *HTTPProvider) CountTokens(

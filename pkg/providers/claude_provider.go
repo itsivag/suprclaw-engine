@@ -48,11 +48,22 @@ func (p *ClaudeProvider) Chat(
 	if err != nil {
 		return nil, err
 	}
+	ensureUsageContract(resp, messages, tools, model, options)
 	return resp, nil
 }
 
 func (p *ClaudeProvider) GetDefaultModel() string {
 	return p.delegate.GetDefaultModel()
+}
+
+func (p *ClaudeProvider) CountTokens(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+) (int, error) {
+	return p.delegate.CountTokens(ctx, messages, tools, model, options)
 }
 
 func createClaudeTokenSource() func() (string, error) {
