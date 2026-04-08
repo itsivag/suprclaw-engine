@@ -15,7 +15,6 @@ import (
 type ToolEntry struct {
 	Tool   Tool
 	IsCore bool
-	TTL    int
 }
 
 type ToolRegistry struct {
@@ -45,13 +44,12 @@ func (r *ToolRegistry) Register(tool Tool) {
 	r.tools[name] = &ToolEntry{
 		Tool:   tool,
 		IsCore: true,
-		TTL:    0, // Core tools do not use TTL
 	}
 	r.version.Add(1)
 	logger.DebugCF("tools", "Registered core tool", map[string]any{"name": name})
 }
 
-// RegisterHidden saves hidden tools (visible only via TTL)
+// RegisterHidden saves hidden tools (deferred visibility).
 func (r *ToolRegistry) RegisterHidden(tool Tool) {
 	if err := ValidateToolContract(tool); err != nil {
 		panic(fmt.Errorf("failed to register hidden tool: %w", err))
@@ -67,42 +65,9 @@ func (r *ToolRegistry) RegisterHidden(tool Tool) {
 	r.tools[name] = &ToolEntry{
 		Tool:   tool,
 		IsCore: false,
-		TTL:    0,
 	}
 	r.version.Add(1)
 	logger.DebugCF("tools", "Registered hidden tool", map[string]any{"name": name})
-}
-
-// PromoteTools atomically sets the TTL for multiple non-core tools.
-// This prevents a concurrent TickTTL from decrementing between promotions.
-func (r *ToolRegistry) PromoteTools(names []string, ttl int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	promoted := 0
-	for _, name := range names {
-		if entry, exists := r.tools[name]; exists {
-			if !entry.IsCore {
-				entry.TTL = ttl
-				promoted++
-			}
-		}
-	}
-	logger.DebugCF(
-		"tools",
-		"PromoteTools completed",
-		map[string]any{"requested": len(names), "promoted": promoted, "ttl": ttl},
-	)
-}
-
-// TickTTL decreases TTL only for non-core tools
-func (r *ToolRegistry) TickTTL() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, entry := range r.tools {
-		if !entry.IsCore && entry.TTL > 0 {
-			entry.TTL--
-		}
-	}
 }
 
 // Version returns the current registry version (atomically).
@@ -144,15 +109,26 @@ func (r *ToolRegistry) SnapshotHiddenTools() HiddenToolSnapshot {
 	}
 }
 
+// SnapshotHiddenToolNames returns hidden tool names in deterministic order.
+func (r *ToolRegistry) SnapshotHiddenToolNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	names := make([]string, 0, len(r.tools))
+	for _, name := range r.sortedToolNames() {
+		entry := r.tools[name]
+		if !entry.IsCore {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	entry, ok := r.tools[name]
 	if !ok {
-		return nil, false
-	}
-	// Hidden tools with expired TTL are not callable.
-	if !entry.IsCore && entry.TTL <= 0 {
 		return nil, false
 	}
 	return entry.Tool, true
@@ -247,6 +223,12 @@ func (r *ToolRegistry) sortedToolNames() []string {
 }
 
 func (r *ToolRegistry) GetDefinitions() []map[string]any {
+	return r.GetDefinitionsWithHiddenAllowlist(nil)
+}
+
+// GetDefinitionsWithHiddenAllowlist returns core tool schemas and hidden
+// tool schemas for allowlisted names only.
+func (r *ToolRegistry) GetDefinitionsWithHiddenAllowlist(allowlist map[string]struct{}) []map[string]any {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -254,12 +236,12 @@ func (r *ToolRegistry) GetDefinitions() []map[string]any {
 	definitions := make([]map[string]any, 0, len(sorted))
 	for _, name := range sorted {
 		entry := r.tools[name]
-
-		if !entry.IsCore && entry.TTL <= 0 {
-			continue
+		if !entry.IsCore {
+			if _, ok := allowlist[name]; !ok {
+				continue
+			}
 		}
-
-		definitions = append(definitions, ToolToSchema(r.tools[name].Tool))
+		definitions = append(definitions, ToolToSchema(entry.Tool))
 	}
 	return definitions
 }
@@ -267,6 +249,14 @@ func (r *ToolRegistry) GetDefinitions() []map[string]any {
 // ToProviderDefs converts tool definitions to provider-compatible format.
 // This is the format expected by LLM provider APIs.
 func (r *ToolRegistry) ToProviderDefs() []providers.ToolDefinition {
+	return r.ToProviderDefsWithHiddenAllowlist(nil)
+}
+
+// ToProviderDefsWithHiddenAllowlist returns provider definitions for all core
+// tools plus hidden tools present in allowlist.
+func (r *ToolRegistry) ToProviderDefsWithHiddenAllowlist(
+	allowlist map[string]struct{},
+) []providers.ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -274,9 +264,10 @@ func (r *ToolRegistry) ToProviderDefs() []providers.ToolDefinition {
 	definitions := make([]providers.ToolDefinition, 0, len(sorted))
 	for _, name := range sorted {
 		entry := r.tools[name]
-
-		if !entry.IsCore && entry.TTL <= 0 {
-			continue
+		if !entry.IsCore {
+			if _, ok := allowlist[name]; !ok {
+				continue
+			}
 		}
 
 		schema := ToolToSchema(entry.Tool)
@@ -321,6 +312,12 @@ func (r *ToolRegistry) Count() int {
 // GetSummaries returns human-readable summaries of all registered tools.
 // Returns a slice of "name - description" strings.
 func (r *ToolRegistry) GetSummaries() []string {
+	return r.GetSummariesWithHiddenAllowlist(nil)
+}
+
+// GetSummariesWithHiddenAllowlist returns human-readable tool summaries for
+// core tools and allowlisted hidden tools.
+func (r *ToolRegistry) GetSummariesWithHiddenAllowlist(allowlist map[string]struct{}) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -328,9 +325,10 @@ func (r *ToolRegistry) GetSummaries() []string {
 	summaries := make([]string, 0, len(sorted))
 	for _, name := range sorted {
 		entry := r.tools[name]
-
-		if !entry.IsCore && entry.TTL <= 0 {
-			continue
+		if !entry.IsCore {
+			if _, ok := allowlist[name]; !ok {
+				continue
+			}
 		}
 
 		summaries = append(summaries, fmt.Sprintf("- `%s` - %s", entry.Tool.Name(), entry.Tool.Description()))

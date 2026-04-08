@@ -948,6 +948,7 @@ func (al *AgentLoop) ResetSession(agentID, sessionKey string) error {
 
 	agentInst.Sessions.SetHistory(sessionKey, make([]providers.Message, 0))
 	agentInst.Sessions.SetSummary(sessionKey, "")
+	agentInst.Sessions.SetDiscoveredTools(sessionKey, nil)
 	return agentInst.Sessions.Save(sessionKey)
 }
 
@@ -1613,8 +1614,29 @@ func (al *AgentLoop) runLLMIteration(
 			})
 		}
 
-		// Build tool definitions
-		providerToolDefs := agent.Tools.ToProviderDefs()
+		// Build tool definitions for this exact request:
+		// core tools + discovered hidden tools that still exist.
+		storedDiscovered := agent.Sessions.GetDiscoveredTools(opts.SessionKey)
+		hiddenSnapshot := agent.Tools.SnapshotHiddenToolNames()
+		hiddenSet := make(map[string]struct{}, len(hiddenSnapshot))
+		for _, name := range hiddenSnapshot {
+			hiddenSet[name] = struct{}{}
+		}
+		validDiscovered := intersectToolNames(storedDiscovered, hiddenSet)
+		if !equalToolNameSlices(validDiscovered, storedDiscovered) {
+			agent.Sessions.SetDiscoveredTools(opts.SessionKey, validDiscovered)
+			if err := agent.Sessions.Save(opts.SessionKey); err != nil {
+				logger.WarnCF("agent", "Failed to persist pruned discovered tools", map[string]any{
+					"agent_id": agent.ID, "session_key": opts.SessionKey, "error": err.Error(),
+				})
+			}
+		}
+		discoveredSet := make(map[string]struct{}, len(validDiscovered))
+		for _, name := range validDiscovered {
+			discoveredSet[name] = struct{}{}
+		}
+		providerToolDefs := agent.Tools.ToProviderDefsWithHiddenAllowlist(discoveredSet)
+		exposedToolNames := toolDefinitionNameSet(providerToolDefs)
 
 		// Log LLM request details
 		logger.DebugCF("agent", "LLM request",
@@ -2071,6 +2093,14 @@ func (al *AgentLoop) runLLMIteration(
 						"iteration": iteration,
 					})
 
+				if _, ok := exposedToolNames[tc.Name]; !ok {
+					agentResults[idx].result = tools.ErrorResult(fmt.Sprintf(
+						"Tool %q is not exposed in this request. Discover it first with tool_search_tool_bm25 or tool_search_tool_regex, then call it on the next turn.",
+						tc.Name,
+					))
+					return
+				}
+
 				// Create async callback for tools that implement AsyncExecutor.
 				// When the background work completes, this publishes the result
 				// as an inbound system message so processSystemMessage routes it
@@ -2250,6 +2280,26 @@ func (al *AgentLoop) runLLMIteration(
 				contentForLLM = r.result.Err.Error()
 			}
 
+			if isToolDiscoverySearchName(r.tc.Name) && !r.result.IsError {
+				discoveredFromResult, parseErr := tools.ExtractToolReferenceNames(contentForLLM)
+				if parseErr != nil {
+					logger.WarnCF("agent", "Failed to parse discovery tool response", map[string]any{
+						"agent_id": agent.ID,
+						"tool":     r.tc.Name,
+						"error":    parseErr.Error(),
+					})
+				} else if len(discoveredFromResult) > 0 {
+					merged := mergeToolNames(validDiscovered, discoveredFromResult)
+					validDiscovered = intersectToolNames(merged, hiddenSet)
+					agent.Sessions.SetDiscoveredTools(opts.SessionKey, validDiscovered)
+					if err := agent.Sessions.Save(opts.SessionKey); err != nil {
+						logger.WarnCF("agent", "Failed to persist discovered tools", map[string]any{
+							"agent_id": agent.ID, "session_key": opts.SessionKey, "error": err.Error(),
+						})
+					}
+				}
+			}
+
 			toolResultMsg := providers.Message{
 				Role:       "tool",
 				Content:    contentForLLM,
@@ -2274,19 +2324,91 @@ func (al *AgentLoop) runLLMIteration(
 			})
 		}
 
-		// Tick down TTL of discovered tools after processing tool results.
-		// Only reached when tool calls were made (the loop continues);
-		// the break on no-tool-call responses skips this.
-		// NOTE: This is safe because processMessage is sequential per agent.
-		// If per-agent concurrency is added, TTL consistency between
-		// ToProviderDefs and Get must be re-evaluated.
-		agent.Tools.TickTTL()
-		logger.DebugCF("agent", "TTL tick after tool execution", map[string]any{
-			"agent_id": agent.ID, "iteration": iteration,
-		})
 	}
 
 	return finalContent, finalUsage, iteration, activeModel, nil
+}
+
+func toolDefinitionNameSet(defs []providers.ToolDefinition) map[string]struct{} {
+	set := make(map[string]struct{}, len(defs))
+	for _, def := range defs {
+		name := strings.TrimSpace(def.Function.Name)
+		if name == "" {
+			continue
+		}
+		set[name] = struct{}{}
+	}
+	return set
+}
+
+func isToolDiscoverySearchName(name string) bool {
+	return name == "tool_search_tool_bm25" || name == "tool_search_tool_regex"
+}
+
+func intersectToolNames(names []string, allow map[string]struct{}) []string {
+	if len(names) == 0 || len(allow) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := allow[trimmed]; !ok {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func mergeToolNames(base []string, extra []string) []string {
+	if len(base) == 0 && len(extra) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(base)+len(extra))
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	for _, name := range base {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	for _, name := range extra {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func equalToolNameSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // publishStatus publishes a live status update to the bus for channel display.
@@ -2824,6 +2946,7 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 
 			agent.Sessions.SetHistory(opts.SessionKey, make([]providers.Message, 0))
 			agent.Sessions.SetSummary(opts.SessionKey, "")
+			agent.Sessions.SetDiscoveredTools(opts.SessionKey, nil)
 			agent.Sessions.Save(opts.SessionKey)
 			return nil
 		}

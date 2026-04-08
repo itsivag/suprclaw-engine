@@ -687,7 +687,7 @@ type GatewayConfig struct {
 
 type ToolDiscoveryConfig struct {
 	Enabled          bool `json:"enabled"            env:"SUPRCLAW_TOOLS_DISCOVERY_ENABLED"`
-	TTL              int  `json:"ttl"                env:"SUPRCLAW_TOOLS_DISCOVERY_TTL"`
+	TTL              int  `json:"ttl"                env:"SUPRCLAW_TOOLS_DISCOVERY_TTL"` // Deprecated: no runtime effect in deferred-loading mode.
 	MaxSearchResults int  `json:"max_search_results" env:"SUPRCLAW_MAX_SEARCH_RESULTS"`
 	UseBM25          bool `json:"use_bm25"           env:"SUPRCLAW_TOOLS_DISCOVERY_USE_BM25"`
 	UseRegex         bool `json:"use_regex"          env:"SUPRCLAW_TOOLS_DISCOVERY_USE_REGEX"`

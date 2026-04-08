@@ -56,6 +56,21 @@ func (b *JSONLBackend) SetSummary(key, summary string) {
 	}
 }
 
+func (b *JSONLBackend) GetDiscoveredTools(key string) []string {
+	names, err := b.store.GetDiscoveredTools(context.Background(), key)
+	if err != nil {
+		log.Printf("session: get discovered tools: %v", err)
+		return []string{}
+	}
+	return names
+}
+
+func (b *JSONLBackend) SetDiscoveredTools(key string, names []string) {
+	if err := b.store.SetDiscoveredTools(context.Background(), key, names); err != nil {
+		log.Printf("session: set discovered tools: %v", err)
+	}
+}
+
 func (b *JSONLBackend) SetHistory(key string, history []providers.Message) {
 	if err := b.store.SetHistory(context.Background(), key, history); err != nil {
 		log.Printf("session: set history: %v", err)

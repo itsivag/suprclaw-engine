@@ -96,6 +96,28 @@ func TestSave_RoundTripsMessageUsage(t *testing.T) {
 	}
 }
 
+func TestSave_RoundTripsDiscoveredTools(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir)
+
+	key := "discovered-roundtrip"
+	sm.GetOrCreate(key)
+	sm.SetDiscoveredTools(key, []string{"mcp_b", "mcp_a", "mcp_a", "  "})
+
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save(%q) failed: %v", key, err)
+	}
+
+	sm2 := NewSessionManager(tmpDir)
+	got := sm2.GetDiscoveredTools(key)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 discovered tools after reload, got %d (%v)", len(got), got)
+	}
+	if got[0] != "mcp_a" || got[1] != "mcp_b" {
+		t.Fatalf("expected sorted deduped discovered tools [mcp_a mcp_b], got %v", got)
+	}
+}
+
 func TestSave_RejectsPathTraversal(t *testing.T) {
 	tmpDir := t.TempDir()
 	sm := NewSessionManager(tmpDir)

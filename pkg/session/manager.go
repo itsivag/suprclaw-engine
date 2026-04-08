@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -12,11 +13,12 @@ import (
 )
 
 type Session struct {
-	Key      string              `json:"key"`
-	Messages []providers.Message `json:"messages"`
-	Summary  string              `json:"summary,omitempty"`
-	Created  time.Time           `json:"created"`
-	Updated  time.Time           `json:"updated"`
+	Key             string              `json:"key"`
+	Messages        []providers.Message `json:"messages"`
+	Summary         string              `json:"summary,omitempty"`
+	DiscoveredTools []string            `json:"discovered_tools,omitempty"`
+	Created         time.Time           `json:"created"`
+	Updated         time.Time           `json:"updated"`
 }
 
 type SessionManager struct {
@@ -122,6 +124,57 @@ func (sm *SessionManager) SetSummary(key string, summary string) {
 	}
 }
 
+func normalizeDiscoveredTools(names []string) []string {
+	if len(names) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(names))
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (sm *SessionManager) GetDiscoveredTools(key string) []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok || len(session.DiscoveredTools) == 0 {
+		return []string{}
+	}
+	out := make([]string, len(session.DiscoveredTools))
+	copy(out, session.DiscoveredTools)
+	return out
+}
+
+func (sm *SessionManager) SetDiscoveredTools(key string, names []string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session = &Session{
+			Key:      key,
+			Messages: []providers.Message{},
+			Created:  time.Now(),
+		}
+		sm.sessions[key] = session
+	}
+	session.DiscoveredTools = normalizeDiscoveredTools(names)
+	session.Updated = time.Now()
+}
+
 func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -190,6 +243,12 @@ func (sm *SessionManager) Save(key string) error {
 		copy(snapshot.Messages, stored.Messages)
 	} else {
 		snapshot.Messages = []providers.Message{}
+	}
+	if len(stored.DiscoveredTools) > 0 {
+		snapshot.DiscoveredTools = make([]string, len(stored.DiscoveredTools))
+		copy(snapshot.DiscoveredTools, stored.DiscoveredTools)
+	} else {
+		snapshot.DiscoveredTools = []string{}
 	}
 	sm.mu.RUnlock()
 

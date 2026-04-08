@@ -21,6 +21,10 @@ type SessionStore interface {
 	GetSummary(key string) string
 	// SetSummary replaces the conversation summary.
 	SetSummary(key, summary string)
+	// GetDiscoveredTools returns hidden tools discovered for deferred exposure.
+	GetDiscoveredTools(key string) []string
+	// SetDiscoveredTools replaces discovered hidden tool names for the session.
+	SetDiscoveredTools(key string, names []string)
 	// SetHistory replaces the full message history.
 	SetHistory(key string, history []providers.Message)
 	// TruncateHistory keeps only the last keepLast messages.

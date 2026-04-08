@@ -52,7 +52,7 @@ SuprClaw supports the [Model Context Protocol](https://modelcontextprotocol.io),
 
 ## Tool Discovery (Lazy Loading)
 
-When connecting to many MCP servers with hundreds of tools, Tool Discovery keeps tools *hidden* by default and uses BM25 keyword search or regex to unlock them on demand.
+When connecting to many MCP servers with hundreds of tools, Tool Discovery keeps tools *hidden* by default and uses BM25 keyword search or regex to discover them on demand.
 
 ```json
 {
@@ -76,7 +76,7 @@ When connecting to many MCP servers with hundreds of tools, Tool Discovery keeps
 | Config | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | bool | false | Enable lazy tool loading |
-| `ttl` | int | 5 | Turns a discovered tool stays unlocked |
+| `ttl` | int | 5 | Deprecated. No runtime effect in deferred-loading mode |
 | `max_search_results` | int | 5 | Max tools returned per search |
 | `use_bm25` | bool | true | Natural language keyword search |
 | `use_regex` | bool | false | Regex pattern search |
@@ -168,4 +168,4 @@ If `discovery.enabled` is `true`, you must enable at least one search engine (`u
 }
 ```
 
-In this setup, the LLM only sees `tool_search_tool_bm25`. It searches and unlocks GitHub or Postgres tools dynamically only when needed.
+In this setup, the LLM only sees `tool_search_tool_bm25`. It discovers GitHub or Postgres tools and those discovered names persist for deferred exposure in subsequent turns.

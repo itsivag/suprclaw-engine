@@ -26,6 +26,12 @@ type Store interface {
 	// SetSummary updates the conversation summary for a session.
 	SetSummary(ctx context.Context, sessionKey, summary string) error
 
+	// GetDiscoveredTools returns discovered hidden tool names for deferred exposure.
+	GetDiscoveredTools(ctx context.Context, sessionKey string) ([]string, error)
+
+	// SetDiscoveredTools replaces discovered hidden tool names for a session.
+	SetDiscoveredTools(ctx context.Context, sessionKey string, names []string) error
+
 	// TruncateHistory removes all but the last keepLast messages from a session.
 	// If keepLast <= 0, all messages are removed.
 	TruncateHistory(ctx context.Context, sessionKey string, keepLast int) error

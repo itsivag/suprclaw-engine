@@ -18,12 +18,11 @@ const (
 
 type RegexSearchTool struct {
 	registry         *ToolRegistry
-	ttl              int
 	maxSearchResults int
 }
 
-func NewRegexSearchTool(r *ToolRegistry, ttl int, maxSearchResults int) *RegexSearchTool {
-	return &RegexSearchTool{registry: r, ttl: ttl, maxSearchResults: maxSearchResults}
+func NewRegexSearchTool(r *ToolRegistry, maxSearchResults int) *RegexSearchTool {
+	return &RegexSearchTool{registry: r, maxSearchResults: maxSearchResults}
 }
 
 func (t *RegexSearchTool) Name() string {
@@ -31,7 +30,7 @@ func (t *RegexSearchTool) Name() string {
 }
 
 func (t *RegexSearchTool) Description() string {
-	return "Search available hidden tools on-demand using a regex pattern. Returns JSON schemas of discovered tools."
+	return "Search hidden tools on-demand using a regex pattern. Returns a strict JSON tool reference bundle."
 }
 
 func (t *RegexSearchTool) UsageContract() ToolUsageContract {
@@ -81,12 +80,11 @@ func (t *RegexSearchTool) Execute(ctx context.Context, args map[string]any) *Too
 	}
 
 	logger.InfoCF("discovery", "Regex search completed", map[string]any{"pattern": pattern, "results": len(res)})
-	return formatDiscoveryResponse(t.registry, res, t.ttl)
+	return formatDiscoveryResponse(res)
 }
 
 type BM25SearchTool struct {
 	registry         *ToolRegistry
-	ttl              int
 	maxSearchResults int
 
 	// Cache: rebuilt only when the registry version changes.
@@ -95,8 +93,8 @@ type BM25SearchTool struct {
 	cacheVersion uint64
 }
 
-func NewBM25SearchTool(r *ToolRegistry, ttl int, maxSearchResults int) *BM25SearchTool {
-	return &BM25SearchTool{registry: r, ttl: ttl, maxSearchResults: maxSearchResults}
+func NewBM25SearchTool(r *ToolRegistry, maxSearchResults int) *BM25SearchTool {
+	return &BM25SearchTool{registry: r, maxSearchResults: maxSearchResults}
 }
 
 func (t *BM25SearchTool) Name() string {
@@ -104,7 +102,7 @@ func (t *BM25SearchTool) Name() string {
 }
 
 func (t *BM25SearchTool) Description() string {
-	return "Search available hidden tools on-demand using natural language query describing the action you need to perform. Returns JSON schemas of discovered tools."
+	return "Search hidden tools on-demand with a natural language query. Returns a strict JSON tool reference bundle."
 }
 
 func (t *BM25SearchTool) UsageContract() ToolUsageContract {
@@ -114,7 +112,6 @@ func (t *BM25SearchTool) UsageContract() ToolUsageContract {
 		HardRequirements: []string{
 			"query must be a non-empty string.",
 			"Search scope is hidden tools only; core tools are excluded.",
-			"Only discovered tools are promoted for the configured TTL window.",
 		},
 	}
 }
@@ -145,13 +142,13 @@ func (t *BM25SearchTool) Execute(ctx context.Context, args map[string]any) *Tool
 	cached := t.getOrBuildEngine()
 	if cached == nil {
 		logger.DebugCF("discovery", "BM25 search: no hidden tools available", nil)
-		return SilentResult("No tools found matching the query.")
+		return formatDiscoveryResponse(nil)
 	}
 
 	ranked := cached.engine.Search(query, t.maxSearchResults)
 	if len(ranked) == 0 {
 		logger.DebugCF("discovery", "BM25 search: no matches", map[string]any{"query": query})
-		return SilentResult("No tools found matching the query.")
+		return formatDiscoveryResponse(nil)
 	}
 
 	results := make([]ToolSearchResult, len(ranked))
@@ -163,15 +160,21 @@ func (t *BM25SearchTool) Execute(ctx context.Context, args map[string]any) *Tool
 	}
 
 	logger.InfoCF("discovery", "BM25 search completed", map[string]any{"query": query, "results": len(results)})
-	return formatDiscoveryResponse(t.registry, results, t.ttl)
+	return formatDiscoveryResponse(results)
 }
 
 // ToolSearchResult represents the result returned to the LLM.
-// Parameters are omitted from the JSON response to save context tokens;
-// the LLM will see full schemas via ToProviderDefs after promotion.
+// Parameters are omitted from discovery responses to save context tokens.
 type ToolSearchResult struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+// ToolReferenceBundle is the strict machine-readable envelope returned by
+// tool discovery tools.
+type ToolReferenceBundle struct {
+	Type  string             `json:"type"`
+	Tools []ToolSearchResult `json:"tools"`
 }
 
 func (r *ToolRegistry) SearchRegex(pattern string, maxSearchResults int) ([]ToolSearchResult, error) {
@@ -212,30 +215,55 @@ func (r *ToolRegistry) SearchRegex(pattern string, maxSearchResults int) ([]Tool
 	return results, nil
 }
 
-func formatDiscoveryResponse(registry *ToolRegistry, results []ToolSearchResult, ttl int) *ToolResult {
-	if len(results) == 0 {
-		return SilentResult("No tools found matching the query.")
+func formatDiscoveryResponse(results []ToolSearchResult) *ToolResult {
+	if results == nil {
+		results = []ToolSearchResult{}
+	}
+	bundle := ToolReferenceBundle{
+		Type:  "tool_reference_bundle",
+		Tools: results,
 	}
 
-	names := make([]string, len(results))
-	for i, r := range results {
-		names[i] = r.Name
-	}
-	registry.PromoteTools(names, ttl)
-	logger.InfoCF("discovery", "Promoted tools", map[string]any{"tools": names, "ttl": ttl})
-
-	b, err := json.Marshal(results)
+	b, err := json.Marshal(bundle)
 	if err != nil {
 		return ErrorResult("Failed to format search results: " + err.Error())
 	}
+	return SilentResult(string(b))
+}
 
-	msg := fmt.Sprintf(
-		"Found %d tools:\n%s\n\nSUCCESS: These tools have been temporarily UNLOCKED as native tools! In your next response, you can call them directly just like any normal tool",
-		len(results),
-		string(b),
-	)
+// ParseToolReferenceBundle parses a strict tool discovery response.
+func ParseToolReferenceBundle(raw string) (ToolReferenceBundle, error) {
+	var bundle ToolReferenceBundle
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &bundle); err != nil {
+		return ToolReferenceBundle{}, fmt.Errorf("invalid tool_reference_bundle JSON: %w", err)
+	}
+	if bundle.Type != "tool_reference_bundle" {
+		return ToolReferenceBundle{}, fmt.Errorf("invalid bundle type: %q", bundle.Type)
+	}
+	return bundle, nil
+}
 
-	return SilentResult(msg)
+// ExtractToolReferenceNames returns deduplicated discovered tool names from
+// a tool_reference_bundle response.
+func ExtractToolReferenceNames(raw string) ([]string, error) {
+	bundle, err := ParseToolReferenceBundle(raw)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(bundle.Tools))
+	out := make([]string, 0, len(bundle.Tools))
+	for _, tool := range bundle.Tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out, nil
 }
 
 // Lightweight internal type used as corpus document for BM25.

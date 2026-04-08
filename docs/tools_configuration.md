@@ -146,8 +146,8 @@ When connecting to multiple MCP servers, exposing hundreds of tools simultaneous
 and increase API costs. The **Discovery** feature solves this by keeping MCP tools *hidden* by default.
 
 Instead of loading all tools, the LLM is provided with a lightweight search tool (using BM25 keyword matching or Regex).
-When the LLM needs a specific capability, it searches the hidden library. Matching tools are then temporarily "unlocked"
-and injected into the context for a configured number of turns (`ttl`).
+When the LLM needs a specific capability, it searches the hidden library. Matching tools are persisted in session
+as discovered references and become available in subsequent turns.
 
 ### Global Config
 
@@ -162,7 +162,7 @@ and injected into the context for a configured number of turns (`ttl`).
 | Config               | Type | Default | Description                                                                                                                       |
 |----------------------|------|---------|-----------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`            | bool | false   | If true, MCP tools are hidden and loaded on-demand via search. If false, all tools are loaded                                     |
-| `ttl`                | int  | 5       | Number of conversational turns a discovered tool remains unlocked                                                                 |
+| `ttl`                | int  | 5       | Deprecated. Kept for compatibility; no runtime effect in deferred-loading mode                                                   |
 | `max_search_results` | int  | 5       | Maximum number of tools returned per search query                                                                                 |
 | `use_bm25`           | bool | true    | Enable the natural language/keyword search tool (`tool_search_tool_bm25`). **Warning**: consumes more resources than regex search |
 | `use_regex`          | bool | false   | Enable the regex pattern search tool (`tool_search_tool_regex`)                                                                   |
@@ -240,8 +240,8 @@ and injected into the context for a configured number of turns (`ttl`).
 
 #### 3) Massive MCP setup with Tool Discovery enabled
 
-*In this example, the LLM will only see the `tool_search_tool_bm25`. It will search and unlock Github or Postgres tools
-dynamically only when requested by the user.*
+*In this example, the LLM will only see `tool_search_tool_bm25`. It searches hidden tools and persists discovered tool names
+for deferred exposure in following turns.*
 
 ```json
 {

@@ -61,7 +61,7 @@ func setupPopulatedRegistry() *ToolRegistry {
 
 func TestRegexSearchTool_Execute(t *testing.T) {
 	reg := setupPopulatedRegistry()
-	tool := NewRegexSearchTool(reg, 5, 10)
+	tool := NewRegexSearchTool(reg, 10)
 	ctx := context.Background()
 
 	t.Run("Empty Pattern Error", func(t *testing.T) {
@@ -78,41 +78,69 @@ func TestRegexSearchTool_Execute(t *testing.T) {
 		}
 	})
 
-	t.Run("No Match Found", func(t *testing.T) {
+	t.Run("No Match Found Returns Empty Bundle", func(t *testing.T) {
 		res := tool.Execute(ctx, map[string]any{"pattern": "alien"})
-		if res.IsError || !strings.Contains(res.ForLLM, "No tools found matching") {
-			t.Errorf("Expected 'no tools found' message, got: %v", res.ForLLM)
+		if res.IsError {
+			t.Fatalf("Expected success, got error: %v", res.ForLLM)
+		}
+		bundle, err := ParseToolReferenceBundle(res.ForLLM)
+		if err != nil {
+			t.Fatalf("Expected strict tool_reference_bundle JSON, got parse error: %v", err)
+		}
+		if bundle.Type != "tool_reference_bundle" {
+			t.Fatalf("Expected bundle type tool_reference_bundle, got %q", bundle.Type)
+		}
+		if len(bundle.Tools) != 0 {
+			t.Fatalf("Expected no tools, got %d", len(bundle.Tools))
 		}
 	})
 
-	t.Run("Successful Match & Promotion", func(t *testing.T) {
-		res := tool.Execute(ctx, map[string]any{"pattern": "system"})
+	t.Run("Successful Match Returns Strict Bundle And No Visibility Mutation", func(t *testing.T) {
+		before := reg.ToProviderDefs()
+		if len(before) != 1 {
+			t.Fatalf("Expected only core tools exposed by default, got %d", len(before))
+		}
 
+		res := tool.Execute(ctx, map[string]any{"pattern": "system"})
 		if res.IsError {
 			t.Fatalf("Unexpected error: %v", res.ForLLM)
 		}
-		if !strings.Contains(res.ForLLM, "SUCCESS: These tools have been temporarily UNLOCKED") {
-			t.Errorf("Expected success string, got: %v", res.ForLLM)
+
+		bundle, err := ParseToolReferenceBundle(res.ForLLM)
+		if err != nil {
+			t.Fatalf("Expected strict tool_reference_bundle JSON, got parse error: %v", err)
 		}
-		if !strings.Contains(res.ForLLM, "mcp_read_file") {
-			t.Errorf("Expected 'mcp_read_file' in results")
+		if len(bundle.Tools) == 0 {
+			t.Fatalf("Expected at least one discovered tool")
+		}
+		if bundle.Tools[0].Name == "" {
+			t.Fatalf("Expected discovered tool name to be non-empty")
+		}
+		names, err := ExtractToolReferenceNames(res.ForLLM)
+		if err != nil {
+			t.Fatalf("ExtractToolReferenceNames failed: %v", err)
+		}
+		foundReadFile := false
+		for _, name := range names {
+			if name == "mcp_read_file" {
+				foundReadFile = true
+				break
+			}
+		}
+		if !foundReadFile {
+			t.Fatalf("Expected mcp_read_file to be discovered, got %v", names)
 		}
 
-		// Verify that the TTL has been updated for the tools found
-		reg.mu.RLock()
-		defer reg.mu.RUnlock()
-		if reg.tools["mcp_read_file"].TTL != 5 {
-			t.Errorf("Expected TTL of 'mcp_read_file' to be promoted to 5, got %d", reg.tools["mcp_read_file"].TTL)
-		}
-		if reg.tools["mcp_fetch_net"].TTL != 0 {
-			t.Errorf("Expected 'mcp_fetch_net' to NOT be promoted (TTL=0)")
+		after := reg.ToProviderDefs()
+		if len(after) != 1 {
+			t.Fatalf("Expected search to have no registry visibility side effects, got %d exposed defs", len(after))
 		}
 	})
 }
 
 func TestBM25SearchTool_Execute(t *testing.T) {
 	reg := setupPopulatedRegistry()
-	tool := NewBM25SearchTool(reg, 3, 10)
+	tool := NewBM25SearchTool(reg, 10)
 	ctx := context.Background()
 
 	t.Run("Empty Query Error", func(t *testing.T) {
@@ -122,34 +150,45 @@ func TestBM25SearchTool_Execute(t *testing.T) {
 		}
 	})
 
-	t.Run("No Match Found", func(t *testing.T) {
+	t.Run("No Match Found Returns Empty Bundle", func(t *testing.T) {
 		res := tool.Execute(ctx, map[string]any{"query": "aliens spaceships"})
-		if res.IsError || !strings.Contains(res.ForLLM, "No tools found matching") {
-			t.Errorf("Expected 'no tools found', got: %v", res.ForLLM)
+		if res.IsError {
+			t.Fatalf("Expected success, got error: %v", res.ForLLM)
+		}
+		bundle, err := ParseToolReferenceBundle(res.ForLLM)
+		if err != nil {
+			t.Fatalf("Expected strict tool_reference_bundle JSON, got parse error: %v", err)
+		}
+		if len(bundle.Tools) != 0 {
+			t.Fatalf("Expected no tools, got %d", len(bundle.Tools))
 		}
 	})
 
-	t.Run("Successful Match & Promotion", func(t *testing.T) {
+	t.Run("Successful Match Returns Strict Bundle", func(t *testing.T) {
 		res := tool.Execute(ctx, map[string]any{"query": "read files"})
-
 		if res.IsError {
 			t.Fatalf("Unexpected error: %v", res.ForLLM)
 		}
-		if !strings.Contains(res.ForLLM, "mcp_read_file") {
-			t.Errorf("Expected 'mcp_read_file' in BM25 results")
+		names, err := ExtractToolReferenceNames(res.ForLLM)
+		if err != nil {
+			t.Fatalf("ExtractToolReferenceNames failed: %v", err)
 		}
-
-		reg.mu.RLock()
-		defer reg.mu.RUnlock()
-		if reg.tools["mcp_read_file"].TTL != 3 {
-			t.Errorf("Expected TTL of 'mcp_read_file' to be promoted to 3")
+		found := false
+		for _, name := range names {
+			if name == "mcp_read_file" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("Expected mcp_read_file in BM25 results, got %v", names)
 		}
 	})
 }
 
 func TestRegexSearchTool_PatternTooLong(t *testing.T) {
 	reg := setupPopulatedRegistry()
-	tool := NewRegexSearchTool(reg, 5, 10)
+	tool := NewRegexSearchTool(reg, 10)
 	ctx := context.Background()
 
 	longPattern := strings.Repeat("a", MaxRegexPatternLength+1)
@@ -261,37 +300,20 @@ func TestToolRegistry_SearchLimitsAndCoreFiltering(t *testing.T) {
 	})
 }
 
-func TestGet_HiddenToolTTLLifecycle(t *testing.T) {
+func TestGet_HiddenToolIsCallableButNotExposedByDefault(t *testing.T) {
 	reg := NewToolRegistry()
 	reg.RegisterHidden(&mockSearchableTool{name: "hidden_tool", desc: "test"})
-
-	// TTL=0 at registration → not gettable
-	_, ok := reg.Get("hidden_tool")
-	if ok {
-		t.Error("Expected hidden tool with TTL=0 to NOT be gettable")
-	}
-
-	// Promote → gettable
-	reg.PromoteTools([]string{"hidden_tool"}, 3)
-	_, ok = reg.Get("hidden_tool")
-	if !ok {
-		t.Error("Expected promoted hidden tool to be gettable")
-	}
-
-	// Tick down to 0 → not gettable again
-	reg.TickTTL() // 3→2
-	reg.TickTTL() // 2→1
-	reg.TickTTL() // 1→0
-	_, ok = reg.Get("hidden_tool")
-	if ok {
-		t.Error("Expected hidden tool with TTL ticked to 0 to NOT be gettable")
-	}
-
-	// Core tools remain always gettable
 	reg.Register(&mockSearchableTool{name: "core_tool", desc: "core"})
-	_, ok = reg.Get("core_tool")
-	if !ok {
-		t.Error("Expected core tool to always be gettable")
+
+	// Hidden tools remain executable by registry lookup when explicitly called.
+	if _, ok := reg.Get("hidden_tool"); !ok {
+		t.Fatal("expected hidden tool to be retrievable by name")
+	}
+
+	// Hidden tools are excluded from default provider definitions.
+	defs := reg.ToProviderDefs()
+	if len(defs) != 1 || defs[0].Function.Name != "core_tool" {
+		t.Fatalf("expected only core tool exposed by default, got %+v", defs)
 	}
 }
 
@@ -299,7 +321,7 @@ func TestBM25CacheInvalidation(t *testing.T) {
 	reg := NewToolRegistry()
 	reg.RegisterHidden(&mockSearchableTool{name: "tool_alpha", desc: "alpha functionality"})
 
-	tool := NewBM25SearchTool(reg, 5, 10)
+	tool := NewBM25SearchTool(reg, 10)
 	ctx := context.Background()
 
 	// First search should find tool_alpha
@@ -316,33 +338,4 @@ func TestBM25CacheInvalidation(t *testing.T) {
 	if !strings.Contains(res.ForLLM, "tool_beta") {
 		t.Errorf("Expected 'tool_beta' after cache invalidation, got: %v", res.ForLLM)
 	}
-}
-
-func TestPromoteTools_ConcurrentWithTickTTL(t *testing.T) {
-	reg := NewToolRegistry()
-	for i := 0; i < 20; i++ {
-		reg.RegisterHidden(&mockSearchableTool{
-			name: fmt.Sprintf("concurrent_tool_%d", i),
-			desc: "concurrent test tool",
-		})
-	}
-
-	names := make([]string, 20)
-	for i := 0; i < 20; i++ {
-		names[i] = fmt.Sprintf("concurrent_tool_%d", i)
-	}
-
-	// Hammer PromoteTools and TickTTL concurrently to detect races
-	done := make(chan struct{})
-	go func() {
-		for i := 0; i < 1000; i++ {
-			reg.PromoteTools(names, 5)
-		}
-		close(done)
-	}()
-
-	for i := 0; i < 1000; i++ {
-		reg.TickTTL()
-	}
-	<-done
 }
