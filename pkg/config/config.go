@@ -132,7 +132,7 @@ func DefaultHeartbeatJobForAgent(agentID string) HeartbeatJobConfig {
 		IntervalMinutes:    30,
 		IdleWindowMinutes:  15,
 		MaxTokensPerRun:    0,
-		SkipIfUnchanged:    true,
+		SkipIfUnchanged:    false,
 		ActiveHoursStart:   "08:00",
 		ActiveHoursEnd:     "22:00",
 		ShowOk:             false,
