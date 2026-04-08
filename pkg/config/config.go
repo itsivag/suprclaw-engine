@@ -880,6 +880,19 @@ type MCPConfig struct {
 	Servers map[string]MCPServerConfig `json:"servers,omitempty"`
 }
 
+func validateRemovedTopLevelConfigKeys(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	if _, found := raw["features"]; found {
+		return fmt.Errorf("config field \"features\" has been removed; delete it from config.json")
+	}
+
+	return nil
+}
+
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
@@ -888,6 +901,10 @@ func LoadConfig(path string) (*Config, error) {
 		if os.IsNotExist(err) {
 			return cfg, nil
 		}
+		return nil, err
+	}
+
+	if err := validateRemovedTopLevelConfigKeys(data); err != nil {
 		return nil, err
 	}
 

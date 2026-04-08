@@ -808,6 +808,29 @@ func TestLoadConfig_HeartbeatRejectsLegacyShape(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_RejectsRemovedFeaturesBlock(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "features": {
+    "prompt": {
+      "sectioned_boundary_v1": false
+    }
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Fatal("expected LoadConfig() to fail when removed features block is present")
+	}
+	if !strings.Contains(err.Error(), "config field \"features\" has been removed") {
+		t.Fatalf("error = %v, want removed-features validation error", err)
+	}
+}
+
 func TestLoadConfig_HeartbeatRejectsInvalidStates(t *testing.T) {
 	tests := []struct {
 		name      string
