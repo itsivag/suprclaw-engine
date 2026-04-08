@@ -746,6 +746,9 @@ func TestDefaultConfig_HeartbeatSchema(t *testing.T) {
 	if job.IntervalMinutes != 30 || job.IdleWindowMinutes != 15 {
 		t.Fatalf("unexpected default heartbeat job: %+v", job)
 	}
+	if job.ActiveHoursStart != "" || job.ActiveHoursEnd != "" {
+		t.Fatalf("default heartbeat job should be always-active (empty active hours), got start=%q end=%q", job.ActiveHoursStart, job.ActiveHoursEnd)
+	}
 }
 
 func TestLoadConfig_HeartbeatMultiJobValid(t *testing.T) {
