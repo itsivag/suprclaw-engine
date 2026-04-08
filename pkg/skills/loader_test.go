@@ -120,17 +120,19 @@ func TestExtractFrontmatter(t *testing.T) {
 
 			// Parse YAML to get name and description (parseSimpleYAML now handles all line ending types)
 			yamlMeta := sl.parseSimpleYAML(frontmatter)
+			name, _ := yamlMeta["name"].(string)
+			description, _ := yamlMeta["description"].(string)
 			assert.Equal(
 				t,
 				tc.expectedName,
-				yamlMeta["name"],
+				name,
 				"Name should be correctly parsed from frontmatter with %s line endings",
 				tc.lineEndingType,
 			)
 			assert.Equal(
 				t,
 				tc.expectedDesc,
-				yamlMeta["description"],
+				description,
 				"Description should be correctly parsed from frontmatter with %s line endings",
 				tc.lineEndingType,
 			)
@@ -416,4 +418,19 @@ func TestGetSkillMetadata_IgnoresHTMLCommentBlocks(t *testing.T) {
 	require.NotNil(t, meta)
 	assert.Equal(t, "biomed-skill", meta.Name)
 	assert.Equal(t, "Summarize biomedical papers.", meta.Description)
+}
+
+func TestGetSkillMetadata_ParsesConditionalPaths(t *testing.T) {
+	tmp := t.TempDir()
+	skillDir := filepath.Join(tmp, "workspace", "skills", "go-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+
+	content := "---\nname: go-skill\ndescription: Go helpers\npaths:\n  - src/**/*.go\n  - pkg/**/*.go\n---\n\n# Go Skill\n"
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644))
+
+	sl := &SkillsLoader{}
+	meta := sl.getSkillMetadata(filepath.Join(skillDir, "SKILL.md"))
+	require.NotNil(t, meta)
+	assert.Equal(t, "go-skill", meta.Name)
+	assert.Equal(t, []string{"src/**/*.go", "pkg/**/*.go"}, meta.Paths)
 }

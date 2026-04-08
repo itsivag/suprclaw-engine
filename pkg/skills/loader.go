@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/gomarkdown/markdown"
@@ -26,15 +27,17 @@ const (
 )
 
 type SkillMetadata struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Paths       []string `json:"paths,omitempty"`
 }
 
 type SkillInfo struct {
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	Source      string `json:"source"`
-	Description string `json:"description"`
+	Name        string   `json:"name"`
+	Path        string   `json:"path"`
+	Source      string   `json:"source"`
+	Description string   `json:"description"`
+	Paths       []string `json:"paths,omitempty"`
 }
 
 func (info SkillInfo) validate() error {
@@ -109,6 +112,9 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 		if err != nil {
 			return
 		}
+		sort.Slice(dirs, func(i, j int) bool {
+			return dirs[i].Name() < dirs[j].Name()
+		})
 		for _, d := range dirs {
 			if !d.IsDir() {
 				continue
@@ -126,6 +132,7 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 			if metadata != nil {
 				info.Description = metadata.Description
 				info.Name = metadata.Name
+				info.Paths = append(info.Paths[:0], metadata.Paths...)
 			}
 			if err := info.validate(); err != nil {
 				slog.Warn("invalid skill from "+source, "name", info.Name, "error", err)
@@ -143,6 +150,13 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 	addSkills(sl.workspaceSkills, "workspace")
 	addSkills(sl.globalSkills, "global")
 	addSkills(sl.builtinSkills, "builtin")
+
+	sort.Slice(skills, func(i, j int) bool {
+		if skills[i].Name == skills[j].Name {
+			return skills[i].Path < skills[j].Path
+		}
+		return skills[i].Name < skills[j].Name
+	})
 
 	return skills
 }
@@ -244,28 +258,27 @@ func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {
 	}
 
 	// Try JSON first (for backward compatibility)
-	var jsonMeta struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
+	var jsonMeta map[string]any
 	if err := json.Unmarshal([]byte(frontmatter), &jsonMeta); err == nil {
-		if jsonMeta.Name != "" {
-			metadata.Name = jsonMeta.Name
+		if name, ok := jsonMeta["name"].(string); ok && strings.TrimSpace(name) != "" {
+			metadata.Name = strings.TrimSpace(name)
 		}
-		if jsonMeta.Description != "" {
-			metadata.Description = jsonMeta.Description
+		if description, ok := jsonMeta["description"].(string); ok && strings.TrimSpace(description) != "" {
+			metadata.Description = strings.TrimSpace(description)
 		}
+		metadata.Paths = parsePathsValue(jsonMeta["paths"])
 		return metadata
 	}
 
 	// Fall back to simple YAML parsing
 	yamlMeta := sl.parseSimpleYAML(frontmatter)
-	if name := yamlMeta["name"]; name != "" {
-		metadata.Name = name
+	if name, ok := yamlMeta["name"].(string); ok && strings.TrimSpace(name) != "" {
+		metadata.Name = strings.TrimSpace(name)
 	}
-	if description := yamlMeta["description"]; description != "" {
-		metadata.Description = description
+	if description, ok := yamlMeta["description"].(string); ok && strings.TrimSpace(description) != "" {
+		metadata.Description = strings.TrimSpace(description)
 	}
+	metadata.Paths = parsePathsValue(yamlMeta["paths"])
 	return metadata
 }
 
@@ -324,24 +337,49 @@ func nodeText(n ast.Node) string {
 }
 
 // parseSimpleYAML parses YAML frontmatter and extracts known metadata fields.
-func (sl *SkillsLoader) parseSimpleYAML(content string) map[string]string {
-	result := make(map[string]string)
-
-	var meta struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
+func (sl *SkillsLoader) parseSimpleYAML(content string) map[string]any {
+	result := make(map[string]any)
+	if err := yaml.Unmarshal([]byte(content), &result); err != nil {
+		return map[string]any{}
 	}
-	if err := yaml.Unmarshal([]byte(content), &meta); err != nil {
-		return result
-	}
-	if meta.Name != "" {
-		result["name"] = meta.Name
-	}
-	if meta.Description != "" {
-		result["description"] = meta.Description
-	}
-
 	return result
+}
+
+func parsePathsValue(raw any) []string {
+	switch v := raw.(type) {
+	case string:
+		p := strings.TrimSpace(v)
+		if p == "" {
+			return nil
+		}
+		return []string{p}
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				continue
+			}
+			trimmed := strings.TrimSpace(s)
+			if trimmed == "" {
+				continue
+			}
+			out = append(out, trimmed)
+		}
+		return out
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, s := range v {
+			trimmed := strings.TrimSpace(s)
+			if trimmed == "" {
+				continue
+			}
+			out = append(out, trimmed)
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func (sl *SkillsLoader) extractFrontmatter(content string) string {

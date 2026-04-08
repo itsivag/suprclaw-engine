@@ -64,6 +64,9 @@ type AgentLoop struct {
 	// Active Supr runs keyed by channel+chatID for run.stop cancellation.
 	activeRunsMu sync.RWMutex
 	activeRuns   map[string]*activeRunState
+	// point-3 caching/diagnostics
+	toolSchemaCache     *ToolSchemaCache
+	promptCacheDetector *PromptCacheBreakDetector
 }
 
 type routeMetadata struct {
@@ -131,14 +134,16 @@ func NewAgentLoop(
 	}
 
 	al := &AgentLoop{
-		bus:         msgBus,
-		cfg:         cfg,
-		registry:    registry,
-		state:       stateManager,
-		summarizing: sync.Map{},
-		fallback:    fallbackChain,
-		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
-		activeRuns:  make(map[string]*activeRunState),
+		bus:                 msgBus,
+		cfg:                 cfg,
+		registry:            registry,
+		state:               stateManager,
+		summarizing:         sync.Map{},
+		fallback:            fallbackChain,
+		cmdRegistry:         commands.NewRegistry(commands.BuiltinDefinitions()),
+		activeRuns:          make(map[string]*activeRunState),
+		toolSchemaCache:     NewToolSchemaCache(),
+		promptCacheDetector: NewPromptCacheBreakDetector(),
 	}
 
 	return al
@@ -270,6 +275,11 @@ func registerSharedTools(
 			if install_skills_enable {
 				agent.Tools.Register(tools.NewInstallSkillTool(registryMgr, agent.Workspace))
 			}
+		}
+		if skills_enabled {
+			globalSkillsDir := config.ResolveGlobalSkillsDir(cfg.Tools.Skills.GlobalDir)
+			skillsLoader := skills.NewSkillsLoader(agent.Workspace, globalSkillsDir, defaultBuiltinSkillsDir())
+			agent.Tools.Register(tools.NewSkillTool(skillsLoader))
 		}
 
 		// Spawn and spawn_status tools share a SubagentManager.
@@ -1511,6 +1521,59 @@ func (al *AgentLoop) handleReasoning(
 	}
 }
 
+func candidateProviderName(candidates []providers.FallbackCandidate, model string) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	for _, c := range candidates {
+		if c.Model == model && strings.TrimSpace(c.Provider) != "" {
+			return c.Provider
+		}
+	}
+	return candidates[0].Provider
+}
+
+func appendUniqueString(dst []string, v string) []string {
+	for _, existing := range dst {
+		if existing == v {
+			return dst
+		}
+	}
+	return append(dst, v)
+}
+
+func collectLikelyPathsFromArgs(args map[string]any) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]string, 0)
+	var walk func(key string, value any)
+	walk = func(key string, value any) {
+		switch v := value.(type) {
+		case string:
+			lk := strings.ToLower(strings.TrimSpace(key))
+			if strings.Contains(lk, "path") || strings.Contains(lk, "file") || lk == "target" {
+				trimmed := strings.TrimSpace(v)
+				if trimmed != "" {
+					out = appendUniqueString(out, trimmed)
+				}
+			}
+		case []any:
+			for _, item := range v {
+				walk(key, item)
+			}
+		case map[string]any:
+			for nestedKey, nestedVal := range v {
+				walk(nestedKey, nestedVal)
+			}
+		}
+	}
+	for k, v := range args {
+		walk(k, v)
+	}
+	return out
+}
+
 // runLLMIteration executes the LLM call loop with tool handling.
 func (al *AgentLoop) runLLMIteration(
 	ctx context.Context,
@@ -1636,6 +1699,30 @@ func (al *AgentLoop) runLLMIteration(
 			discoveredSet[name] = struct{}{}
 		}
 		providerToolDefs := agent.Tools.ToProviderDefsWithHiddenAllowlist(discoveredSet)
+		activeProviderName := candidateProviderName(activeCandidates, activeModel)
+		toolsetFingerprint := computeToolsetFingerprint(providerToolDefs)
+		if al.toolSchemaCache != nil {
+			cachedDefs, fp, hit := al.toolSchemaCache.GetOrSet(
+				opts.SessionKey,
+				agent.ID,
+				activeProviderName,
+				activeModel,
+				providerToolDefs,
+			)
+			providerToolDefs = cachedDefs
+			toolsetFingerprint = fp
+			logger.DebugCF("agent", "Tool schema cache",
+				map[string]any{
+					"agent_id":    agent.ID,
+					"session_key": opts.SessionKey,
+					"provider":    activeProviderName,
+					"model":       activeModel,
+					"cache_hit":   hit,
+					"fingerprint": toolsetFingerprint,
+					"tools_count": len(providerToolDefs),
+					"iteration":   iteration,
+				})
+		}
 		exposedToolNames := toolDefinitionNameSet(providerToolDefs)
 
 		// Log LLM request details
@@ -1650,6 +1737,7 @@ func (al *AgentLoop) runLLMIteration(
 				"temperature":       agent.Temperature,
 				"context_window":    agent.ContextWindow,
 				"system_prompt_len": len(messages[0].Content),
+				"toolset_fp":        toolsetFingerprint,
 			})
 
 		// Log full messages (detailed)
@@ -1687,6 +1775,8 @@ func (al *AgentLoop) runLLMIteration(
 					map[string]any{"agent_id": agent.ID, "thinking_level": string(effectiveThinking)})
 			}
 		}
+
+		var promptSnapshot PromptStateSnapshot
 
 		callLLM := func() (*providers.LLMResponse, error) {
 			al.activeRequests.Add(1)
@@ -1814,6 +1904,19 @@ func (al *AgentLoop) runLLMIteration(
 				})
 			}
 
+			systemPromptText := ""
+			if len(messages) > 0 && messages[0].Role == "system" {
+				systemPromptText = messages[0].Content
+			}
+			promptSnapshot = NewPromptStateSnapshot(
+				systemPromptText,
+				providerToolDefs,
+				activeModel,
+				llmOpts,
+				agent.ContextBuilder.SkillStateEpoch(),
+				agent.ContextBuilder.CacheInvalidationEpoch(),
+			)
+
 			response, err = callLLM()
 			if err == nil {
 				if cancelErr := checkpoint(); cancelErr != nil {
@@ -1906,6 +2009,18 @@ func (al *AgentLoop) runLLMIteration(
 			return "", nil, iteration, activeModel, err
 		}
 
+		if al.promptCacheDetector != nil {
+			detectorKey := agent.ID + ":" + opts.SessionKey
+			al.promptCacheDetector.Analyze(
+				detectorKey,
+				promptSnapshot,
+				response.Usage,
+				PromptMutators{
+					ConfigChanged: opts.ModelOverride != "" || opts.ThinkingOverride != "",
+				},
+			)
+		}
+
 		go al.handleReasoning(
 			ctx,
 			response.Reasoning,
@@ -1962,6 +2077,12 @@ func (al *AgentLoop) runLLMIteration(
 		normalizedToolCalls := make([]providers.ToolCall, 0, len(response.ToolCalls))
 		for _, tc := range response.ToolCalls {
 			normalizedToolCalls = append(normalizedToolCalls, providers.NormalizeToolCall(tc))
+		}
+		touchedPaths := make([]string, 0, len(normalizedToolCalls))
+		for _, tc := range normalizedToolCalls {
+			for _, p := range collectLikelyPathsFromArgs(tc.Arguments) {
+				touchedPaths = appendUniqueString(touchedPaths, p)
+			}
 		}
 
 		// Log tool calls
@@ -2309,6 +2430,20 @@ func (al *AgentLoop) runLLMIteration(
 
 			// Save tool result message to session
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
+		}
+
+		if len(touchedPaths) > 0 {
+			activated := agent.ContextBuilder.ActivateSkillsForPaths(opts.Channel, opts.ChatID, touchedPaths)
+			if len(activated) > 0 {
+				logger.InfoCF("agent", "Activated conditional skills",
+					map[string]any{
+						"agent_id":      agent.ID,
+						"session_key":   opts.SessionKey,
+						"activated":     activated,
+						"touched_paths": touchedPaths,
+						"iteration":     iteration,
+					})
+			}
 		}
 
 		if activity != nil && iterationStepID != "" {

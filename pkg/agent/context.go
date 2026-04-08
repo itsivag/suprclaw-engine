@@ -6,10 +6,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/itsivag/suprclaw/pkg/config"
@@ -43,7 +47,20 @@ type ContextBuilder struct {
 	// build time. This catches nested file creations/deletions/mtime changes
 	// that may not update the top-level skill root directory mtime.
 	skillFilesAtCache map[string]time.Time
+
+	// sessionActivatedSkills tracks conditional skill activations keyed by session.
+	sessionActivatedSkills map[string]map[string]struct{}
+	skillsStateMu          sync.RWMutex
+	skillStateEpoch        atomic.Uint64
+	cacheInvalidationEpoch atomic.Uint64
 }
+
+const (
+	systemPromptDynamicBoundary = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
+	defaultSkillsCharBudget     = 8000
+	minSkillDescChars           = 20
+	maxSkillDescChars           = 250
+)
 
 func (cb *ContextBuilder) WithToolDiscovery(useBM25, useRegex bool) *ContextBuilder {
 	cb.toolDiscoveryBM25 = useBM25
@@ -76,9 +93,10 @@ func NewContextBuilderWithSkillDirs(workspace, globalSkillsDir, builtinSkillsDir
 	}
 
 	return &ContextBuilder{
-		workspace:    workspace,
-		skillsLoader: skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
-		memory:       NewMemoryStore(workspace),
+		workspace:              workspace,
+		skillsLoader:           skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
+		memory:                 NewMemoryStore(workspace),
+		sessionActivatedSkills: make(map[string]map[string]struct{}),
 	}
 }
 
@@ -131,20 +149,132 @@ func (cb *ContextBuilder) getDiscoveryRule() string {
 	)
 }
 
-func (cb *ContextBuilder) BuildSystemPrompt() string {
-	parts := []string{}
+func (cb *ContextBuilder) skillsSessionKey(channel, chatID string) string {
+	channel = strings.TrimSpace(channel)
+	chatID = strings.TrimSpace(chatID)
+	if channel == "" && chatID == "" {
+		return "default"
+	}
+	return channel + ":" + chatID
+}
 
-	// Core identity section
+func truncateSkillDescription(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return s[:max]
+	}
+	return s[:max-1] + "…"
+}
+
+func normalizeSkillInfos(skillsIn []skills.SkillInfo) []skills.SkillInfo {
+	out := make([]skills.SkillInfo, len(skillsIn))
+	copy(out, skillsIn)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name == out[j].Name {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func (cb *ContextBuilder) renderSkillsSummary(skillsIn []skills.SkillInfo) string {
+	skillsList := normalizeSkillInfos(skillsIn)
+	if len(skillsList) == 0 {
+		return ""
+	}
+
+	totalBudget := defaultSkillsCharBudget
+	if envBudget := strings.TrimSpace(os.Getenv("SUPRCLAW_SKILLS_SUMMARY_CHAR_BUDGET")); envBudget != "" {
+		if parsed, err := strconv.Atoi(envBudget); err == nil && parsed >= 1024 {
+			totalBudget = parsed
+		}
+	}
+
+	// Keep enough room for xml framing and non-description fields.
+	fixedChars := 0
+	for _, s := range skillsList {
+		fixedChars += len(s.Name) + len(s.Path) + len(s.Source) + 128
+	}
+	availableForDesc := totalBudget - fixedChars
+	descBudget := maxSkillDescChars
+	if availableForDesc <= 0 {
+		descBudget = minSkillDescChars
+	} else {
+		perSkill := availableForDesc / len(skillsList)
+		if perSkill < minSkillDescChars {
+			perSkill = minSkillDescChars
+		}
+		if perSkill > maxSkillDescChars {
+			perSkill = maxSkillDescChars
+		}
+		descBudget = perSkill
+	}
+
+	lines := make([]string, 0, len(skillsList)*6+2)
+	lines = append(lines, "<skills>")
+	for _, s := range skillsList {
+		escapedName := xmlEscape(s.Name)
+		escapedDesc := xmlEscape(truncateSkillDescription(s.Description, descBudget))
+		escapedPath := xmlEscape(s.Path)
+
+		lines = append(lines, "  <skill>")
+		lines = append(lines, fmt.Sprintf("    <name>%s</name>", escapedName))
+		lines = append(lines, fmt.Sprintf("    <description>%s</description>", escapedDesc))
+		lines = append(lines, fmt.Sprintf("    <location>%s</location>", escapedPath))
+		lines = append(lines, fmt.Sprintf("    <source>%s</source>", s.Source))
+		lines = append(lines, "  </skill>")
+	}
+	lines = append(lines, "</skills>")
+	return strings.Join(lines, "\n")
+}
+
+func (cb *ContextBuilder) staticSkillInfos() []skills.SkillInfo {
+	allSkills := cb.skillsLoader.ListSkills()
+	always := make([]skills.SkillInfo, 0, len(allSkills))
+	for _, s := range allSkills {
+		if len(s.Paths) == 0 {
+			always = append(always, s)
+		}
+	}
+	return always
+}
+
+func (cb *ContextBuilder) activatedSessionSkillInfos(channel, chatID string) []skills.SkillInfo {
+	sessionKey := cb.skillsSessionKey(channel, chatID)
+	cb.skillsStateMu.RLock()
+	activeSet := cb.sessionActivatedSkills[sessionKey]
+	cb.skillsStateMu.RUnlock()
+	if len(activeSet) == 0 {
+		return nil
+	}
+
+	allSkills := cb.skillsLoader.ListSkills()
+	active := make([]skills.SkillInfo, 0, len(activeSet))
+	for _, s := range allSkills {
+		if _, ok := activeSet[s.Name]; ok {
+			active = append(active, s)
+		}
+	}
+	return active
+}
+
+func (cb *ContextBuilder) buildStaticSystemSections() []string {
+	parts := []string{}
 	parts = append(parts, cb.getIdentity())
 
-	// Bootstrap files
 	bootstrapContent := cb.LoadBootstrapFiles()
 	if bootstrapContent != "" {
 		parts = append(parts, bootstrapContent)
 	}
 
-	// Skills - show summary, AI can read full content with read_file tool
-	skillsSummary := cb.skillsLoader.BuildSkillsSummary()
+	skillsSummary := cb.renderSkillsSummary(cb.staticSkillInfos())
 	if skillsSummary != "" {
 		parts = append(parts, fmt.Sprintf(`# Skills
 
@@ -153,13 +283,18 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 %s`, skillsSummary))
 	}
 
-	// Memory context
 	memoryContext := cb.memory.GetMemoryContext()
 	if memoryContext != "" {
 		parts = append(parts, "# Memory\n\n"+memoryContext)
 	}
 
-	// Join with "---" separator
+	parts = append(parts, systemPromptDynamicBoundary)
+
+	return parts
+}
+
+func (cb *ContextBuilder) BuildSystemPrompt() string {
+	parts := cb.buildStaticSystemSections()
 	return strings.Join(parts, "\n\n---\n\n")
 }
 
@@ -217,6 +352,7 @@ func (cb *ContextBuilder) InvalidateCache() {
 	cb.cachedAt = time.Time{}
 	cb.existedAtCache = nil
 	cb.skillFilesAtCache = nil
+	cb.cacheInvalidationEpoch.Add(1)
 
 	logger.DebugCF("agent", "System prompt cache invalidated", nil)
 }
@@ -434,6 +570,157 @@ func skillFilesChangedSince(skillRoots []string, filesAtCache map[string]time.Ti
 	return false
 }
 
+func xmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+func normalizeRelativeSkillPath(workspace, rawPath string) (string, bool) {
+	rawPath = strings.TrimSpace(rawPath)
+	if rawPath == "" {
+		return "", false
+	}
+
+	path := filepath.Clean(rawPath)
+	if filepath.IsAbs(path) {
+		rel, err := filepath.Rel(workspace, path)
+		if err != nil {
+			return "", false
+		}
+		path = rel
+	}
+
+	path = filepath.ToSlash(path)
+	if path == "." || strings.HasPrefix(path, "../") || strings.HasPrefix(path, "/") {
+		return "", false
+	}
+	return path, true
+}
+
+func wildcardPatternToRegexp(pattern string) (*regexp.Regexp, error) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil, fmt.Errorf("empty pattern")
+	}
+	pattern = filepath.ToSlash(pattern)
+
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(pattern); {
+		switch {
+		case strings.HasPrefix(pattern[i:], "**/"):
+			// Globstar with trailing slash should match zero-or-more directories.
+			// Example: src/**/*.go matches both src/main.go and src/a/b.go
+			b.WriteString("(?:.*/)?")
+			i += 3
+		case strings.HasPrefix(pattern[i:], "/**"):
+			// Allow suffix globstar to absorb zero-or-more subpath components.
+			b.WriteString("(?:/.*)?")
+			i += 3
+		case strings.HasPrefix(pattern[i:], "**"):
+			b.WriteString(".*")
+			i += 2
+		case pattern[i] == '*':
+			b.WriteString("[^/]*")
+			i++
+		case pattern[i] == '?':
+			b.WriteString("[^/]")
+			i++
+		default:
+			b.WriteString(regexp.QuoteMeta(string(pattern[i])))
+			i++
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
+}
+
+func matchesAnySkillPath(paths []string, relativePaths []string) bool {
+	if len(paths) == 0 || len(relativePaths) == 0 {
+		return false
+	}
+
+	for _, p := range paths {
+		re, err := wildcardPatternToRegexp(p)
+		if err != nil {
+			continue
+		}
+		for _, candidate := range relativePaths {
+			if re.MatchString(candidate) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ActivateSkillsForPaths activates session-scoped conditional skills whose
+// frontmatter paths match the touched file paths.
+func (cb *ContextBuilder) ActivateSkillsForPaths(channel, chatID string, touchedPaths []string) []string {
+	if len(touchedPaths) == 0 {
+		return nil
+	}
+
+	relative := make([]string, 0, len(touchedPaths))
+	seen := make(map[string]struct{}, len(touchedPaths))
+	for _, p := range touchedPaths {
+		rel, ok := normalizeRelativeSkillPath(cb.workspace, p)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[rel]; exists {
+			continue
+		}
+		seen[rel] = struct{}{}
+		relative = append(relative, rel)
+	}
+	if len(relative) == 0 {
+		return nil
+	}
+
+	sessionKey := cb.skillsSessionKey(channel, chatID)
+	allSkills := cb.skillsLoader.ListSkills()
+
+	cb.skillsStateMu.Lock()
+	defer cb.skillsStateMu.Unlock()
+
+	activatedSet, ok := cb.sessionActivatedSkills[sessionKey]
+	if !ok {
+		activatedSet = make(map[string]struct{})
+		cb.sessionActivatedSkills[sessionKey] = activatedSet
+	}
+
+	activated := make([]string, 0)
+	for _, s := range allSkills {
+		if len(s.Paths) == 0 {
+			continue
+		}
+		if _, already := activatedSet[s.Name]; already {
+			continue
+		}
+		if matchesAnySkillPath(s.Paths, relative) {
+			activatedSet[s.Name] = struct{}{}
+			activated = append(activated, s.Name)
+		}
+	}
+
+	if len(activated) > 0 {
+		sort.Strings(activated)
+		cb.skillStateEpoch.Add(1)
+	}
+	return activated
+}
+
+func (cb *ContextBuilder) SkillStateEpoch() uint64 {
+	return cb.skillStateEpoch.Load()
+}
+
+func (cb *ContextBuilder) CacheInvalidationEpoch() uint64 {
+	return cb.cacheInvalidationEpoch.Load()
+}
+
 func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	bootstrapFiles := []string{
 		"AGENTS.md",
@@ -516,6 +803,16 @@ func (cb *ContextBuilder) BuildMessages(
 
 	// Build short dynamic context (time, runtime, session) — changes per request
 	dynamicCtx := cb.buildDynamicContext(channel, chatID, senderID, senderDisplayName)
+	activatedSkills := cb.activatedSessionSkillInfos(channel, chatID)
+	activatedSkillsSection := ""
+	if len(activatedSkills) > 0 {
+		activatedSkillsSummary := cb.renderSkillsSummary(activatedSkills)
+		activatedSkillsSection = fmt.Sprintf(`# Session Skills
+
+The following path-conditional skills are active for this session because relevant files were touched:
+
+%s`, activatedSkillsSummary)
+	}
 
 	// Compose a single system message: static (cached) + dynamic + optional summary.
 	// Keeping all system content in one message ensures every provider adapter can
@@ -531,6 +828,11 @@ func (cb *ContextBuilder) BuildMessages(
 	contentBlocks := []providers.ContentBlock{
 		{Type: "text", Text: staticPrompt, CacheControl: &providers.CacheControl{Type: "ephemeral"}},
 		{Type: "text", Text: dynamicCtx},
+	}
+
+	if activatedSkillsSection != "" {
+		stringParts = append(stringParts, activatedSkillsSection)
+		contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: activatedSkillsSection})
 	}
 
 	if summary != "" {
@@ -776,12 +1078,23 @@ func (cb *ContextBuilder) AddAssistantMessage(
 func (cb *ContextBuilder) GetSkillsInfo() map[string]any {
 	allSkills := cb.skillsLoader.ListSkills()
 	skillNames := make([]string, 0, len(allSkills))
+	conditional := 0
 	for _, s := range allSkills {
 		skillNames = append(skillNames, s.Name)
+		if len(s.Paths) > 0 {
+			conditional++
+		}
 	}
+	cb.skillsStateMu.RLock()
+	activeSessions := len(cb.sessionActivatedSkills)
+	cb.skillsStateMu.RUnlock()
 	return map[string]any{
-		"total":     len(allSkills),
-		"available": len(allSkills),
-		"names":     skillNames,
+		"total":               len(allSkills),
+		"available":           len(allSkills),
+		"names":               skillNames,
+		"conditional_pending": conditional,
+		"dynamic_sessions":    activeSessions,
+		"skill_state_epoch":   cb.SkillStateEpoch(),
+		"cache_invalidations": cb.CacheInvalidationEpoch(),
 	}
 }
