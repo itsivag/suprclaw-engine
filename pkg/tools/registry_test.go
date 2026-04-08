@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -14,12 +15,16 @@ import (
 type mockRegistryTool struct {
 	name   string
 	desc   string
+	usage  ToolUsageContract
 	params map[string]any
 	result *ToolResult
 }
 
-func (m *mockRegistryTool) Name() string               { return m.name }
-func (m *mockRegistryTool) Description() string        { return m.desc }
+func (m *mockRegistryTool) Name() string        { return m.name }
+func (m *mockRegistryTool) Description() string { return m.desc }
+func (m *mockRegistryTool) UsageContract() ToolUsageContract {
+	return m.usage
+}
 func (m *mockRegistryTool) Parameters() map[string]any { return m.params }
 func (m *mockRegistryTool) Execute(_ context.Context, _ map[string]any) *ToolResult {
 	return m.result
@@ -51,8 +56,19 @@ func newMockTool(name, desc string) *mockRegistryTool {
 	return &mockRegistryTool{
 		name:   name,
 		desc:   desc,
+		usage:  validTestUsageContract(),
 		params: map[string]any{"type": "object"},
 		result: SilentResult("ok"),
+	}
+}
+
+func validTestUsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "test usage condition",
+		DoNotUseWhen: "test non-usage condition",
+		HardRequirements: []string{
+			"test requirement",
+		},
 	}
 }
 
@@ -109,6 +125,7 @@ func TestToolRegistry_Execute_Success(t *testing.T) {
 	r.Register(&mockRegistryTool{
 		name:   "greet",
 		desc:   "says hello",
+		usage:  validTestUsageContract(),
 		params: map[string]any{},
 		result: SilentResult("hello"),
 	})
@@ -220,8 +237,9 @@ func TestToolRegistry_GetDefinitions(t *testing.T) {
 	if fn["name"] != "alpha" {
 		t.Errorf("expected name 'alpha', got %v", fn["name"])
 	}
-	if fn["description"] != "tool A" {
-		t.Errorf("expected description 'tool A', got %v", fn["description"])
+	expectedDescription := FormatToolDescription("tool A", validTestUsageContract())
+	if fn["description"] != expectedDescription {
+		t.Errorf("expected description %q, got %v", expectedDescription, fn["description"])
 	}
 }
 
@@ -231,6 +249,7 @@ func TestToolRegistry_ToProviderDefs(t *testing.T) {
 	r.Register(&mockRegistryTool{
 		name:   "beta",
 		desc:   "tool B",
+		usage:  validTestUsageContract(),
 		params: params,
 		result: SilentResult("ok"),
 	})
@@ -244,7 +263,7 @@ func TestToolRegistry_ToProviderDefs(t *testing.T) {
 		Type: "function",
 		Function: providers.ToolFunctionDefinition{
 			Name:        "beta",
-			Description: "tool B",
+			Description: FormatToolDescription("tool B", validTestUsageContract()),
 			Parameters:  params,
 		},
 	}
@@ -327,8 +346,9 @@ func TestToolToSchema(t *testing.T) {
 	if fn["name"] != "demo" {
 		t.Errorf("expected name 'demo', got %v", fn["name"])
 	}
-	if fn["description"] != "demo tool" {
-		t.Errorf("expected description 'demo tool', got %v", fn["description"])
+	expectedDescription := FormatToolDescription("demo tool", validTestUsageContract())
+	if fn["description"] != expectedDescription {
+		t.Errorf("expected description %q, got %v", expectedDescription, fn["description"])
 	}
 	if fn["parameters"] == nil {
 		t.Error("expected parameters to be set")
@@ -357,4 +377,48 @@ func TestToolRegistry_ConcurrentAccess(t *testing.T) {
 	if r.Count() == 0 {
 		t.Error("expected tools to be registered after concurrent access")
 	}
+}
+
+func TestToolRegistry_Register_FailFastOnInvalidUsageContract(t *testing.T) {
+	r := NewToolRegistry()
+
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("expected panic for invalid usage contract")
+		}
+		if !strings.Contains(fmt.Sprint(recovered), "invalid usage contract") {
+			t.Fatalf("expected panic to mention invalid usage contract, got: %v", recovered)
+		}
+	}()
+
+	r.Register(&mockRegistryTool{
+		name:   "invalid_core",
+		desc:   "invalid",
+		usage:  ToolUsageContract{UseWhen: " ", DoNotUseWhen: "valid", HardRequirements: []string{"ok"}},
+		params: map[string]any{"type": "object"},
+		result: SilentResult("ok"),
+	})
+}
+
+func TestToolRegistry_RegisterHidden_FailFastOnInvalidUsageContract(t *testing.T) {
+	r := NewToolRegistry()
+
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("expected panic for invalid usage contract")
+		}
+		if !strings.Contains(fmt.Sprint(recovered), "invalid usage contract") {
+			t.Fatalf("expected panic to mention invalid usage contract, got: %v", recovered)
+		}
+	}()
+
+	r.RegisterHidden(&mockRegistryTool{
+		name:   "invalid_hidden",
+		desc:   "invalid",
+		usage:  ToolUsageContract{UseWhen: "valid", DoNotUseWhen: "valid", HardRequirements: []string{""}},
+		params: map[string]any{"type": "object"},
+		result: SilentResult("ok"),
+	})
 }

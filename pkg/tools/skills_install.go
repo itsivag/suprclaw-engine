@@ -43,6 +43,18 @@ func (t *InstallSkillTool) Description() string {
 	return "Install a skill from a registry by slug. Downloads and extracts the skill into the workspace. Use find_skills first to discover available skills."
 }
 
+func (t *InstallSkillTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to install a specific skill from a known registry into the workspace.",
+		DoNotUseWhen: "you need to discover candidate skills first.",
+		HardRequirements: []string{
+			"slug and registry must be provided and pass identifier validation.",
+			"If the skill directory already exists, force must be true to reinstall.",
+			"Installation failures or malware blocks must surface as explicit errors.",
+		},
+	}
+}
+
 func (t *InstallSkillTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

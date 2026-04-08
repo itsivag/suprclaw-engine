@@ -31,6 +31,10 @@ func NewToolRegistry() *ToolRegistry {
 }
 
 func (r *ToolRegistry) Register(tool Tool) {
+	if err := ValidateToolContract(tool); err != nil {
+		panic(fmt.Errorf("failed to register core tool: %w", err))
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	name := tool.Name()
@@ -49,6 +53,10 @@ func (r *ToolRegistry) Register(tool Tool) {
 
 // RegisterHidden saves hidden tools (visible only via TTL)
 func (r *ToolRegistry) RegisterHidden(tool Tool) {
+	if err := ValidateToolContract(tool); err != nil {
+		panic(fmt.Errorf("failed to register hidden tool: %w", err))
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	name := tool.Name()

@@ -141,6 +141,18 @@ func (t *agentBrowserTargetsListTool) Description() string {
 	return "List Agent Browser targets. Call this first, then pass the selected target id into agent_browser_action/batch."
 }
 
+func (t *agentBrowserTargetsListTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need the current Agent Browser target ids before running browser actions.",
+		DoNotUseWhen: "you already have a valid target id for the active browser session.",
+		HardRequirements: []string{
+			"Call this before action or batch calls when target id is unknown.",
+			"Use returned target ids exactly in subsequent browser tool calls.",
+			"Agent Browser endpoint configuration must be valid.",
+		},
+	}
+}
+
 func (t *agentBrowserTargetsListTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -177,6 +189,18 @@ func (t *agentBrowserActionTool) Name() string {
 
 func (t *agentBrowserActionTool) Description() string {
 	return "Execute one Agent Browser action. Allowed actions: tabs.select, navigate, click, type, press, screenshot, snapshot, wait. For click/type, args.selector MUST be a snapshot ref like @e12."
+}
+
+func (t *agentBrowserActionTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to execute one explicit Agent Browser action on a selected target.",
+		DoNotUseWhen: "you need multi-step execution better represented as a single batch.",
+		HardRequirements: []string{
+			"target and action must be provided.",
+			"action must be one of the explicitly allowed Agent Browser actions.",
+			"Action-specific args validation must pass, including selector ref requirements.",
+		},
+	}
 }
 
 func (t *agentBrowserActionTool) Parameters() map[string]any {
@@ -255,6 +279,18 @@ func (t *agentBrowserBatchTool) Name() string {
 
 func (t *agentBrowserBatchTool) Description() string {
 	return "Execute a Agent Browser batch on one target. Each step action must be one of: tabs.select, navigate, click, type, press, screenshot, snapshot, wait. click/type require ref selectors (@eN)."
+}
+
+func (t *agentBrowserBatchTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need multiple ordered Agent Browser actions executed against one target.",
+		DoNotUseWhen: "a single browser action is sufficient.",
+		HardRequirements: []string{
+			"target and non-empty steps must be provided.",
+			"Each step action must be from the allowed Agent Browser action set.",
+			"Each step args payload must pass action-specific validation before execution.",
+		},
+	}
 }
 
 func (t *agentBrowserBatchTool) Parameters() map[string]any {

@@ -230,6 +230,15 @@ type noopTool struct{}
 
 func (t *noopTool) Name() string        { return "noop_tool" }
 func (t *noopTool) Description() string { return "no-op test tool" }
+func (t *noopTool) UsageContract() tools.ToolUsageContract {
+	return tools.ToolUsageContract{
+		UseWhen:      "test noop usage",
+		DoNotUseWhen: "test noop non-usage",
+		HardRequirements: []string{
+			"test requirement",
+		},
+	}
+}
 func (t *noopTool) Parameters() map[string]any {
 	return map[string]any{
 		"type":       "object",
@@ -244,6 +253,15 @@ type failingTool struct{}
 
 func (t *failingTool) Name() string        { return "noop_tool" }
 func (t *failingTool) Description() string { return "failing test tool" }
+func (t *failingTool) UsageContract() tools.ToolUsageContract {
+	return tools.ToolUsageContract{
+		UseWhen:      "test failing usage",
+		DoNotUseWhen: "test failing non-usage",
+		HardRequirements: []string{
+			"test requirement",
+		},
+	}
+}
 func (t *failingTool) Parameters() map[string]any {
 	return map[string]any{
 		"type":       "object",
@@ -2375,6 +2393,16 @@ func (m *mockCustomTool) Name() string {
 
 func (m *mockCustomTool) Description() string {
 	return "Mock custom tool for testing"
+}
+
+func (m *mockCustomTool) UsageContract() tools.ToolUsageContract {
+	return tools.ToolUsageContract{
+		UseWhen:      "test custom tool usage",
+		DoNotUseWhen: "test custom tool non-usage",
+		HardRequirements: []string{
+			"test requirement",
+		},
+	}
 }
 
 func (m *mockCustomTool) Parameters() map[string]any {

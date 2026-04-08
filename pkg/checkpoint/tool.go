@@ -44,6 +44,18 @@ func (t *CheckpointTool) Description() string {
 		"Use before making risky changes so you can roll back if needed."
 }
 
+func (t *CheckpointTool) UsageContract() tools.ToolUsageContract {
+	return tools.ToolUsageContract{
+		UseWhen:      "you need an explicit restore point before risky workspace or tool operations.",
+		DoNotUseWhen: "you only need to inspect state without creating a new checkpoint.",
+		HardRequirements: []string{
+			"Use this tool before operations where rollback may be needed.",
+			"The optional label should clearly identify checkpoint intent.",
+			"Treat checkpoint creation failures as blocking errors.",
+		},
+	}
+}
+
 // Parameters returns the tool's JSON Schema parameters.
 func (t *CheckpointTool) Parameters() map[string]any {
 	return map[string]any{

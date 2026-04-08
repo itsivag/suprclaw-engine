@@ -34,6 +34,18 @@ func (t *RegexSearchTool) Description() string {
 	return "Search available hidden tools on-demand using a regex pattern. Returns JSON schemas of discovered tools."
 }
 
+func (t *RegexSearchTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to discover hidden tools by matching tool names or descriptions with a regex pattern.",
+		DoNotUseWhen: "the needed tool is already available as a visible callable tool.",
+		HardRequirements: []string{
+			"pattern must be a non-empty string.",
+			"pattern length must not exceed the regex maximum limit.",
+			"Invalid regex syntax must be treated as an explicit error.",
+		},
+	}
+}
+
 func (t *RegexSearchTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -93,6 +105,18 @@ func (t *BM25SearchTool) Name() string {
 
 func (t *BM25SearchTool) Description() string {
 	return "Search available hidden tools on-demand using natural language query describing the action you need to perform. Returns JSON schemas of discovered tools."
+}
+
+func (t *BM25SearchTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need semantic hidden-tool discovery from a natural language query.",
+		DoNotUseWhen: "you already know and can call the required visible tool directly.",
+		HardRequirements: []string{
+			"query must be a non-empty string.",
+			"Search scope is hidden tools only; core tools are excluded.",
+			"Only discovered tools are promoted for the configured TTL window.",
+		},
+	}
 }
 
 func (t *BM25SearchTool) Parameters() map[string]any {

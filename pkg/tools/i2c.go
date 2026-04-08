@@ -24,6 +24,18 @@ func (t *I2CTool) Description() string {
 	return "Interact with I2C bus devices for reading sensors and controlling peripherals. Actions: detect (list buses), scan (find devices on a bus), read (read bytes from device), write (send bytes to device). Linux only."
 }
 
+func (t *I2CTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need Linux I2C bus operations such as detect, scan, read, or write.",
+		DoNotUseWhen: "the runtime is non-Linux or the task does not involve I2C hardware access.",
+		HardRequirements: []string{
+			"action must be provided and valid for I2C operations.",
+			"The tool is Linux-only and requires /dev/i2c-* device access.",
+			"Write operations require explicit confirmation and valid address/bus inputs.",
+		},
+	}
+}
+
 func (t *I2CTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

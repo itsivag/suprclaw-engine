@@ -56,6 +56,18 @@ func (t *SendFileTool) Description() string {
 	return "Send a local file (image, document, etc.) to the user on the current chat channel."
 }
 
+func (t *SendFileTool) UsageContract() ToolUsageContract {
+	return ToolUsageContract{
+		UseWhen:      "you need to deliver a local file artifact to the user over the active chat channel.",
+		DoNotUseWhen: "you only need to send plain text with no file attachment.",
+		HardRequirements: []string{
+			"path must be provided.",
+			"Resolved path must point to an existing file and comply with size and access restrictions.",
+			"Target channel/chat and media store must be configured before sending.",
+		},
+	}
+}
+
 func (t *SendFileTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
