@@ -115,6 +115,17 @@ type oauthFlowResponse struct {
 	Interval  int    `json:"interval,omitempty"`
 }
 
+type oauthBrowserPollRequest struct {
+	Code        string
+	RedirectURL string
+}
+
+type oauthRedirectCompletion struct {
+	Code          string
+	State         string
+	ProviderError string
+}
+
 func (h *adminHandler) handleListOAuthProviders(w http.ResponseWriter, r *http.Request) {
 	providersResp := make([]oauthProviderStatus, 0, len(oauthProviderOrder))
 
@@ -271,13 +282,7 @@ func (h *adminHandler) handleOAuthLogin(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		redirectURI := buildOAuthRedirectURI(r)
-		if provider == oauthProviderOpenAI {
-			if err := validateOpenAIBrowserRedirect(cfg, redirectURI); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-		}
+		redirectURI := resolveOAuthBrowserRedirectURI(provider, cfg, r)
 		authURL := oauthBuildAuthorizeURL(cfg, pkce, state, redirectURI)
 
 		now := oauthNow()
@@ -338,44 +343,90 @@ func (h *adminHandler) handlePollOAuthFlow(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if flow.Method != oauthMethodDeviceCode {
-		http.Error(w, "flow does not support polling", http.StatusBadRequest)
-		return
-	}
 	if flow.Status != oauthFlowPending {
 		writeJSON(w, http.StatusOK, flowToResponse(flow))
 		return
 	}
 
-	cfg := auth.OpenAIOAuthConfig()
-	cred, err := oauthPollDeviceCodeOnce(cfg, flow.DeviceAuthID, flow.UserCode)
-	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "pending") {
+	switch flow.Method {
+	case oauthMethodDeviceCode:
+		cfg := auth.OpenAIOAuthConfig()
+		cred, err := oauthPollDeviceCodeOnce(cfg, flow.DeviceAuthID, flow.UserCode)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "pending") {
+				updated, _ := h.getOAuthFlow(flowID)
+				writeJSON(w, http.StatusOK, flowToResponse(updated))
+				return
+			}
+			h.setOAuthFlowError(flowID, fmt.Sprintf("device code poll failed: %v", err))
 			updated, _ := h.getOAuthFlow(flowID)
 			writeJSON(w, http.StatusOK, flowToResponse(updated))
 			return
 		}
-		h.setOAuthFlowError(flowID, fmt.Sprintf("device code poll failed: %v", err))
-		updated, _ := h.getOAuthFlow(flowID)
-		writeJSON(w, http.StatusOK, flowToResponse(updated))
-		return
-	}
-	if cred == nil {
-		updated, _ := h.getOAuthFlow(flowID)
-		writeJSON(w, http.StatusOK, flowToResponse(updated))
-		return
-	}
+		if cred == nil {
+			updated, _ := h.getOAuthFlow(flowID)
+			writeJSON(w, http.StatusOK, flowToResponse(updated))
+			return
+		}
 
-	if err := h.persistCredentialAndConfig(flow.Provider, oauthMethodTokenOrOAuth(flow.Method), cred); err != nil {
-		h.setOAuthFlowError(flowID, fmt.Sprintf("failed to save credential: %v", err))
+		if err := h.persistCredentialAndConfig(flow.Provider, oauthMethodTokenOrOAuth(flow.Method), cred); err != nil {
+			h.setOAuthFlowError(flowID, fmt.Sprintf("failed to save credential: %v", err))
+			updated, _ := h.getOAuthFlow(flowID)
+			writeJSON(w, http.StatusOK, flowToResponse(updated))
+			return
+		}
+
+		h.setOAuthFlowSuccess(flowID)
 		updated, _ := h.getOAuthFlow(flowID)
 		writeJSON(w, http.StatusOK, flowToResponse(updated))
 		return
-	}
 
-	h.setOAuthFlowSuccess(flowID)
-	updated, _ := h.getOAuthFlow(flowID)
-	writeJSON(w, http.StatusOK, flowToResponse(updated))
+	case oauthMethodBrowser:
+		completion, err := parseOAuthBrowserPollRequest(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		code := completion.Code
+		if completion.RedirectURL != "" {
+			redirect, parseErr := parseOAuthRedirectCompletion(completion.RedirectURL)
+			if parseErr != nil {
+				h.setOAuthFlowError(flowID, parseErr.Error())
+				updated, _ := h.getOAuthFlow(flowID)
+				writeJSON(w, http.StatusBadRequest, flowToResponse(updated))
+				return
+			}
+			if redirect.ProviderError != "" {
+				h.setOAuthFlowError(flowID, "authorization failed: "+redirect.ProviderError)
+				updated, _ := h.getOAuthFlow(flowID)
+				writeJSON(w, http.StatusBadRequest, flowToResponse(updated))
+				return
+			}
+			if redirect.State != "" && redirect.State != flow.OAuthState {
+				h.setOAuthFlowError(flowID, "state mismatch")
+				updated, _ := h.getOAuthFlow(flowID)
+				writeJSON(w, http.StatusBadRequest, flowToResponse(updated))
+				return
+			}
+			code = redirect.Code
+		}
+
+		if err := h.completeBrowserOAuthFlow(flow, code); err != nil {
+			h.setOAuthFlowError(flowID, err.Error())
+			updated, _ := h.getOAuthFlow(flowID)
+			writeJSON(w, http.StatusOK, flowToResponse(updated))
+			return
+		}
+
+		h.setOAuthFlowSuccess(flowID)
+		updated, _ := h.getOAuthFlow(flowID)
+		writeJSON(w, http.StatusOK, flowToResponse(updated))
+		return
+
+	default:
+		http.Error(w, "flow does not support polling", http.StatusBadRequest)
+	}
 }
 
 func (h *adminHandler) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
@@ -412,23 +463,9 @@ func (h *adminHandler) handleOAuthCallback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	cfg, err := oauthConfigForProvider(flow.Provider)
-	if err != nil {
+	if err := h.completeBrowserOAuthFlow(flow, code); err != nil {
 		h.setOAuthFlowError(flow.ID, err.Error())
-		renderOAuthCallbackPage(w, flow.ID, oauthFlowError, "Unsupported provider", err.Error())
-		return
-	}
-
-	cred, err := oauthExchangeCodeForTokens(cfg, code, flow.CodeVerifier, flow.RedirectURI)
-	if err != nil {
-		h.setOAuthFlowError(flow.ID, fmt.Sprintf("token exchange failed: %v", err))
-		renderOAuthCallbackPage(w, flow.ID, oauthFlowError, "Token exchange failed", err.Error())
-		return
-	}
-
-	if err := h.persistCredentialAndConfig(flow.Provider, oauthMethodTokenOrOAuth(flow.Method), cred); err != nil {
-		h.setOAuthFlowError(flow.ID, fmt.Sprintf("failed to save credential: %v", err))
-		renderOAuthCallbackPage(w, flow.ID, oauthFlowError, "Failed to save credential", err.Error())
+		renderOAuthCallbackPage(w, flow.ID, oauthFlowError, "Authentication failed", err.Error())
 		return
 	}
 
@@ -545,6 +582,82 @@ func oauthMethodTokenOrOAuth(method string) string {
 	return "oauth"
 }
 
+func parseOAuthBrowserPollRequest(r *http.Request) (oauthBrowserPollRequest, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		return oauthBrowserPollRequest{}, fmt.Errorf("failed to read request body")
+	}
+	defer r.Body.Close()
+
+	if strings.TrimSpace(string(body)) == "" {
+		return oauthBrowserPollRequest{}, fmt.Errorf("browser flow poll requires exactly one of code or redirect_url")
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return oauthBrowserPollRequest{}, fmt.Errorf("invalid JSON: %v", err)
+	}
+	if len(payload) != 1 {
+		return oauthBrowserPollRequest{}, fmt.Errorf("unsupported payload shape: provide exactly one of code or redirect_url")
+	}
+
+	if rawCode, ok := payload["code"]; ok {
+		var code string
+		if err := json.Unmarshal(rawCode, &code); err != nil {
+			return oauthBrowserPollRequest{}, fmt.Errorf("code must be a string")
+		}
+		code = strings.TrimSpace(code)
+		if code == "" {
+			return oauthBrowserPollRequest{}, fmt.Errorf("code is required")
+		}
+		return oauthBrowserPollRequest{Code: code}, nil
+	}
+
+	if rawRedirectURL, ok := payload["redirect_url"]; ok {
+		var redirectURL string
+		if err := json.Unmarshal(rawRedirectURL, &redirectURL); err != nil {
+			return oauthBrowserPollRequest{}, fmt.Errorf("redirect_url must be a string")
+		}
+		redirectURL = strings.TrimSpace(redirectURL)
+		if redirectURL == "" {
+			return oauthBrowserPollRequest{}, fmt.Errorf("redirect_url is required")
+		}
+		return oauthBrowserPollRequest{RedirectURL: redirectURL}, nil
+	}
+
+	return oauthBrowserPollRequest{}, fmt.Errorf("unsupported payload shape: provide exactly one of code or redirect_url")
+}
+
+func parseOAuthRedirectCompletion(redirectURL string) (oauthRedirectCompletion, error) {
+	parsedURL, err := url.Parse(redirectURL)
+	if err != nil {
+		return oauthRedirectCompletion{}, fmt.Errorf("malformed redirect_url: %v", err)
+	}
+	if strings.TrimSpace(parsedURL.Scheme) == "" || strings.TrimSpace(parsedURL.Host) == "" {
+		return oauthRedirectCompletion{}, fmt.Errorf("malformed redirect_url: missing scheme or host")
+	}
+
+	query := parsedURL.Query()
+	result := oauthRedirectCompletion{
+		State: strings.TrimSpace(query.Get("state")),
+	}
+
+	providerErr := strings.TrimSpace(query.Get("error"))
+	if providerErr != "" {
+		if desc := strings.TrimSpace(query.Get("error_description")); desc != "" {
+			providerErr = providerErr + ": " + desc
+		}
+		result.ProviderError = providerErr
+		return result, nil
+	}
+
+	result.Code = strings.TrimSpace(query.Get("code"))
+	if result.Code == "" {
+		return oauthRedirectCompletion{}, fmt.Errorf("redirect_url is missing authorization code")
+	}
+	return result, nil
+}
+
 func buildOAuthRedirectURI(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
@@ -556,24 +669,34 @@ func buildOAuthRedirectURI(r *http.Request) string {
 	return fmt.Sprintf("%s://%s/oauth/callback", scheme, r.Host)
 }
 
-func validateOpenAIBrowserRedirect(cfg auth.OAuthProviderConfig, redirectURI string) error {
-	if !auth.IsDefaultOpenAIOAuthClientID(cfg.ClientID) {
-		return nil
+func resolveOAuthBrowserRedirectURI(provider string, cfg auth.OAuthProviderConfig, r *http.Request) string {
+	if provider == oauthProviderOpenAI && auth.IsDefaultOpenAIOAuthClientID(cfg.ClientID) {
+		return fmt.Sprintf("http://localhost:%d/auth/callback", cfg.Port)
+	}
+	return buildOAuthRedirectURI(r)
+}
+
+func (h *adminHandler) completeBrowserOAuthFlow(flow *oauthFlow, code string) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return fmt.Errorf("missing authorization code")
 	}
 
-	parsed, err := url.Parse(redirectURI)
+	cfg, err := oauthConfigForProvider(flow.Provider)
 	if err != nil {
-		return fmt.Errorf("invalid redirect uri: %w", err)
-	}
-	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
-	if host == "localhost" || host == "127.0.0.1" {
-		return nil
+		return err
 	}
 
-	return fmt.Errorf(
-		"openai browser oauth using the default client_id only supports localhost callbacks; set OPENAI_OAUTH_CLIENT_ID for callback host %q",
-		host,
-	)
+	cred, err := oauthExchangeCodeForTokens(cfg, code, flow.CodeVerifier, flow.RedirectURI)
+	if err != nil {
+		return fmt.Errorf("token exchange failed: %w", err)
+	}
+
+	if err := h.persistCredentialAndConfig(flow.Provider, oauthMethodTokenOrOAuth(flow.Method), cred); err != nil {
+		return fmt.Errorf("failed to save credential: %w", err)
+	}
+
+	return nil
 }
 
 func flowToResponse(flow *oauthFlow) oauthFlowResponse {

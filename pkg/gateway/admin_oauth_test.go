@@ -149,13 +149,23 @@ func TestAdminOAuthBrowserFlowCreatedAndQueried(t *testing.T) {
 	}
 }
 
-func TestAdminOAuthLoginRejectsDefaultOpenAIClientOnNonLocalCallbackHost(t *testing.T) {
+func TestAdminOAuthLoginDefaultOpenAIClientUsesLocalhostRedirect(t *testing.T) {
 	t.Setenv("OPENAI_OAUTH_CLIENT_ID", "")
 	t.Setenv("OPENAI_OAUTH_ORIGINATOR", "")
 
 	configPath, cleanup := setupAdminOAuthTestEnv(t)
 	defer cleanup()
 	resetAdminOAuthHooks(t)
+
+	oauthGeneratePKCE = func() (auth.PKCECodes, error) {
+		return auth.PKCECodes{CodeVerifier: "verifier-1", CodeChallenge: "challenge-1"}, nil
+	}
+	oauthGenerateState = func() (string, error) { return "state-1", nil }
+	var capturedRedirectURI string
+	oauthBuildAuthorizeURL = func(cfg auth.OAuthProviderConfig, pkce auth.PKCECodes, state, redirectURI string) string {
+		capturedRedirectURI = redirectURI
+		return "https://example.com/authorize?state=" + state
+	}
 
 	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
 	mux := http.NewServeMux()
@@ -172,11 +182,53 @@ func TestAdminOAuthLoginRejectsDefaultOpenAIClientOnNonLocalCallbackHost(t *test
 	req.Header.Set("Content-Type", "application/json")
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "OPENAI_OAUTH_CLIENT_ID") {
-		t.Fatalf("expected explicit env guidance in response, body=%s", rec.Body.String())
+	if capturedRedirectURI != "http://localhost:1455/auth/callback" {
+		t.Fatalf("redirect_uri = %q, want %q", capturedRedirectURI, "http://localhost:1455/auth/callback")
+	}
+}
+
+func TestAdminOAuthLoginCustomOpenAIClientUsesTenantCallbackRedirect(t *testing.T) {
+	t.Setenv("OPENAI_OAUTH_CLIENT_ID", "custom-client")
+	t.Setenv("OPENAI_OAUTH_ORIGINATOR", "")
+
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	oauthGeneratePKCE = func() (auth.PKCECodes, error) {
+		return auth.PKCECodes{CodeVerifier: "verifier-1", CodeChallenge: "challenge-1"}, nil
+	}
+	oauthGenerateState = func() (string, error) { return "state-1", nil }
+	var capturedRedirectURI string
+	oauthBuildAuthorizeURL = func(cfg auth.OAuthProviderConfig, pkce auth.PKCECodes, state, redirectURI string) string {
+		capturedRedirectURI = redirectURI
+		return "https://example.com/authorize?state=" + state
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/login",
+		strings.NewReader(`{"provider":"openai","method":"browser"}`),
+	)
+	req.Host = "tenant.suprclaw.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if capturedRedirectURI != "https://tenant.suprclaw.com/oauth/callback" {
+		t.Fatalf("redirect_uri = %q, want %q", capturedRedirectURI, "https://tenant.suprclaw.com/oauth/callback")
 	}
 }
 
@@ -217,6 +269,413 @@ func TestAdminOAuthFlowExpiresWhenQueried(t *testing.T) {
 	}
 	if flowResp.Status != oauthFlowExpired {
 		t.Fatalf("flow status = %q, want %q", flowResp.Status, oauthFlowExpired)
+	}
+}
+
+func TestAdminOAuthBrowserPollWithCodeCompletesFlow(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	oauthNow = func() time.Time { return now }
+	oauthExchangeCodeForTokens = func(
+		cfg auth.OAuthProviderConfig,
+		code, codeVerifier, redirectURI string,
+	) (*auth.AuthCredential, error) {
+		if code != "auth-code-1" {
+			t.Fatalf("code = %q, want %q", code, "auth-code-1")
+		}
+		if codeVerifier != "verifier-1" {
+			t.Fatalf("code_verifier = %q, want %q", codeVerifier, "verifier-1")
+		}
+		if redirectURI != "http://localhost:1455/auth/callback" {
+			t.Fatalf("redirect_uri = %q, want %q", redirectURI, "http://localhost:1455/auth/callback")
+		}
+		return &auth.AuthCredential{
+			AccessToken: "access-token-1",
+			Provider:    oauthProviderOpenAI,
+		}, nil
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	h.storeOAuthFlow(&oauthFlow{
+		ID:           "flow-browser-code",
+		Provider:     oauthProviderOpenAI,
+		Method:       oauthMethodBrowser,
+		Status:       oauthFlowPending,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		ExpiresAt:    now.Add(oauthBrowserFlowTTL),
+		CodeVerifier: "verifier-1",
+		OAuthState:   "state-1",
+		RedirectURI:  "http://localhost:1455/auth/callback",
+	})
+
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/oauth/flows/flow-browser-code/poll", strings.NewReader(`{"code":"auth-code-1"}`))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var flowResp oauthFlowResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &flowResp); err != nil {
+		t.Fatalf("unmarshal flow response: %v", err)
+	}
+	if flowResp.Status != oauthFlowSuccess {
+		t.Fatalf("flow status = %q, want %q", flowResp.Status, oauthFlowSuccess)
+	}
+}
+
+func TestAdminOAuthBrowserPollWithRedirectURLCompletesFlow(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	oauthNow = func() time.Time { return now }
+	oauthExchangeCodeForTokens = func(
+		cfg auth.OAuthProviderConfig,
+		code, codeVerifier, redirectURI string,
+	) (*auth.AuthCredential, error) {
+		if code != "auth-code-2" {
+			t.Fatalf("code = %q, want %q", code, "auth-code-2")
+		}
+		return &auth.AuthCredential{
+			AccessToken: "access-token-2",
+			Provider:    oauthProviderOpenAI,
+		}, nil
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	h.storeOAuthFlow(&oauthFlow{
+		ID:           "flow-browser-redirect",
+		Provider:     oauthProviderOpenAI,
+		Method:       oauthMethodBrowser,
+		Status:       oauthFlowPending,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		ExpiresAt:    now.Add(oauthBrowserFlowTTL),
+		CodeVerifier: "verifier-2",
+		OAuthState:   "state-2",
+		RedirectURI:  "http://localhost:1455/auth/callback",
+	})
+
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/flows/flow-browser-redirect/poll",
+		strings.NewReader(`{"redirect_url":"http://localhost:1455/auth/callback?code=auth-code-2&state=state-2"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var flowResp oauthFlowResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &flowResp); err != nil {
+		t.Fatalf("unmarshal flow response: %v", err)
+	}
+	if flowResp.Status != oauthFlowSuccess {
+		t.Fatalf("flow status = %q, want %q", flowResp.Status, oauthFlowSuccess)
+	}
+}
+
+func TestAdminOAuthBrowserPollRejectsMissingPayload(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	oauthNow = func() time.Time { return now }
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	h.storeOAuthFlow(&oauthFlow{
+		ID:        "flow-browser-missing-payload",
+		Provider:  oauthProviderOpenAI,
+		Method:    oauthMethodBrowser,
+		Status:    oauthFlowPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: now.Add(oauthBrowserFlowTTL),
+	})
+
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/oauth/flows/flow-browser-missing-payload/poll", strings.NewReader(""))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "exactly one of code or redirect_url") {
+		t.Fatalf("unexpected body: %s", rec.Body.String())
+	}
+}
+
+func TestAdminOAuthBrowserPollRejectsUnsupportedPayloadShape(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	oauthNow = func() time.Time { return now }
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	h.storeOAuthFlow(&oauthFlow{
+		ID:        "flow-browser-invalid-shape",
+		Provider:  oauthProviderOpenAI,
+		Method:    oauthMethodBrowser,
+		Status:    oauthFlowPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: now.Add(oauthBrowserFlowTTL),
+	})
+
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/flows/flow-browser-invalid-shape/poll",
+		strings.NewReader(`{"code":"c1","redirect_url":"http://localhost:1455/auth/callback?code=c2"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "unsupported payload shape") {
+		t.Fatalf("unexpected body: %s", rec.Body.String())
+	}
+}
+
+func TestAdminOAuthBrowserPollRejectsMalformedRedirectURL(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	oauthNow = func() time.Time { return now }
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	h.storeOAuthFlow(&oauthFlow{
+		ID:         "flow-browser-malformed-redirect",
+		Provider:   oauthProviderOpenAI,
+		Method:     oauthMethodBrowser,
+		Status:     oauthFlowPending,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		ExpiresAt:  now.Add(oauthBrowserFlowTTL),
+		OAuthState: "state-1",
+	})
+
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/flows/flow-browser-malformed-redirect/poll",
+		strings.NewReader(`{"redirect_url":"not-a-url"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var flowResp oauthFlowResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &flowResp); err != nil {
+		t.Fatalf("unmarshal flow response: %v", err)
+	}
+	if flowResp.Status != oauthFlowError {
+		t.Fatalf("flow status = %q, want %q", flowResp.Status, oauthFlowError)
+	}
+	if !strings.Contains(flowResp.Error, "malformed redirect_url") {
+		t.Fatalf("unexpected flow error: %q", flowResp.Error)
+	}
+}
+
+func TestAdminOAuthBrowserPollRejectsMissingCodeInRedirectURL(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	oauthNow = func() time.Time { return now }
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	h.storeOAuthFlow(&oauthFlow{
+		ID:         "flow-browser-missing-code",
+		Provider:   oauthProviderOpenAI,
+		Method:     oauthMethodBrowser,
+		Status:     oauthFlowPending,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		ExpiresAt:  now.Add(oauthBrowserFlowTTL),
+		OAuthState: "state-1",
+	})
+
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/flows/flow-browser-missing-code/poll",
+		strings.NewReader(`{"redirect_url":"http://localhost:1455/auth/callback?state=state-1"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var flowResp oauthFlowResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &flowResp); err != nil {
+		t.Fatalf("unmarshal flow response: %v", err)
+	}
+	if flowResp.Status != oauthFlowError {
+		t.Fatalf("flow status = %q, want %q", flowResp.Status, oauthFlowError)
+	}
+	if !strings.Contains(flowResp.Error, "missing authorization code") {
+		t.Fatalf("unexpected flow error: %q", flowResp.Error)
+	}
+}
+
+func TestAdminOAuthBrowserPollRejectsStateMismatch(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	oauthNow = func() time.Time { return now }
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	h.storeOAuthFlow(&oauthFlow{
+		ID:         "flow-browser-state-mismatch",
+		Provider:   oauthProviderOpenAI,
+		Method:     oauthMethodBrowser,
+		Status:     oauthFlowPending,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		ExpiresAt:  now.Add(oauthBrowserFlowTTL),
+		OAuthState: "state-expected",
+	})
+
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/flows/flow-browser-state-mismatch/poll",
+		strings.NewReader(`{"redirect_url":"http://localhost:1455/auth/callback?code=auth-code-1&state=state-actual"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var flowResp oauthFlowResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &flowResp); err != nil {
+		t.Fatalf("unmarshal flow response: %v", err)
+	}
+	if flowResp.Status != oauthFlowError {
+		t.Fatalf("flow status = %q, want %q", flowResp.Status, oauthFlowError)
+	}
+	if flowResp.Error != "state mismatch" {
+		t.Fatalf("flow error = %q, want %q", flowResp.Error, "state mismatch")
+	}
+}
+
+func TestAdminOAuthDeviceCodePollUnchanged(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	oauthNow = func() time.Time { return now }
+	oauthPollDeviceCodeOnce = func(
+		cfg auth.OAuthProviderConfig,
+		deviceAuthID, userCode string,
+	) (*auth.AuthCredential, error) {
+		if deviceAuthID != "device-auth-1" {
+			t.Fatalf("device_auth_id = %q, want %q", deviceAuthID, "device-auth-1")
+		}
+		if userCode != "user-code-1" {
+			t.Fatalf("user_code = %q, want %q", userCode, "user-code-1")
+		}
+		return &auth.AuthCredential{
+			AccessToken: "access-token-device",
+			Provider:    oauthProviderOpenAI,
+		}, nil
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	h.storeOAuthFlow(&oauthFlow{
+		ID:           "flow-device-1",
+		Provider:     oauthProviderOpenAI,
+		Method:       oauthMethodDeviceCode,
+		Status:       oauthFlowPending,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		ExpiresAt:    now.Add(oauthDeviceCodeFlowTTL),
+		DeviceAuthID: "device-auth-1",
+		UserCode:     "user-code-1",
+		VerifyURL:    "https://auth.openai.com/codex/device",
+		Interval:     5,
+	})
+
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/oauth/flows/flow-device-1/poll", strings.NewReader(""))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var flowResp oauthFlowResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &flowResp); err != nil {
+		t.Fatalf("unmarshal flow response: %v", err)
+	}
+	if flowResp.Status != oauthFlowSuccess {
+		t.Fatalf("flow status = %q, want %q", flowResp.Status, oauthFlowSuccess)
+	}
+	if flowResp.Method != oauthMethodDeviceCode {
+		t.Fatalf("flow method = %q, want %q", flowResp.Method, oauthMethodDeviceCode)
 	}
 }
 
