@@ -891,6 +891,7 @@ func (h *adminHandler) syncProviderAuthMethod(provider, authMethod string) error
 			return fmt.Errorf("unsupported provider %q", provider)
 		}
 
+		defaultModel := defaultModelConfigForProvider(provider, authMethod)
 		found := false
 		for i := range cfg.ModelList {
 			if modelBelongsToProvider(provider, cfg.ModelList[i].Model) {
@@ -900,10 +901,69 @@ func (h *adminHandler) syncProviderAuthMethod(provider, authMethod string) error
 		}
 
 		if !found && authMethod != "" {
-			cfg.ModelList = append(cfg.ModelList, defaultModelConfigForProvider(provider, authMethod))
+			cfg.ModelList = append(cfg.ModelList, defaultModel)
+		}
+
+		if authMethod != "" {
+			h.syncManagedAgentModelsToProvider(cfg, provider, defaultModel.ModelName)
 		}
 		return nil
 	})
+}
+
+func (h *adminHandler) syncManagedAgentModelsToProvider(
+	cfg *config.Config,
+	provider string,
+	targetModelName string,
+) {
+	targetModelName = strings.TrimSpace(targetModelName)
+	if targetModelName == "" {
+		return
+	}
+
+	defaultModelName := strings.TrimSpace(cfg.Agents.Defaults.GetModelName())
+	if shouldSwitchManagedModelToProvider(cfg, provider, defaultModelName) {
+		cfg.Agents.Defaults.ModelName = targetModelName
+		cfg.Agents.Defaults.Model = ""
+	}
+
+	for i := range cfg.Agents.List {
+		agent := &cfg.Agents.List[i]
+		isLeadAgent := agent.Default || strings.EqualFold(strings.TrimSpace(agent.ID), "main")
+		if !isLeadAgent {
+			continue
+		}
+
+		currentModel := ""
+		if agent.Model != nil {
+			currentModel = strings.TrimSpace(agent.Model.Primary)
+		}
+		if !shouldSwitchManagedModelToProvider(cfg, provider, currentModel) {
+			continue
+		}
+
+		if agent.Model == nil {
+			agent.Model = &config.AgentModelConfig{}
+		}
+		agent.Model.Primary = targetModelName
+		agent.Model.Fallbacks = nil
+	}
+}
+
+func shouldSwitchManagedModelToProvider(cfg *config.Config, provider, modelName string) bool {
+	_ = cfg
+	_ = provider
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return true
+	}
+
+	lower := strings.ToLower(modelName)
+	switch lower {
+	case "suprclaw-default", "suprclaw-fast":
+		return true
+	}
+	return false
 }
 
 func modelBelongsToProvider(provider, model string) bool {

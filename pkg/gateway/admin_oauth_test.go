@@ -822,6 +822,74 @@ func TestAdminOAuthCallbackSuccessPersistsCredentialAndConfig(t *testing.T) {
 	}
 }
 
+func TestAdminOAuthCallbackSuccessSwitchesManagedLeadModelToOpenAI(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthManagedRuntimeTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	now := time.Date(2026, 3, 6, 12, 0, 0, 0, time.UTC)
+	oauthNow = func() time.Time { return now }
+	oauthExchangeCodeForTokens = func(
+		cfg auth.OAuthProviderConfig,
+		code, codeVerifier, redirectURI string,
+	) (*auth.AuthCredential, error) {
+		return &auth.AuthCredential{
+			AccessToken:  "access-token-2",
+			RefreshToken: "refresh-token-2",
+			Provider:     oauthProviderOpenAI,
+		}, nil
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	h.storeOAuthFlow(&oauthFlow{
+		ID:           "flow-managed-1",
+		Provider:     oauthProviderOpenAI,
+		Method:       oauthMethodBrowser,
+		Status:       oauthFlowPending,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		ExpiresAt:    now.Add(oauthBrowserFlowTTL),
+		CodeVerifier: "verifier-2",
+		OAuthState:   "state-managed-1",
+		RedirectURI:  "https://api.suprclaw.com/oauth/callback",
+	})
+
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/oauth/callback?state=state-managed-1&code=auth-code-2", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	if got := updated.Agents.Defaults.GetModelName(); got != "gpt-5.4" {
+		t.Fatalf("agents.defaults.model_name = %q, want %q", got, "gpt-5.4")
+	}
+	if len(updated.Agents.List) == 0 || updated.Agents.List[0].Model == nil {
+		t.Fatalf("expected main agent model to be set")
+	}
+	if got := updated.Agents.List[0].Model.Primary; got != "gpt-5.4" {
+		t.Fatalf("main agent model primary = %q, want %q", got, "gpt-5.4")
+	}
+
+	hasOAuthModel := false
+	for _, modelCfg := range updated.ModelList {
+		if modelCfg.Model == "openai/gpt-5.4" && modelCfg.AuthMethod == "oauth" {
+			hasOAuthModel = true
+		}
+	}
+	if !hasOAuthModel {
+		t.Fatalf("expected openai/gpt-5.4 oauth model in config")
+	}
+}
+
 func TestAdminOAuthLogoutClearsCredentialAndConfig(t *testing.T) {
 	configPath, cleanup := setupAdminOAuthTestEnv(t)
 	defer cleanup()
@@ -905,6 +973,63 @@ func setupAdminOAuthTestEnv(t *testing.T) (string, func()) {
 		APIKey:    "sk-default",
 	}}
 	cfg.Agents.Defaults.ModelName = "custom-default"
+
+	configPath := filepath.Join(tmp, "config.json")
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig error: %v", err)
+	}
+
+	cleanup := func() {
+		_ = os.Setenv("HOME", oldHome)
+		if oldSuprHome == "" {
+			_ = os.Unsetenv("SUPRCLAW_HOME")
+		} else {
+			_ = os.Setenv("SUPRCLAW_HOME", oldSuprHome)
+		}
+	}
+	return configPath, cleanup
+}
+
+func setupAdminOAuthManagedRuntimeTestEnv(t *testing.T) (string, func()) {
+	t.Helper()
+
+	tmp := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	oldSuprHome := os.Getenv("SUPRCLAW_HOME")
+
+	if err := os.Setenv("HOME", tmp); err != nil {
+		t.Fatalf("set HOME: %v", err)
+	}
+	if err := os.Setenv("SUPRCLAW_HOME", filepath.Join(tmp, ".suprclaw")); err != nil {
+		t.Fatalf("set SUPRCLAW_HOME: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.ModelList = []config.ModelConfig{
+		{
+			ModelName: "suprclaw-default",
+			Model:     "litellm/suprclaw-default",
+			APIBase:   "http://127.0.0.1:4000/v1",
+			APIKey:    "litellm-secret",
+		},
+		{
+			ModelName: "suprclaw-fast",
+			Model:     "litellm/suprclaw-fast",
+			APIBase:   "http://127.0.0.1:4000/v1",
+			APIKey:    "litellm-secret",
+		},
+	}
+	cfg.Agents.Defaults.ModelName = "suprclaw-default"
+	cfg.Agents.Defaults.Model = ""
+	cfg.Agents.List = []config.AgentConfig{
+		{
+			ID:      "main",
+			Default: true,
+			Model: &config.AgentModelConfig{
+				Primary: "suprclaw-fast",
+			},
+		},
+	}
 
 	configPath := filepath.Join(tmp, "config.json")
 	if err := config.SaveConfig(configPath, cfg); err != nil {
