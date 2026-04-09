@@ -545,7 +545,7 @@ func renderOAuthCallbackPage(w http.ResponseWriter, flowID, status, title, errMs
 func normalizeOAuthProvider(raw string) (string, error) {
 	provider := strings.ToLower(strings.TrimSpace(raw))
 	switch provider {
-	case "antigravity":
+	case "antigravity", "google":
 		return oauthProviderGoogleAntigravity, nil
 	case oauthProviderOpenAI, oauthProviderAnthropic, oauthProviderGoogleAntigravity:
 		return provider, nil

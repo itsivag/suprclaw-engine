@@ -149,6 +149,51 @@ func TestAdminOAuthBrowserFlowCreatedAndQueried(t *testing.T) {
 	}
 }
 
+func TestAdminOAuthLoginGoogleAliasCreatesGoogleAntigravityBrowserFlow(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	oauthGeneratePKCE = func() (auth.PKCECodes, error) {
+		return auth.PKCECodes{CodeVerifier: "verifier-google", CodeChallenge: "challenge-google"}, nil
+	}
+	oauthGenerateState = func() (string, error) { return "state-google", nil }
+	oauthBuildAuthorizeURL = func(cfg auth.OAuthProviderConfig, pkce auth.PKCECodes, state, redirectURI string) string {
+		return "https://accounts.google.com/o/oauth2/v2/auth?state=" + state
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/login",
+		strings.NewReader(`{"provider":"google","method":"browser"}`),
+	)
+	req.Host = "tenant.suprclaw.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var loginResp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &loginResp); err != nil {
+		t.Fatalf("unmarshal login response: %v", err)
+	}
+	if loginResp["provider"] != oauthProviderGoogleAntigravity {
+		t.Fatalf("provider = %v, want %q", loginResp["provider"], oauthProviderGoogleAntigravity)
+	}
+	if loginResp["method"] != oauthMethodBrowser {
+		t.Fatalf("method = %v, want %q", loginResp["method"], oauthMethodBrowser)
+	}
+}
+
 func TestAdminOAuthLoginDefaultOpenAIClientUsesLocalhostRedirect(t *testing.T) {
 	t.Setenv("OPENAI_OAUTH_CLIENT_ID", "")
 	t.Setenv("OPENAI_OAUTH_ORIGINATOR", "")
