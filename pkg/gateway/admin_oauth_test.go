@@ -149,6 +149,37 @@ func TestAdminOAuthBrowserFlowCreatedAndQueried(t *testing.T) {
 	}
 }
 
+func TestAdminOAuthLoginRejectsDefaultOpenAIClientOnNonLocalCallbackHost(t *testing.T) {
+	t.Setenv("OPENAI_OAUTH_CLIENT_ID", "")
+	t.Setenv("OPENAI_OAUTH_ORIGINATOR", "")
+
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/login",
+		strings.NewReader(`{"provider":"openai","method":"browser"}`),
+	)
+	req.Host = "tenant.suprclaw.com"
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "OPENAI_OAUTH_CLIENT_ID") {
+		t.Fatalf("expected explicit env guidance in response, body=%s", rec.Body.String())
+	}
+}
+
 func TestAdminOAuthFlowExpiresWhenQueried(t *testing.T) {
 	configPath, cleanup := setupAdminOAuthTestEnv(t)
 	defer cleanup()

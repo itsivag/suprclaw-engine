@@ -55,18 +55,12 @@ func TestBuildAuthorizeURL(t *testing.T) {
 	if !strings.Contains(u, "response_type=code") {
 		t.Error("URL missing response_type")
 	}
-	if !strings.Contains(u, "id_token_add_organizations=true") {
-		t.Error("URL missing id_token_add_organizations")
-	}
-	if !strings.Contains(u, "codex_cli_simplified_flow=true") {
-		t.Error("URL missing codex_cli_simplified_flow")
-	}
-	if !strings.Contains(u, "originator=codex_cli_rs") {
-		t.Error("URL missing originator")
-	}
 }
 
 func TestBuildAuthorizeURLOpenAIExtras(t *testing.T) {
+	t.Setenv("OPENAI_OAUTH_CLIENT_ID", "")
+	t.Setenv("OPENAI_OAUTH_ORIGINATOR", "")
+
 	cfg := OpenAIOAuthConfig()
 	pkce := PKCECodes{CodeVerifier: "test-verifier", CodeChallenge: "test-challenge"}
 
@@ -85,6 +79,30 @@ func TestBuildAuthorizeURLOpenAIExtras(t *testing.T) {
 	}
 	if q.Get("originator") != "codex_cli_rs" {
 		t.Errorf("originator = %q, want codex_cli_rs", q.Get("originator"))
+	}
+}
+
+func TestBuildAuthorizeURLCustomOpenAIClientOmitsCodexSpecificExtras(t *testing.T) {
+	cfg := OAuthProviderConfig{
+		Issuer:   "https://auth.openai.com",
+		ClientID: "custom-client-id",
+		Scopes:   "openid profile email offline_access",
+		Port:     1455,
+	}
+	pkce := PKCECodes{CodeVerifier: "test-verifier", CodeChallenge: "test-challenge"}
+
+	u := BuildAuthorizeURL(cfg, pkce, "test-state", "https://app.example.com/oauth/callback")
+	parsed, err := url.Parse(u)
+	if err != nil {
+		t.Fatalf("url.Parse() error: %v", err)
+	}
+	q := parsed.Query()
+
+	if q.Get("id_token_add_organizations") != "" {
+		t.Errorf("id_token_add_organizations = %q, want empty", q.Get("id_token_add_organizations"))
+	}
+	if q.Get("codex_cli_simplified_flow") != "" {
+		t.Errorf("codex_cli_simplified_flow = %q, want empty", q.Get("codex_cli_simplified_flow"))
 	}
 }
 
@@ -322,15 +340,37 @@ func TestRefreshAccessTokenPreservesRefreshAndAccountID(t *testing.T) {
 }
 
 func TestOpenAIOAuthConfig(t *testing.T) {
+	t.Setenv("OPENAI_OAUTH_ISSUER", "")
+	t.Setenv("OPENAI_OAUTH_CLIENT_ID", "")
+	t.Setenv("OPENAI_OAUTH_CLIENT_SECRET", "")
+	t.Setenv("OPENAI_OAUTH_SCOPES", "")
+	t.Setenv("OPENAI_OAUTH_ORIGINATOR", "")
+
 	cfg := OpenAIOAuthConfig()
-	if cfg.Issuer != "https://auth.openai.com" {
-		t.Errorf("Issuer = %q, want %q", cfg.Issuer, "https://auth.openai.com")
+	if cfg.Issuer != defaultOpenAIOAuthIssuer {
+		t.Errorf("Issuer = %q, want %q", cfg.Issuer, defaultOpenAIOAuthIssuer)
 	}
 	if cfg.ClientID == "" {
 		t.Error("ClientID is empty")
 	}
 	if cfg.Port != 1455 {
 		t.Errorf("Port = %d, want 1455", cfg.Port)
+	}
+	if cfg.Originator != defaultOpenAIOAuthOriginator {
+		t.Errorf("Originator = %q, want %q", cfg.Originator, defaultOpenAIOAuthOriginator)
+	}
+}
+
+func TestOpenAIOAuthConfigCustomClientDoesNotForceOriginator(t *testing.T) {
+	t.Setenv("OPENAI_OAUTH_CLIENT_ID", "custom-client-id")
+	t.Setenv("OPENAI_OAUTH_ORIGINATOR", "")
+
+	cfg := OpenAIOAuthConfig()
+	if cfg.ClientID != "custom-client-id" {
+		t.Fatalf("ClientID = %q, want custom-client-id", cfg.ClientID)
+	}
+	if cfg.Originator != "" {
+		t.Fatalf("Originator = %q, want empty", cfg.Originator)
 	}
 }
 

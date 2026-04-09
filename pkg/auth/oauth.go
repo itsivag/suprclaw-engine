@@ -30,13 +30,39 @@ type OAuthProviderConfig struct {
 	Port         int
 }
 
+const (
+	defaultOpenAIOAuthIssuer     = "https://auth.openai.com"
+	defaultOpenAIOAuthClientID   = "app_EMoamEEZ73f0CkXaXp7hrann"
+	defaultOpenAIOAuthScopes     = "openid profile email offline_access"
+	defaultOpenAIOAuthOriginator = "codex_cli_rs"
+)
+
+func envOrDefault(key, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func IsDefaultOpenAIOAuthClientID(clientID string) bool {
+	return strings.TrimSpace(clientID) == defaultOpenAIOAuthClientID
+}
+
 func OpenAIOAuthConfig() OAuthProviderConfig {
+	clientID := envOrDefault("OPENAI_OAUTH_CLIENT_ID", defaultOpenAIOAuthClientID)
+	originator := strings.TrimSpace(os.Getenv("OPENAI_OAUTH_ORIGINATOR"))
+	if originator == "" && IsDefaultOpenAIOAuthClientID(clientID) {
+		originator = defaultOpenAIOAuthOriginator
+	}
+
 	return OAuthProviderConfig{
-		Issuer:     "https://auth.openai.com",
-		ClientID:   "app_EMoamEEZ73f0CkXaXp7hrann",
-		Scopes:     "openid profile email offline_access",
-		Originator: "codex_cli_rs",
-		Port:       1455,
+		Issuer:       envOrDefault("OPENAI_OAUTH_ISSUER", defaultOpenAIOAuthIssuer),
+		ClientID:     clientID,
+		ClientSecret: strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_SECRET")),
+		Scopes:       envOrDefault("OPENAI_OAUTH_SCOPES", defaultOpenAIOAuthScopes),
+		Originator:   originator,
+		Port:         1455,
 	}
 }
 
@@ -456,16 +482,15 @@ func buildAuthorizeURL(cfg OAuthProviderConfig, pkce PKCECodes, state, redirectU
 	}
 
 	isGoogle := strings.Contains(strings.ToLower(cfg.Issuer), "accounts.google.com")
+	isOpenAI := strings.Contains(strings.ToLower(cfg.Issuer), "auth.openai.com")
 	if isGoogle {
 		// Google OAuth requires these for refresh token support
 		params.Set("access_type", "offline")
 		params.Set("prompt", "consent")
-	} else {
-		// OpenAI-specific parameters
-		params.Set("id_token_add_organizations", "true")
-		params.Set("codex_cli_simplified_flow", "true")
-		if strings.Contains(strings.ToLower(cfg.Issuer), "auth.openai.com") {
-			params.Set("originator", "suprclaw")
+	} else if isOpenAI {
+		if IsDefaultOpenAIOAuthClientID(cfg.ClientID) {
+			params.Set("id_token_add_organizations", "true")
+			params.Set("codex_cli_simplified_flow", "true")
 		}
 		if cfg.Originator != "" {
 			params.Set("originator", cfg.Originator)

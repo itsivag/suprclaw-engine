@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -271,6 +272,12 @@ func (h *adminHandler) handleOAuthLogin(w http.ResponseWriter, r *http.Request) 
 		}
 
 		redirectURI := buildOAuthRedirectURI(r)
+		if provider == oauthProviderOpenAI {
+			if err := validateOpenAIBrowserRedirect(cfg, redirectURI); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 		authURL := oauthBuildAuthorizeURL(cfg, pkce, state, redirectURI)
 
 		now := oauthNow()
@@ -547,6 +554,26 @@ func buildOAuthRedirectURI(r *http.Request) string {
 		scheme = strings.Split(forwarded, ",")[0]
 	}
 	return fmt.Sprintf("%s://%s/oauth/callback", scheme, r.Host)
+}
+
+func validateOpenAIBrowserRedirect(cfg auth.OAuthProviderConfig, redirectURI string) error {
+	if !auth.IsDefaultOpenAIOAuthClientID(cfg.ClientID) {
+		return nil
+	}
+
+	parsed, err := url.Parse(redirectURI)
+	if err != nil {
+		return fmt.Errorf("invalid redirect uri: %w", err)
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "localhost" || host == "127.0.0.1" {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"openai browser oauth using the default client_id only supports localhost callbacks; set OPENAI_OAUTH_CLIENT_ID for callback host %q",
+		host,
+	)
 }
 
 func flowToResponse(flow *oauthFlow) oauthFlowResponse {
