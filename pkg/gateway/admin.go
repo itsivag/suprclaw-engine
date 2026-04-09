@@ -16,6 +16,9 @@ type adminHandler struct {
 	cronService           *cron.CronService
 	secret                string
 	mu                    sync.Mutex // serialises all config mutations
+	oauthMu               sync.Mutex
+	oauthFlows            map[string]*oauthFlow
+	oauthState            map[string]string
 	agentLoop             *agent.AgentLoop
 	heartbeatHistoryStore *heartbeat.HistoryStore
 	commandRunner         func(name string, args ...string) ([]byte, error)
@@ -32,6 +35,8 @@ func newAdminHandler(
 		configPath:            configPath,
 		cronService:           cs,
 		secret:                secret,
+		oauthFlows:            make(map[string]*oauthFlow),
+		oauthState:            make(map[string]string),
 		agentLoop:             al,
 		heartbeatHistoryStore: hs,
 		commandRunner:         nil,
@@ -85,6 +90,14 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 	// MCP
 	mux.HandleFunc("POST /api/admin/mcp/configure", h.auth(h.mcpConfigure))
 	mux.HandleFunc("DELETE /api/admin/mcp/tools/{toolName}", h.auth(h.mcpDeleteTool))
+
+	// OAuth (runtime gateway contract surface)
+	mux.HandleFunc("GET /api/oauth/providers", h.auth(h.handleListOAuthProviders))
+	mux.HandleFunc("POST /api/oauth/login", h.auth(h.handleOAuthLogin))
+	mux.HandleFunc("GET /api/oauth/flows/{id}", h.auth(h.handleGetOAuthFlow))
+	mux.HandleFunc("POST /api/oauth/flows/{id}/poll", h.auth(h.handlePollOAuthFlow))
+	mux.HandleFunc("POST /api/oauth/logout", h.auth(h.handleOAuthLogout))
+	mux.HandleFunc("GET /oauth/callback", h.handleOAuthCallback)
 
 	// Skills — specific paths before wildcard
 	mux.HandleFunc("GET /api/admin/skills", h.auth(h.listSkills))
