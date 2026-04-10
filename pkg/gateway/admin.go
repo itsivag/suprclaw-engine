@@ -94,6 +94,7 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 	// OAuth (runtime gateway contract surface)
 	mux.HandleFunc("GET /api/oauth/providers", h.auth(h.handleListOAuthProviders))
 	mux.HandleFunc("POST /api/oauth/login", h.auth(h.handleOAuthLogin))
+	mux.HandleFunc("POST /api/oauth/model", h.auth(h.handleOAuthUpdateModel))
 	mux.HandleFunc("GET /api/oauth/flows/{id}", h.auth(h.handleGetOAuthFlow))
 	mux.HandleFunc("POST /api/oauth/flows/{id}/poll", h.auth(h.handlePollOAuthFlow))
 	mux.HandleFunc("POST /api/oauth/logout", h.auth(h.handleOAuthLogout))
