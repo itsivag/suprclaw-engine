@@ -93,16 +93,22 @@ type oauthFlow struct {
 }
 
 type oauthProviderStatus struct {
-	Provider    string   `json:"provider"`
-	DisplayName string   `json:"display_name"`
-	Methods     []string `json:"methods"`
-	LoggedIn    bool     `json:"logged_in"`
-	Status      string   `json:"status"`
-	AuthMethod  string   `json:"auth_method,omitempty"`
-	ExpiresAt   string   `json:"expires_at,omitempty"`
-	AccountID   string   `json:"account_id,omitempty"`
-	Email       string   `json:"email,omitempty"`
-	ProjectID   string   `json:"project_id,omitempty"`
+	Provider        string               `json:"provider"`
+	DisplayName     string               `json:"display_name"`
+	Methods         []string             `json:"methods"`
+	AvailableModels []oauthProviderModel `json:"available_models"`
+	LoggedIn        bool                 `json:"logged_in"`
+	Status          string               `json:"status"`
+	AuthMethod      string               `json:"auth_method,omitempty"`
+	ExpiresAt       string               `json:"expires_at,omitempty"`
+	AccountID       string               `json:"account_id,omitempty"`
+	Email           string               `json:"email,omitempty"`
+	ProjectID       string               `json:"project_id,omitempty"`
+}
+
+type oauthProviderModel struct {
+	ModelName string `json:"model_name"`
+	Model     string `json:"model"`
 }
 
 type oauthFlowResponse struct {
@@ -136,6 +142,11 @@ type oauthLoginRequest struct {
 	ModelProvided bool
 }
 
+type oauthModelUpdateRequest struct {
+	Provider string
+	Model    string
+}
+
 type oauthModelValidationError struct {
 	message string
 }
@@ -145,6 +156,14 @@ func (e *oauthModelValidationError) Error() string {
 }
 
 func (h *adminHandler) handleListOAuthProviders(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	cfg, err := config.LoadConfig(h.configPath)
+	h.mu.Unlock()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	providersResp := make([]oauthProviderStatus, 0, len(oauthProviderOrder))
 
 	for _, provider := range oauthProviderOrder {
@@ -155,10 +174,11 @@ func (h *adminHandler) handleListOAuthProviders(w http.ResponseWriter, r *http.R
 		}
 
 		item := oauthProviderStatus{
-			Provider:    provider,
-			DisplayName: oauthProviderLabels[provider],
-			Methods:     oauthProviderMethods[provider],
-			Status:      "not_logged_in",
+			Provider:        provider,
+			DisplayName:     oauthProviderLabels[provider],
+			Methods:         oauthProviderMethods[provider],
+			AvailableModels: availableOAuthProviderModels(cfg, provider),
+			Status:          "not_logged_in",
 		}
 		if cred != nil {
 			item.LoggedIn = true
@@ -185,6 +205,33 @@ func (h *adminHandler) handleListOAuthProviders(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]any{
 		"providers": providersResp,
 	})
+}
+
+func availableOAuthProviderModels(cfg *config.Config, provider string) []oauthProviderModel {
+	if cfg == nil {
+		return []oauthProviderModel{}
+	}
+	result := make([]oauthProviderModel, 0)
+	seenModelNames := make(map[string]struct{})
+	for _, modelCfg := range cfg.ModelList {
+		if !modelBelongsToProvider(provider, modelCfg.Model) {
+			continue
+		}
+		modelName := strings.TrimSpace(modelCfg.ModelName)
+		modelID := strings.TrimSpace(modelCfg.Model)
+		if modelName == "" || modelID == "" {
+			continue
+		}
+		if _, exists := seenModelNames[modelName]; exists {
+			continue
+		}
+		seenModelNames[modelName] = struct{}{}
+		result = append(result, oauthProviderModel{
+			ModelName: modelName,
+			Model:     modelID,
+		})
+	}
+	return result
 }
 
 func (h *adminHandler) syncStoredOAuthCredentialsToConfig() error {
@@ -376,6 +423,81 @@ func (h *adminHandler) handleOAuthLogin(w http.ResponseWriter, r *http.Request) 
 	default:
 		http.Error(w, "unsupported login method", http.StatusBadRequest)
 	}
+}
+
+func (h *adminHandler) handleOAuthUpdateModel(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	req, err := parseOAuthModelUpdateRequest(body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	provider, err := normalizeOAuthProvider(req.Provider)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cred, err := oauthGetCredential(provider)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load credential: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if cred == nil {
+		http.Error(w, fmt.Sprintf("provider %q is not connected", provider), http.StatusBadRequest)
+		return
+	}
+	if cred.IsExpired() || cred.NeedsRefresh() {
+		http.Error(w, fmt.Sprintf("provider %q credential is not connected", provider), http.StatusBadRequest)
+		return
+	}
+
+	authMethod := strings.ToLower(strings.TrimSpace(cred.AuthMethod))
+	if authMethod == "" {
+		http.Error(w, fmt.Sprintf("provider %q credential is missing auth method", provider), http.StatusInternalServerError)
+		return
+	}
+	if !isStoredCredentialAuthMethodSupported(provider, authMethod) {
+		http.Error(
+			w,
+			fmt.Sprintf("provider %q credential has unsupported auth method %q", provider, authMethod),
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	if err := h.validateOAuthLoginSelectedModel(provider, req.Model); err != nil {
+		var validationErr *oauthModelValidationError
+		if errors.As(err, &validationErr) {
+			http.Error(w, validationErr.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, fmt.Sprintf("failed to validate model: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.syncProviderAuthMethod(provider, authMethod, req.Model); err != nil {
+		var validationErr *oauthModelValidationError
+		if errors.As(err, &validationErr) {
+			http.Error(w, validationErr.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, fmt.Sprintf("failed to update oauth model: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"provider": provider,
+		"model":    req.Model,
+	})
 }
 
 func (h *adminHandler) handleGetOAuthFlow(w http.ResponseWriter, r *http.Request) {
@@ -1219,6 +1341,22 @@ func parseOAuthLoginRequest(body []byte) (oauthLoginRequest, error) {
 			return oauthLoginRequest{}, fmt.Errorf("model is required when provided")
 		}
 		req.Model = model
+	}
+	return req, nil
+}
+
+func parseOAuthModelUpdateRequest(body []byte) (oauthModelUpdateRequest, error) {
+	var req oauthModelUpdateRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return oauthModelUpdateRequest{}, fmt.Errorf("invalid JSON: %v", err)
+	}
+	req.Provider = strings.TrimSpace(req.Provider)
+	req.Model = strings.TrimSpace(req.Model)
+	if req.Provider == "" {
+		return oauthModelUpdateRequest{}, fmt.Errorf("provider is required")
+	}
+	if req.Model == "" {
+		return oauthModelUpdateRequest{}, fmt.Errorf("model is required")
 	}
 	return req, nil
 }

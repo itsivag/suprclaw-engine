@@ -31,6 +31,7 @@ func TestAdminOAuthRoutesRequireBearer(t *testing.T) {
 	}{
 		{method: http.MethodGet, path: "/api/oauth/providers"},
 		{method: http.MethodPost, path: "/api/oauth/login", body: `{"provider":"openai","method":"browser"}`},
+		{method: http.MethodPost, path: "/api/oauth/model", body: `{"provider":"openai","model":"gpt-5.4"}`},
 		{method: http.MethodGet, path: "/api/oauth/flows/abc123"},
 		{method: http.MethodPost, path: "/api/oauth/flows/abc123/poll"},
 		{method: http.MethodPost, path: "/api/oauth/logout", body: `{"provider":"openai"}`},
@@ -136,6 +137,88 @@ func TestAdminOAuthLoginRejectsInvalidModelOverride(t *testing.T) {
 				t.Fatalf("response body = %q, want substring %q", rec.Body.String(), tc.wantMessage)
 			}
 		})
+	}
+}
+
+func TestAdminOAuthUpdateModelSuccess(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	appendOAuthTestModel(t, configPath, config.ModelConfig{
+		ModelName: "openai-custom",
+		Model:     "openai/gpt-4.1",
+	})
+	if err := auth.SetCredential(oauthProviderOpenAI, &auth.AuthCredential{
+		AccessToken: "token-update-model",
+		Provider:    oauthProviderOpenAI,
+		AuthMethod:  "oauth",
+	}); err != nil {
+		t.Fatalf("SetCredential error: %v", err)
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/model",
+		strings.NewReader(`{"provider":"openai","model":"openai-custom"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload["status"] != "ok" {
+		t.Fatalf("status field = %v, want ok", payload["status"])
+	}
+	if payload["model"] != "openai-custom" {
+		t.Fatalf("model field = %v, want %q", payload["model"], "openai-custom")
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	if got := cfg.Agents.Defaults.GetModelName(); got != "openai-custom" {
+		t.Fatalf("agents.defaults model = %q, want %q", got, "openai-custom")
+	}
+}
+
+func TestAdminOAuthUpdateModelRejectsDisconnectedProvider(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/model",
+		strings.NewReader(`{"provider":"openai","model":"custom-default"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `provider "openai" is not connected`) {
+		t.Fatalf("body = %q, expected disconnected provider error", rec.Body.String())
 	}
 }
 
@@ -1173,6 +1256,84 @@ func TestAdminOAuthProvidersReturnsConnectedState(t *testing.T) {
 	if payload.Providers[0].Status != "connected" {
 		t.Fatalf("openai provider status = %q, want %q", payload.Providers[0].Status, "connected")
 	}
+	for _, providerItem := range payload.Providers {
+		if len(providerItem.AvailableModels) != 0 {
+			t.Fatalf(
+				"provider %q available_models length = %d, want 0",
+				providerItem.Provider,
+				len(providerItem.AvailableModels),
+			)
+		}
+	}
+}
+
+func TestAdminOAuthProvidersIncludesAvailableModelsFilteredAndDeduped(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	cfg.ModelList = []config.ModelConfig{
+		{ModelName: "openai-primary", Model: "openai/gpt-5.4"},
+		{ModelName: "openai-primary", Model: "openai/gpt-4o"},
+		{ModelName: "openai-fast", Model: "openai/gpt-4.1-mini"},
+		{ModelName: "anthropic-main", Model: "anthropic/claude-sonnet-4.6"},
+		{ModelName: "google-main", Model: "antigravity/gemini-3-flash"},
+		{ModelName: "platform-default", Model: "litellm/suprclaw-default"},
+	}
+	if err = config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig error: %v", err)
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/oauth/providers", nil)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var payload struct {
+		Providers []oauthProviderStatus `json:"providers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal providers response: %v", err)
+	}
+
+	openAIProvider := findOAuthProviderStatus(t, payload.Providers, oauthProviderOpenAI)
+	if len(openAIProvider.AvailableModels) != 2 {
+		t.Fatalf("openai available_models length = %d, want 2", len(openAIProvider.AvailableModels))
+	}
+	if openAIProvider.AvailableModels[0].ModelName != "openai-primary" || openAIProvider.AvailableModels[0].Model != "openai/gpt-5.4" {
+		t.Fatalf("openai first available model = %#v, want model_name=openai-primary model=openai/gpt-5.4", openAIProvider.AvailableModels[0])
+	}
+	if openAIProvider.AvailableModels[1].ModelName != "openai-fast" || openAIProvider.AvailableModels[1].Model != "openai/gpt-4.1-mini" {
+		t.Fatalf("openai second available model = %#v, want model_name=openai-fast model=openai/gpt-4.1-mini", openAIProvider.AvailableModels[1])
+	}
+
+	anthropicProvider := findOAuthProviderStatus(t, payload.Providers, oauthProviderAnthropic)
+	if len(anthropicProvider.AvailableModels) != 1 {
+		t.Fatalf("anthropic available_models length = %d, want 1", len(anthropicProvider.AvailableModels))
+	}
+	if anthropicProvider.AvailableModels[0].ModelName != "anthropic-main" || anthropicProvider.AvailableModels[0].Model != "anthropic/claude-sonnet-4.6" {
+		t.Fatalf("anthropic available model = %#v, want model_name=anthropic-main model=anthropic/claude-sonnet-4.6", anthropicProvider.AvailableModels[0])
+	}
+
+	googleProvider := findOAuthProviderStatus(t, payload.Providers, oauthProviderGoogleAntigravity)
+	if len(googleProvider.AvailableModels) != 1 {
+		t.Fatalf("google available_models length = %d, want 1", len(googleProvider.AvailableModels))
+	}
+	if googleProvider.AvailableModels[0].ModelName != "google-main" || googleProvider.AvailableModels[0].Model != "antigravity/gemini-3-flash" {
+		t.Fatalf("google available model = %#v, want model_name=google-main model=antigravity/gemini-3-flash", googleProvider.AvailableModels[0])
+	}
 }
 
 func TestAdminOAuthProvidersNoopWhenConfigAlreadySynced(t *testing.T) {
@@ -1397,6 +1558,17 @@ func appendOAuthTestModel(t *testing.T, configPath string, modelCfg config.Model
 	if err := config.SaveConfig(configPath, cfg); err != nil {
 		t.Fatalf("SaveConfig error: %v", err)
 	}
+}
+
+func findOAuthProviderStatus(t *testing.T, providers []oauthProviderStatus, provider string) oauthProviderStatus {
+	t.Helper()
+	for _, item := range providers {
+		if item.Provider == provider {
+			return item
+		}
+	}
+	t.Fatalf("provider %q not found in providers payload", provider)
+	return oauthProviderStatus{}
 }
 
 func resetAdminOAuthHooks(t *testing.T) {
