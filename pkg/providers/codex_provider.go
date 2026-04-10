@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -102,8 +103,15 @@ func (p *CodexProvider) Chat(
 	defer stream.Close()
 
 	var resp *responses.Response
+	streamOutputByIndex := make(map[int]responses.ResponseOutputItemUnion)
 	for stream.Next() {
 		evt := stream.Current()
+		if evt.Type == "response.output_item.done" {
+			doneEvent := evt.AsResponseOutputItemDone()
+			if doneEvent.OutputIndex >= 0 {
+				streamOutputByIndex[int(doneEvent.OutputIndex)] = doneEvent.Item
+			}
+		}
 		if evt.Type == "response.completed" || evt.Type == "response.failed" || evt.Type == "response.incomplete" {
 			evtResp := evt.Response
 			if evtResp.ID != "" {
@@ -149,6 +157,9 @@ func (p *CodexProvider) Chat(
 		}
 		logger.ErrorCF("provider.codex", "Codex stream ended without completed response event", fields)
 		return nil, fmt.Errorf("codex API call: stream ended without completed response")
+	}
+	if len(resp.Output) == 0 && len(streamOutputByIndex) > 0 {
+		resp.Output = outputItemsFromStreamIndexes(streamOutputByIndex)
 	}
 
 	out := parseCodexResponse(resp)
@@ -385,6 +396,8 @@ func parseCodexResponse(resp *responses.Response) *LLMResponse {
 			for _, c := range item.Content {
 				if c.Type == "output_text" {
 					content.WriteString(c.Text)
+				} else if c.Type == "refusal" {
+					content.WriteString(c.Refusal)
 				}
 			}
 		case "function_call":
@@ -423,6 +436,21 @@ func parseCodexResponse(resp *responses.Response) *LLMResponse {
 		FinishReason: finishReason,
 		Usage:        usage,
 	}
+}
+
+func outputItemsFromStreamIndexes(
+	outputByIndex map[int]responses.ResponseOutputItemUnion,
+) []responses.ResponseOutputItemUnion {
+	indices := make([]int, 0, len(outputByIndex))
+	for idx := range outputByIndex {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	result := make([]responses.ResponseOutputItemUnion, 0, len(indices))
+	for _, idx := range indices {
+		result = append(result, outputByIndex[idx])
+	}
+	return result
 }
 
 func createCodexTokenSource() func() (string, string, error) {

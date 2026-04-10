@@ -370,6 +370,65 @@ func TestCodexProvider_ChatRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCodexProvider_ChatRoundTrip_UsesOutputItemDoneWhenCompletedHasNoOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+
+		var reqBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if reqBody["stream"] != true {
+			http.Error(w, "stream must be true", http.StatusBadRequest)
+			return
+		}
+
+		doneItem := map[string]any{
+			"id":     "msg_1",
+			"type":   "message",
+			"role":   "assistant",
+			"status": "completed",
+			"content": []map[string]any{
+				{"type": "output_text", "text": "Recovered from output_item.done"},
+			},
+		}
+		completedResp := map[string]any{
+			"id":     "resp_test",
+			"object": "response",
+			"status": "completed",
+			"output": []map[string]any{},
+			"usage": map[string]any{
+				"input_tokens":          9,
+				"output_tokens":         7,
+				"total_tokens":          16,
+				"input_tokens_details":  map[string]any{"cached_tokens": 0},
+				"output_tokens_details": map[string]any{"reasoning_tokens": 0},
+			},
+		}
+		writeOutputItemDoneAndCompletedSSE(w, doneItem, completedResp)
+	}))
+	defer server.Close()
+
+	provider := NewCodexProvider("test-token", "acc-123")
+	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
+
+	messages := []Message{{Role: "user", Content: "Hello"}}
+	resp, err := provider.Chat(t.Context(), messages, nil, "gpt-4o", map[string]any{"max_tokens": 1024})
+	if err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if resp.Content != "Recovered from output_item.done" {
+		t.Errorf("Content = %q, want %q", resp.Content, "Recovered from output_item.done")
+	}
+	if resp.Usage == nil || resp.Usage.TotalTokens != 16 {
+		t.Fatalf("TotalTokens = %v, want 16", resp.Usage)
+	}
+}
+
 func TestCodexProvider_ChatRoundTrip_WebSearchDisabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
@@ -641,5 +700,28 @@ func writeCompletedSSE(w http.ResponseWriter, response map[string]any) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	fmt.Fprintf(w, "event: response.completed\n")
 	fmt.Fprintf(w, "data: %s\n\n", string(b))
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+}
+
+func writeOutputItemDoneAndCompletedSSE(w http.ResponseWriter, doneItem, response map[string]any) {
+	itemDoneEvent := map[string]any{
+		"type":            "response.output_item.done",
+		"sequence_number": 1,
+		"output_index":    0,
+		"item":            doneItem,
+	}
+	completedEvent := map[string]any{
+		"type":            "response.completed",
+		"sequence_number": 2,
+		"response":        response,
+	}
+	itemDoneBytes, _ := json.Marshal(itemDoneEvent)
+	completedBytes, _ := json.Marshal(completedEvent)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	fmt.Fprintf(w, "event: response.output_item.done\n")
+	fmt.Fprintf(w, "data: %s\n\n", string(itemDoneBytes))
+	fmt.Fprintf(w, "event: response.completed\n")
+	fmt.Fprintf(w, "data: %s\n\n", string(completedBytes))
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 }
