@@ -127,6 +127,11 @@ type oauthRedirectCompletion struct {
 }
 
 func (h *adminHandler) handleListOAuthProviders(w http.ResponseWriter, r *http.Request) {
+	if err := h.syncStoredOAuthCredentialsToConfig(); err != nil {
+		http.Error(w, fmt.Sprintf("failed to sync oauth provider config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	providersResp := make([]oauthProviderStatus, 0, len(oauthProviderOrder))
 
 	for _, provider := range oauthProviderOrder {
@@ -167,6 +172,42 @@ func (h *adminHandler) handleListOAuthProviders(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]any{
 		"providers": providersResp,
 	})
+}
+
+func (h *adminHandler) syncStoredOAuthCredentialsToConfig() error {
+	for _, provider := range oauthProviderOrder {
+		cred, err := oauthGetCredential(provider)
+		if err != nil {
+			return fmt.Errorf("load credential for %q: %w", provider, err)
+		}
+		if cred == nil {
+			continue
+		}
+
+		authMethod := strings.ToLower(strings.TrimSpace(cred.AuthMethod))
+		if authMethod == "" {
+			return fmt.Errorf("stored credential for provider %q is missing auth_method", provider)
+		}
+		if !isStoredCredentialAuthMethodSupported(provider, authMethod) {
+			return fmt.Errorf("stored credential for provider %q has unsupported auth_method %q", provider, authMethod)
+		}
+
+		if err := h.syncProviderAuthMethod(provider, authMethod); err != nil {
+			return fmt.Errorf("sync provider %q auth_method %q: %w", provider, authMethod, err)
+		}
+	}
+	return nil
+}
+
+func isStoredCredentialAuthMethodSupported(provider, authMethod string) bool {
+	switch authMethod {
+	case "oauth":
+		return provider == oauthProviderOpenAI ||
+			provider == oauthProviderAnthropic ||
+			provider == oauthProviderGoogleAntigravity
+	default:
+		return isOAuthMethodSupported(provider, authMethod)
+	}
 }
 
 func (h *adminHandler) handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
