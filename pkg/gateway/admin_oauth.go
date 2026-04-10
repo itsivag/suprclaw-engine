@@ -1123,14 +1123,8 @@ func (h *adminHandler) syncProviderAuthMethod(provider, authMethod, selectedMode
 		}
 
 		if authMethod != "" {
-			if selectedModelName != "" {
-				if h.forceManagedAgentModels(cfg, targetModel.ModelName) {
-					changed = true
-				}
-			} else {
-				if h.syncManagedAgentModelsToProvider(cfg, provider, targetModel.ModelName) {
-					changed = true
-				}
+			if h.syncAllAgentModels(cfg, targetModel.ModelName) {
+				changed = true
 			}
 		}
 		return changed, nil
@@ -1174,7 +1168,7 @@ func resolveOAuthModelConfigForProvider(cfg *config.Config, provider, modelName 
 	}
 }
 
-func (h *adminHandler) forceManagedAgentModels(cfg *config.Config, targetModelName string) bool {
+func (h *adminHandler) syncAllAgentModels(cfg *config.Config, targetModelName string) bool {
 	changed := false
 	targetModelName = strings.TrimSpace(targetModelName)
 	if targetModelName == "" {
@@ -1189,10 +1183,6 @@ func (h *adminHandler) forceManagedAgentModels(cfg *config.Config, targetModelNa
 
 	for i := range cfg.Agents.List {
 		agent := &cfg.Agents.List[i]
-		isLeadAgent := agent.Default || strings.EqualFold(strings.TrimSpace(agent.ID), "main")
-		if !isLeadAgent {
-			continue
-		}
 		if agent.Model == nil {
 			agent.Model = &config.AgentModelConfig{}
 			changed = true
@@ -1207,73 +1197,6 @@ func (h *adminHandler) forceManagedAgentModels(cfg *config.Config, targetModelNa
 		}
 	}
 	return changed
-}
-
-func (h *adminHandler) syncManagedAgentModelsToProvider(
-	cfg *config.Config,
-	provider string,
-	targetModelName string,
-) bool {
-	changed := false
-	targetModelName = strings.TrimSpace(targetModelName)
-	if targetModelName == "" {
-		return false
-	}
-
-	defaultModelName := strings.TrimSpace(cfg.Agents.Defaults.GetModelName())
-	if shouldSwitchManagedModelToProvider(cfg, provider, defaultModelName) {
-		if cfg.Agents.Defaults.ModelName != targetModelName || cfg.Agents.Defaults.Model != "" {
-			cfg.Agents.Defaults.ModelName = targetModelName
-			cfg.Agents.Defaults.Model = ""
-			changed = true
-		}
-	}
-
-	for i := range cfg.Agents.List {
-		agent := &cfg.Agents.List[i]
-		isLeadAgent := agent.Default || strings.EqualFold(strings.TrimSpace(agent.ID), "main")
-		if !isLeadAgent {
-			continue
-		}
-
-		currentModel := ""
-		if agent.Model != nil {
-			currentModel = strings.TrimSpace(agent.Model.Primary)
-		}
-		if !shouldSwitchManagedModelToProvider(cfg, provider, currentModel) {
-			continue
-		}
-
-		if agent.Model == nil {
-			agent.Model = &config.AgentModelConfig{}
-			changed = true
-		}
-		if agent.Model.Primary != targetModelName {
-			agent.Model.Primary = targetModelName
-			changed = true
-		}
-		if len(agent.Model.Fallbacks) > 0 {
-			agent.Model.Fallbacks = nil
-			changed = true
-		}
-	}
-	return changed
-}
-
-func shouldSwitchManagedModelToProvider(cfg *config.Config, provider, modelName string) bool {
-	_ = cfg
-	_ = provider
-	modelName = strings.TrimSpace(modelName)
-	if modelName == "" {
-		return true
-	}
-
-	lower := strings.ToLower(modelName)
-	switch lower {
-	case "suprclaw-default", "suprclaw-fast":
-		return true
-	}
-	return false
 }
 
 func modelBelongsToProvider(provider, model string) bool {

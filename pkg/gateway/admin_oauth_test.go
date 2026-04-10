@@ -1144,7 +1144,7 @@ func TestAdminOAuthCallbackSuccessPersistsCredentialAndConfig(t *testing.T) {
 	}
 }
 
-func TestAdminOAuthCallbackSuccessSwitchesManagedLeadModelToOpenAI(t *testing.T) {
+func TestAdminOAuthCallbackSuccessSwitchesAllManagedAgentModelsToOpenAI(t *testing.T) {
 	configPath, cleanup := setupAdminOAuthManagedRuntimeTestEnv(t)
 	defer cleanup()
 	resetAdminOAuthHooks(t)
@@ -1194,12 +1194,7 @@ func TestAdminOAuthCallbackSuccessSwitchesManagedLeadModelToOpenAI(t *testing.T)
 	if got := updated.Agents.Defaults.GetModelName(); got != "gpt-5.4" {
 		t.Fatalf("agents.defaults.model_name = %q, want %q", got, "gpt-5.4")
 	}
-	if len(updated.Agents.List) == 0 || updated.Agents.List[0].Model == nil {
-		t.Fatalf("expected main agent model to be set")
-	}
-	if got := updated.Agents.List[0].Model.Primary; got != "gpt-5.4" {
-		t.Fatalf("main agent model primary = %q, want %q", got, "gpt-5.4")
-	}
+	assertAllOAuthAgentModels(t, updated, "gpt-5.4")
 
 	hasOAuthModel := false
 	for _, modelCfg := range updated.ModelList {
@@ -1210,6 +1205,51 @@ func TestAdminOAuthCallbackSuccessSwitchesManagedLeadModelToOpenAI(t *testing.T)
 	if !hasOAuthModel {
 		t.Fatalf("expected openai/gpt-5.4 oauth model in config")
 	}
+}
+
+func TestAdminOAuthUpdateModelSyncsAllAgents(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthManagedRuntimeTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	appendOAuthTestModel(t, configPath, config.ModelConfig{
+		ModelName: "openai-custom",
+		Model:     "openai/gpt-4.1",
+	})
+	if err := auth.SetCredential(oauthProviderOpenAI, &auth.AuthCredential{
+		AccessToken: "token-update-model-all",
+		Provider:    oauthProviderOpenAI,
+		AuthMethod:  "oauth",
+	}); err != nil {
+		t.Fatalf("SetCredential error: %v", err)
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/model",
+		strings.NewReader(`{"provider":"openai","model":"openai-custom"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	if got := updated.Agents.Defaults.GetModelName(); got != "openai-custom" {
+		t.Fatalf("agents.defaults.model_name = %q, want %q", got, "openai-custom")
+	}
+	assertAllOAuthAgentModels(t, updated, "openai-custom")
 }
 
 func TestAdminOAuthProvidersReturnsConnectedState(t *testing.T) {
@@ -1529,6 +1569,12 @@ func setupAdminOAuthManagedRuntimeTestEnv(t *testing.T) (string, func()) {
 				Primary: "suprclaw-fast",
 			},
 		},
+		{
+			ID: "content-writer",
+			Model: &config.AgentModelConfig{
+				Primary: "suprclaw-default",
+			},
+		},
 	}
 
 	configPath := filepath.Join(tmp, "config.json")
@@ -1545,6 +1591,27 @@ func setupAdminOAuthManagedRuntimeTestEnv(t *testing.T) (string, func()) {
 		}
 	}
 	return configPath, cleanup
+}
+
+func assertAllOAuthAgentModels(t *testing.T, cfg *config.Config, targetModel string) {
+	t.Helper()
+	if cfg == nil {
+		t.Fatalf("config is nil")
+	}
+	if len(cfg.Agents.List) == 0 {
+		t.Fatalf("expected at least one configured agent")
+	}
+	for _, agent := range cfg.Agents.List {
+		if agent.Model == nil {
+			t.Fatalf("expected agent %q model to be set", agent.ID)
+		}
+		if got := agent.Model.Primary; got != targetModel {
+			t.Fatalf("agent %q model primary = %q, want %q", agent.ID, got, targetModel)
+		}
+		if len(agent.Model.Fallbacks) > 0 {
+			t.Fatalf("agent %q fallbacks = %#v, want none", agent.ID, agent.Model.Fallbacks)
+		}
+	}
 }
 
 func appendOAuthTestModel(t *testing.T, configPath string, modelCfg config.ModelConfig) {
