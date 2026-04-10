@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -73,21 +74,22 @@ var (
 )
 
 type oauthFlow struct {
-	ID           string
-	Provider     string
-	Method       string
-	Status       string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	ExpiresAt    time.Time
-	Error        string
-	CodeVerifier string
-	OAuthState   string
-	RedirectURI  string
-	DeviceAuthID string
-	UserCode     string
-	VerifyURL    string
-	Interval     int
+	ID            string
+	Provider      string
+	Method        string
+	SelectedModel string
+	Status        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	ExpiresAt     time.Time
+	Error         string
+	CodeVerifier  string
+	OAuthState    string
+	RedirectURI   string
+	DeviceAuthID  string
+	UserCode      string
+	VerifyURL     string
+	Interval      int
 }
 
 type oauthProviderStatus struct {
@@ -124,6 +126,22 @@ type oauthRedirectCompletion struct {
 	Code          string
 	State         string
 	ProviderError string
+}
+
+type oauthLoginRequest struct {
+	Provider      string
+	Method        string
+	Token         string
+	Model         string
+	ModelProvided bool
+}
+
+type oauthModelValidationError struct {
+	message string
+}
+
+func (e *oauthModelValidationError) Error() string {
+	return e.message
 }
 
 func (h *adminHandler) handleListOAuthProviders(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +205,7 @@ func (h *adminHandler) syncStoredOAuthCredentialsToConfig() error {
 			return fmt.Errorf("stored credential for provider %q has unsupported auth_method %q", provider, authMethod)
 		}
 
-		if err := h.syncProviderAuthMethod(provider, authMethod); err != nil {
+		if err := h.syncProviderAuthMethod(provider, authMethod, ""); err != nil {
 			return fmt.Errorf("sync provider %q auth_method %q: %w", provider, authMethod, err)
 		}
 	}
@@ -213,13 +231,9 @@ func (h *adminHandler) handleOAuthLogin(w http.ResponseWriter, r *http.Request) 
 	}
 	defer r.Body.Close()
 
-	var req struct {
-		Provider string `json:"provider"`
-		Method   string `json:"method"`
-		Token    string `json:"token"`
-	}
-	if err = json.Unmarshal(body, &req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+	req, err := parseOAuthLoginRequest(body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -239,6 +253,18 @@ func (h *adminHandler) handleOAuthLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if req.ModelProvided {
+		if err := h.validateOAuthLoginSelectedModel(provider, req.Model); err != nil {
+			var validationErr *oauthModelValidationError
+			if errors.As(err, &validationErr) {
+				http.Error(w, validationErr.Error(), http.StatusBadRequest)
+				return
+			}
+			http.Error(w, fmt.Sprintf("failed to validate model: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	switch method {
 	case oauthMethodToken:
 		token := strings.TrimSpace(req.Token)
@@ -252,7 +278,7 @@ func (h *adminHandler) handleOAuthLogin(w http.ResponseWriter, r *http.Request) 
 			Provider:    provider,
 			AuthMethod:  oauthMethodToken,
 		}
-		if err := h.persistCredentialAndConfig(provider, oauthMethodToken, cred); err != nil {
+		if err := h.persistCredentialAndConfig(provider, oauthMethodToken, cred, req.Model); err != nil {
 			http.Error(w, fmt.Sprintf("token login failed: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -274,17 +300,18 @@ func (h *adminHandler) handleOAuthLogin(w http.ResponseWriter, r *http.Request) 
 
 		now := oauthNow()
 		flow := &oauthFlow{
-			ID:           newOAuthFlowID(),
-			Provider:     provider,
-			Method:       method,
-			Status:       oauthFlowPending,
-			CreatedAt:    now,
-			UpdatedAt:    now,
-			ExpiresAt:    now.Add(oauthDeviceCodeFlowTTL),
-			DeviceAuthID: info.DeviceAuthID,
-			UserCode:     info.UserCode,
-			VerifyURL:    info.VerifyURL,
-			Interval:     info.Interval,
+			ID:            newOAuthFlowID(),
+			Provider:      provider,
+			Method:        method,
+			SelectedModel: req.Model,
+			Status:        oauthFlowPending,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+			ExpiresAt:     now.Add(oauthDeviceCodeFlowTTL),
+			DeviceAuthID:  info.DeviceAuthID,
+			UserCode:      info.UserCode,
+			VerifyURL:     info.VerifyURL,
+			Interval:      info.Interval,
 		}
 		h.storeOAuthFlow(flow)
 
@@ -323,16 +350,17 @@ func (h *adminHandler) handleOAuthLogin(w http.ResponseWriter, r *http.Request) 
 
 		now := oauthNow()
 		flow := &oauthFlow{
-			ID:           newOAuthFlowID(),
-			Provider:     provider,
-			Method:       method,
-			Status:       oauthFlowPending,
-			CreatedAt:    now,
-			UpdatedAt:    now,
-			ExpiresAt:    now.Add(oauthBrowserFlowTTL),
-			CodeVerifier: pkce.CodeVerifier,
-			OAuthState:   state,
-			RedirectURI:  redirectURI,
+			ID:            newOAuthFlowID(),
+			Provider:      provider,
+			Method:        method,
+			SelectedModel: req.Model,
+			Status:        oauthFlowPending,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+			ExpiresAt:     now.Add(oauthBrowserFlowTTL),
+			CodeVerifier:  pkce.CodeVerifier,
+			OAuthState:    state,
+			RedirectURI:   redirectURI,
 		}
 		h.storeOAuthFlow(flow)
 
@@ -405,7 +433,7 @@ func (h *adminHandler) handlePollOAuthFlow(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		if err := h.persistCredentialAndConfig(flow.Provider, oauthMethodTokenOrOAuth(flow.Method), cred); err != nil {
+		if err := h.persistCredentialAndConfig(flow.Provider, oauthMethodTokenOrOAuth(flow.Method), cred, flow.SelectedModel); err != nil {
 			h.setOAuthFlowError(flowID, fmt.Sprintf("failed to save credential: %v", err))
 			updated, _ := h.getOAuthFlow(flowID)
 			writeJSON(w, http.StatusOK, flowToResponse(updated))
@@ -535,7 +563,7 @@ func (h *adminHandler) handleOAuthLogout(w http.ResponseWriter, r *http.Request)
 		http.Error(w, fmt.Sprintf("failed to delete credential: %v", err), http.StatusInternalServerError)
 		return
 	}
-	if err := h.syncProviderAuthMethod(provider, ""); err != nil {
+	if err := h.syncProviderAuthMethod(provider, "", ""); err != nil {
 		http.Error(w, fmt.Sprintf("failed to update config: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -728,7 +756,7 @@ func (h *adminHandler) completeBrowserOAuthFlow(flow *oauthFlow, code string) er
 		return fmt.Errorf("token exchange failed: %w", err)
 	}
 
-	if err := h.persistCredentialAndConfig(flow.Provider, oauthMethodTokenOrOAuth(flow.Method), cred); err != nil {
+	if err := h.persistCredentialAndConfig(flow.Provider, oauthMethodTokenOrOAuth(flow.Method), cred, flow.SelectedModel); err != nil {
 		return fmt.Errorf("failed to save credential: %w", err)
 	}
 
@@ -875,7 +903,7 @@ func (h *adminHandler) gcOAuthFlowsLocked(now time.Time) {
 	}
 }
 
-func (h *adminHandler) persistCredentialAndConfig(provider, authMethod string, cred *auth.AuthCredential) error {
+func (h *adminHandler) persistCredentialAndConfig(provider, authMethod string, cred *auth.AuthCredential, selectedModelName string) error {
 	if cred == nil {
 		return fmt.Errorf("empty credential")
 	}
@@ -908,13 +936,14 @@ func (h *adminHandler) persistCredentialAndConfig(provider, authMethod string, c
 	if err := oauthSetCredential(provider, &cp); err != nil {
 		return fmt.Errorf("saving credential: %w", err)
 	}
-	if err := h.syncProviderAuthMethod(provider, authMethod); err != nil {
+	if err := h.syncProviderAuthMethod(provider, authMethod, selectedModelName); err != nil {
 		return fmt.Errorf("syncing provider auth config: %w", err)
 	}
 	return nil
 }
 
-func (h *adminHandler) syncProviderAuthMethod(provider, authMethod string) error {
+func (h *adminHandler) syncProviderAuthMethod(provider, authMethod, selectedModelName string) error {
+	selectedModelName = strings.TrimSpace(selectedModelName)
 	return h.mutateCfgIfChanged(func(cfg *config.Config) (bool, error) {
 		changed := false
 		switch provider {
@@ -937,7 +966,20 @@ func (h *adminHandler) syncProviderAuthMethod(provider, authMethod string) error
 			return false, fmt.Errorf("unsupported provider %q", provider)
 		}
 
-		defaultModel := defaultModelConfigForProvider(provider, authMethod)
+		targetModel := config.ModelConfig{}
+		if authMethod != "" {
+			if selectedModelName != "" {
+				selectedModelCfg, err := resolveOAuthModelConfigForProvider(cfg, provider, selectedModelName)
+				if err != nil {
+					return false, err
+				}
+				selectedModelCfg.AuthMethod = authMethod
+				targetModel = selectedModelCfg
+			} else {
+				targetModel = defaultModelConfigForProvider(provider, authMethod)
+			}
+		}
+
 		found := false
 		for i := range cfg.ModelList {
 			if modelBelongsToProvider(provider, cfg.ModelList[i].Model) {
@@ -945,22 +987,104 @@ func (h *adminHandler) syncProviderAuthMethod(provider, authMethod string) error
 					cfg.ModelList[i].AuthMethod = authMethod
 					changed = true
 				}
-				found = true
+				if authMethod != "" &&
+					cfg.ModelList[i].ModelName == targetModel.ModelName &&
+					cfg.ModelList[i].Model == targetModel.Model {
+					found = true
+				}
 			}
 		}
 
 		if !found && authMethod != "" {
-			cfg.ModelList = append(cfg.ModelList, defaultModel)
+			cfg.ModelList = append(cfg.ModelList, targetModel)
 			changed = true
 		}
 
 		if authMethod != "" {
-			if h.syncManagedAgentModelsToProvider(cfg, provider, defaultModel.ModelName) {
-				changed = true
+			if selectedModelName != "" {
+				if h.forceManagedAgentModels(cfg, targetModel.ModelName) {
+					changed = true
+				}
+			} else {
+				if h.syncManagedAgentModelsToProvider(cfg, provider, targetModel.ModelName) {
+					changed = true
+				}
 			}
 		}
 		return changed, nil
 	})
+}
+
+func (h *adminHandler) validateOAuthLoginSelectedModel(provider, modelName string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return err
+	}
+	_, err = resolveOAuthModelConfigForProvider(cfg, provider, modelName)
+	return err
+}
+
+func resolveOAuthModelConfigForProvider(cfg *config.Config, provider, modelName string) (config.ModelConfig, error) {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return config.ModelConfig{}, &oauthModelValidationError{message: "model is required when provided"}
+	}
+	var nameExists bool
+	for _, modelCfg := range cfg.ModelList {
+		if modelCfg.ModelName != modelName {
+			continue
+		}
+		nameExists = true
+		if modelBelongsToProvider(provider, modelCfg.Model) {
+			return modelCfg, nil
+		}
+	}
+	if !nameExists {
+		return config.ModelConfig{}, &oauthModelValidationError{
+			message: fmt.Sprintf("unsupported model %q for provider %q", modelName, provider),
+		}
+	}
+	return config.ModelConfig{}, &oauthModelValidationError{
+		message: fmt.Sprintf("model %q does not belong to provider %q", modelName, provider),
+	}
+}
+
+func (h *adminHandler) forceManagedAgentModels(cfg *config.Config, targetModelName string) bool {
+	changed := false
+	targetModelName = strings.TrimSpace(targetModelName)
+	if targetModelName == "" {
+		return false
+	}
+
+	if cfg.Agents.Defaults.ModelName != targetModelName || cfg.Agents.Defaults.Model != "" {
+		cfg.Agents.Defaults.ModelName = targetModelName
+		cfg.Agents.Defaults.Model = ""
+		changed = true
+	}
+
+	for i := range cfg.Agents.List {
+		agent := &cfg.Agents.List[i]
+		isLeadAgent := agent.Default || strings.EqualFold(strings.TrimSpace(agent.ID), "main")
+		if !isLeadAgent {
+			continue
+		}
+		if agent.Model == nil {
+			agent.Model = &config.AgentModelConfig{}
+			changed = true
+		}
+		if agent.Model.Primary != targetModelName {
+			agent.Model.Primary = targetModelName
+			changed = true
+		}
+		if len(agent.Model.Fallbacks) > 0 {
+			agent.Model.Fallbacks = nil
+			changed = true
+		}
+	}
+	return changed
 }
 
 func (h *adminHandler) syncManagedAgentModelsToProvider(
@@ -1070,6 +1194,33 @@ func defaultModelConfigForProvider(provider, authMethod string) config.ModelConf
 	default:
 		return config.ModelConfig{}
 	}
+}
+
+func parseOAuthLoginRequest(body []byte) (oauthLoginRequest, error) {
+	var req oauthLoginRequest
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return oauthLoginRequest{}, fmt.Errorf("invalid JSON: %v", err)
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return oauthLoginRequest{}, fmt.Errorf("invalid JSON: %v", err)
+	}
+
+	rawModel, modelProvided := payload["model"]
+	req.ModelProvided = modelProvided
+	if modelProvided {
+		var model string
+		if err := json.Unmarshal(rawModel, &model); err != nil {
+			return oauthLoginRequest{}, fmt.Errorf("model must be a string")
+		}
+		model = strings.TrimSpace(model)
+		if model == "" {
+			return oauthLoginRequest{}, fmt.Errorf("model is required when provided")
+		}
+		req.Model = model
+	}
+	return req, nil
 }
 
 func fetchGoogleUserEmail(accessToken string) (string, error) {

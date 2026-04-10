@@ -571,7 +571,7 @@ func TestCodexProvider_ChatRoundTrip_TokenSourceFallbackAccountID(t *testing.T) 
 	}
 }
 
-func TestCodexProvider_ChatRoundTrip_ModelFallbackFromUnsupported(t *testing.T) {
+func TestCodexProvider_ChatRoundTrip_SupportedModel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
 			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
@@ -636,6 +636,27 @@ func TestCodexProvider_ChatRoundTrip_ModelFallbackFromUnsupported(t *testing.T) 
 	}
 }
 
+func TestCodexProvider_ChatRejectsUnsupportedModel(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		http.Error(w, "should not reach upstream for invalid model", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	provider := NewCodexProvider("test-token", "acc-123")
+	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
+
+	messages := []Message{{Role: "user", Content: "Hello"}}
+	_, err := provider.Chat(t.Context(), messages, nil, "glm-4.7", nil)
+	if err == nil {
+		t.Fatal("Chat() expected error for unsupported model, got nil")
+	}
+	if requestCount != 0 {
+		t.Fatalf("Chat() made %d upstream requests for unsupported model, want 0", requestCount)
+	}
+}
+
 func TestCodexProvider_GetDefaultModel(t *testing.T) {
 	p := NewCodexProvider("test-token", "")
 	if got := p.GetDefaultModel(); got != codexDefaultModel {
@@ -645,34 +666,33 @@ func TestCodexProvider_GetDefaultModel(t *testing.T) {
 
 func TestResolveCodexModel(t *testing.T) {
 	tests := []struct {
-		name         string
-		input        string
-		wantModel    string
-		wantFallback bool
+		name      string
+		input     string
+		wantModel string
+		wantErr   bool
 	}{
-		{name: "empty", input: "", wantModel: codexDefaultModel, wantFallback: true},
+		{name: "empty", input: "", wantErr: true},
 		{
-			name:         "unsupported namespace",
-			input:        "anthropic/claude-3.5",
-			wantModel:    codexDefaultModel,
-			wantFallback: true,
+			name:    "unsupported namespace",
+			input:   "anthropic/claude-3.5",
+			wantErr: true,
 		},
-		{name: "non-openai prefixed", input: "glm-4.7", wantModel: codexDefaultModel, wantFallback: true},
-		{name: "openai prefix", input: "openai/gpt-5.3-codex", wantModel: "gpt-5.3-codex", wantFallback: false},
-		{name: "direct gpt", input: "gpt-4o", wantModel: "gpt-4o", wantFallback: false},
+		{name: "non-openai prefixed", input: "glm-4.7", wantErr: true},
+		{name: "openai prefix", input: "openai/gpt-5.3-codex", wantModel: "gpt-5.3-codex"},
+		{name: "direct gpt", input: "gpt-4o", wantModel: "gpt-4o"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotModel, reason := resolveCodexModel(tt.input)
+			gotModel, err := resolveCodexModel(tt.input)
 			if gotModel != tt.wantModel {
 				t.Fatalf("resolveCodexModel(%q) model = %q, want %q", tt.input, gotModel, tt.wantModel)
 			}
-			if tt.wantFallback && reason == "" {
-				t.Fatalf("resolveCodexModel(%q) expected fallback reason", tt.input)
+			if tt.wantErr && err == nil {
+				t.Fatalf("resolveCodexModel(%q) expected error", tt.input)
 			}
-			if !tt.wantFallback && reason != "" {
-				t.Fatalf("resolveCodexModel(%q) unexpected fallback reason: %q", tt.input, reason)
+			if !tt.wantErr && err != nil {
+				t.Fatalf("resolveCodexModel(%q) unexpected error: %v", tt.input, err)
 			}
 		})
 	}

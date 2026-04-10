@@ -62,17 +62,9 @@ func (p *CodexProvider) Chat(
 ) (*LLMResponse, error) {
 	var opts []option.RequestOption
 	accountID := p.accountID
-	resolvedModel, fallbackReason := resolveCodexModel(model)
-	if fallbackReason != "" {
-		logger.WarnCF(
-			"provider.codex",
-			"Requested model is not compatible with Codex backend, using fallback",
-			map[string]any{
-				"requested_model": model,
-				"resolved_model":  resolvedModel,
-				"reason":          fallbackReason,
-			},
-		)
+	resolvedModel, err := resolveCodexModel(model)
+	if err != nil {
+		return nil, fmt.Errorf("invalid codex model: %w", err)
 	}
 	if p.tokenSource != nil {
 		tok, accID, err := p.tokenSource()
@@ -120,7 +112,7 @@ func (p *CodexProvider) Chat(
 			}
 		}
 	}
-	err := stream.Err()
+	err = stream.Err()
 	if err != nil {
 		fields := map[string]any{
 			"requested_model":    model,
@@ -182,16 +174,19 @@ func (p *CodexProvider) CountTokens(
 	return providerscommon.EstimateTokenCount(messages, tools, model, options), nil
 }
 
-func resolveCodexModel(model string) (string, string) {
+func resolveCodexModel(model string) (string, error) {
 	m := strings.ToLower(strings.TrimSpace(model))
 	if m == "" {
-		return codexDefaultModel, "empty model"
+		return "", fmt.Errorf("model is required")
 	}
 
 	if after, ok := strings.CutPrefix(m, "openai/"); ok {
 		m = after
+		if m == "" {
+			return "", fmt.Errorf("model is required")
+		}
 	} else if strings.Contains(m, "/") {
-		return codexDefaultModel, "non-openai model namespace"
+		return "", fmt.Errorf("unsupported model namespace: %s", model)
 	}
 
 	unsupportedPrefixes := []string{
@@ -213,15 +208,15 @@ func resolveCodexModel(model string) (string, string) {
 	}
 	for _, prefix := range unsupportedPrefixes {
 		if strings.HasPrefix(m, prefix) {
-			return codexDefaultModel, "unsupported model prefix"
+			return "", fmt.Errorf("unsupported model prefix: %s", model)
 		}
 	}
 
 	if strings.HasPrefix(m, "gpt-") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") {
-		return m, ""
+		return m, nil
 	}
 
-	return codexDefaultModel, "unsupported model family"
+	return "", fmt.Errorf("unsupported model family: %s", model)
 }
 
 func buildCodexParams(

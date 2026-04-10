@@ -85,6 +85,60 @@ func TestAdminOAuthLoginRejectsUnsupportedMethod(t *testing.T) {
 	}
 }
 
+func TestAdminOAuthLoginRejectsInvalidModelOverride(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	appendOAuthTestModel(t, configPath, config.ModelConfig{
+		ModelName: "anthropic-sonnet",
+		Model:     "anthropic/claude-sonnet-4.6",
+	})
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	cases := []struct {
+		name        string
+		body        string
+		wantMessage string
+	}{
+		{
+			name:        "unknown model name",
+			body:        `{"provider":"openai","method":"browser","model":"missing-model"}`,
+			wantMessage: `unsupported model "missing-model" for provider "openai"`,
+		},
+		{
+			name:        "model does not belong to provider",
+			body:        `{"provider":"openai","method":"browser","model":"anthropic-sonnet"}`,
+			wantMessage: `model "anthropic-sonnet" does not belong to provider "openai"`,
+		},
+		{
+			name:        "blank model override",
+			body:        `{"provider":"openai","method":"browser","model":"   "}`,
+			wantMessage: "model is required when provided",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/oauth/login", strings.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer test-secret")
+			req.Header.Set("Content-Type", "application/json")
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantMessage) {
+				t.Fatalf("response body = %q, want substring %q", rec.Body.String(), tc.wantMessage)
+			}
+		})
+	}
+}
+
 func TestAdminOAuthBrowserFlowCreatedAndQueried(t *testing.T) {
 	configPath, cleanup := setupAdminOAuthTestEnv(t)
 	defer cleanup()
@@ -274,6 +328,191 @@ func TestAdminOAuthLoginCustomOpenAIClientUsesTenantCallbackRedirect(t *testing.
 	}
 	if capturedRedirectURI != "https://tenant.suprclaw.com/oauth/callback" {
 		t.Fatalf("redirect_uri = %q, want %q", capturedRedirectURI, "https://tenant.suprclaw.com/oauth/callback")
+	}
+}
+
+func TestAdminOAuthBrowserLoginWithModelOverrideSwitchesManagedLeadModel(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthManagedRuntimeTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	appendOAuthTestModel(t, configPath, config.ModelConfig{
+		ModelName: "openai-custom",
+		Model:     "openai/gpt-4o",
+	})
+
+	oauthGeneratePKCE = func() (auth.PKCECodes, error) {
+		return auth.PKCECodes{CodeVerifier: "verifier-custom", CodeChallenge: "challenge-custom"}, nil
+	}
+	oauthGenerateState = func() (string, error) { return "state-custom", nil }
+	oauthBuildAuthorizeURL = func(cfg auth.OAuthProviderConfig, pkce auth.PKCECodes, state, redirectURI string) string {
+		return "https://example.com/authorize?state=" + state
+	}
+	oauthExchangeCodeForTokens = func(
+		cfg auth.OAuthProviderConfig,
+		code, codeVerifier, redirectURI string,
+	) (*auth.AuthCredential, error) {
+		return &auth.AuthCredential{
+			AccessToken: "access-token-custom",
+			Provider:    oauthProviderOpenAI,
+		}, nil
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	loginRec := httptest.NewRecorder()
+	loginReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/login",
+		strings.NewReader(`{"provider":"openai","method":"browser","model":"openai-custom"}`),
+	)
+	loginReq.Header.Set("Authorization", "Bearer test-secret")
+	loginReq.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d, body=%s", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+
+	callbackRec := httptest.NewRecorder()
+	callbackReq := httptest.NewRequest(http.MethodGet, "/oauth/callback?state=state-custom&code=auth-code-custom", nil)
+	mux.ServeHTTP(callbackRec, callbackReq)
+	if callbackRec.Code != http.StatusOK {
+		t.Fatalf("callback status = %d, want %d, body=%s", callbackRec.Code, http.StatusOK, callbackRec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	if got := updated.Agents.Defaults.GetModelName(); got != "openai-custom" {
+		t.Fatalf("agents.defaults.model_name = %q, want %q", got, "openai-custom")
+	}
+	if len(updated.Agents.List) == 0 || updated.Agents.List[0].Model == nil {
+		t.Fatalf("expected lead agent model to be set")
+	}
+	if got := updated.Agents.List[0].Model.Primary; got != "openai-custom" {
+		t.Fatalf("lead agent primary = %q, want %q", got, "openai-custom")
+	}
+}
+
+func TestAdminOAuthDeviceCodeLoginWithModelOverrideSwitchesManagedLeadModel(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthManagedRuntimeTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	appendOAuthTestModel(t, configPath, config.ModelConfig{
+		ModelName: "openai-device",
+		Model:     "openai/gpt-4.1",
+	})
+
+	oauthRequestDeviceCode = func(cfg auth.OAuthProviderConfig) (*auth.DeviceCodeInfo, error) {
+		return &auth.DeviceCodeInfo{
+			DeviceAuthID: "device-auth-model",
+			UserCode:     "user-code-model",
+			VerifyURL:    "https://auth.openai.com/device",
+			Interval:     3,
+		}, nil
+	}
+	oauthPollDeviceCodeOnce = func(
+		cfg auth.OAuthProviderConfig,
+		deviceAuthID, userCode string,
+	) (*auth.AuthCredential, error) {
+		return &auth.AuthCredential{
+			AccessToken: "device-token",
+			Provider:    oauthProviderOpenAI,
+		}, nil
+	}
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	loginRec := httptest.NewRecorder()
+	loginReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/login",
+		strings.NewReader(`{"provider":"openai","method":"device_code","model":"openai-device"}`),
+	)
+	loginReq.Header.Set("Authorization", "Bearer test-secret")
+	loginReq.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d, body=%s", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+
+	var loginPayload map[string]any
+	if err := json.Unmarshal(loginRec.Body.Bytes(), &loginPayload); err != nil {
+		t.Fatalf("unmarshal login payload: %v", err)
+	}
+	flowID, _ := loginPayload["flow_id"].(string)
+	if flowID == "" {
+		t.Fatalf("missing flow_id in response: %v", loginPayload)
+	}
+
+	pollRec := httptest.NewRecorder()
+	pollReq := httptest.NewRequest(http.MethodPost, "/api/oauth/flows/"+flowID+"/poll", strings.NewReader(""))
+	pollReq.Header.Set("Authorization", "Bearer test-secret")
+	mux.ServeHTTP(pollRec, pollReq)
+	if pollRec.Code != http.StatusOK {
+		t.Fatalf("poll status = %d, want %d, body=%s", pollRec.Code, http.StatusOK, pollRec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	if got := updated.Agents.Defaults.GetModelName(); got != "openai-device" {
+		t.Fatalf("agents.defaults.model_name = %q, want %q", got, "openai-device")
+	}
+	if len(updated.Agents.List) == 0 || updated.Agents.List[0].Model == nil {
+		t.Fatalf("expected lead agent model to be set")
+	}
+	if got := updated.Agents.List[0].Model.Primary; got != "openai-device" {
+		t.Fatalf("lead agent primary = %q, want %q", got, "openai-device")
+	}
+}
+
+func TestAdminOAuthTokenLoginWithModelOverrideSwitchesManagedLeadModel(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthManagedRuntimeTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	appendOAuthTestModel(t, configPath, config.ModelConfig{
+		ModelName: "openai-token",
+		Model:     "openai/gpt-4.1-mini",
+	})
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/login",
+		strings.NewReader(`{"provider":"openai","method":"token","token":"token-value","model":"openai-token"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	if got := updated.Agents.Defaults.GetModelName(); got != "openai-token" {
+		t.Fatalf("agents.defaults.model_name = %q, want %q", got, "openai-token")
+	}
+	if len(updated.Agents.List) == 0 || updated.Agents.List[0].Model == nil {
+		t.Fatalf("expected lead agent model to be set")
+	}
+	if got := updated.Agents.List[0].Model.Primary; got != "openai-token" {
+		t.Fatalf("lead agent primary = %q, want %q", got, "openai-token")
 	}
 }
 
@@ -953,7 +1192,7 @@ func TestAdminOAuthProvidersNoopWhenConfigAlreadySynced(t *testing.T) {
 	mux := http.NewServeMux()
 	h.registerRoutes(mux)
 
-	if err := h.syncProviderAuthMethod(oauthProviderOpenAI, "oauth"); err != nil {
+	if err := h.syncProviderAuthMethod(oauthProviderOpenAI, "oauth", ""); err != nil {
 		t.Fatalf("syncProviderAuthMethod error: %v", err)
 	}
 
@@ -1145,6 +1384,19 @@ func setupAdminOAuthManagedRuntimeTestEnv(t *testing.T) (string, func()) {
 		}
 	}
 	return configPath, cleanup
+}
+
+func appendOAuthTestModel(t *testing.T, configPath string, modelCfg config.ModelConfig) {
+	t.Helper()
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	cfg.ModelList = append(cfg.ModelList, modelCfg)
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig error: %v", err)
+	}
 }
 
 func resetAdminOAuthHooks(t *testing.T) {
