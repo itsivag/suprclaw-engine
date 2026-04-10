@@ -139,7 +139,19 @@ jq -n \
         model: $modelId
       }
       + (if $apiBase != "" then {api_base: $apiBase} else {} end)
-      + (if $apiKey != "" then {api_key: $apiKey} else {} end))
+      + (if $apiKey != "" then {api_key: $apiKey} else {} end)),
+      {
+        model_name: "gpt-5.4",
+        model: "openai/gpt-5.4"
+      },
+      {
+        model_name: "claude-sonnet-4.6",
+        model: "anthropic/claude-sonnet-4.6"
+      },
+      {
+        model_name: "gemini-flash",
+        model: "antigravity/gemini-3-flash"
+      }
     ],
     gateway: ({
       host: "0.0.0.0",
