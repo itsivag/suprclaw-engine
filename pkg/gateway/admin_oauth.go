@@ -127,11 +127,6 @@ type oauthRedirectCompletion struct {
 }
 
 func (h *adminHandler) handleListOAuthProviders(w http.ResponseWriter, r *http.Request) {
-	if err := h.syncStoredOAuthCredentialsToConfig(); err != nil {
-		http.Error(w, fmt.Sprintf("failed to sync oauth provider config: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	providersResp := make([]oauthProviderStatus, 0, len(oauthProviderOrder))
 
 	for _, provider := range oauthProviderOrder {
@@ -920,35 +915,51 @@ func (h *adminHandler) persistCredentialAndConfig(provider, authMethod string, c
 }
 
 func (h *adminHandler) syncProviderAuthMethod(provider, authMethod string) error {
-	return h.mutateCfg(func(cfg *config.Config) error {
+	return h.mutateCfgIfChanged(func(cfg *config.Config) (bool, error) {
+		changed := false
 		switch provider {
 		case oauthProviderOpenAI:
-			cfg.Providers.OpenAI.AuthMethod = authMethod
+			if cfg.Providers.OpenAI.AuthMethod != authMethod {
+				cfg.Providers.OpenAI.AuthMethod = authMethod
+				changed = true
+			}
 		case oauthProviderAnthropic:
-			cfg.Providers.Anthropic.AuthMethod = authMethod
+			if cfg.Providers.Anthropic.AuthMethod != authMethod {
+				cfg.Providers.Anthropic.AuthMethod = authMethod
+				changed = true
+			}
 		case oauthProviderGoogleAntigravity:
-			cfg.Providers.Antigravity.AuthMethod = authMethod
+			if cfg.Providers.Antigravity.AuthMethod != authMethod {
+				cfg.Providers.Antigravity.AuthMethod = authMethod
+				changed = true
+			}
 		default:
-			return fmt.Errorf("unsupported provider %q", provider)
+			return false, fmt.Errorf("unsupported provider %q", provider)
 		}
 
 		defaultModel := defaultModelConfigForProvider(provider, authMethod)
 		found := false
 		for i := range cfg.ModelList {
 			if modelBelongsToProvider(provider, cfg.ModelList[i].Model) {
-				cfg.ModelList[i].AuthMethod = authMethod
+				if cfg.ModelList[i].AuthMethod != authMethod {
+					cfg.ModelList[i].AuthMethod = authMethod
+					changed = true
+				}
 				found = true
 			}
 		}
 
 		if !found && authMethod != "" {
 			cfg.ModelList = append(cfg.ModelList, defaultModel)
+			changed = true
 		}
 
 		if authMethod != "" {
-			h.syncManagedAgentModelsToProvider(cfg, provider, defaultModel.ModelName)
+			if h.syncManagedAgentModelsToProvider(cfg, provider, defaultModel.ModelName) {
+				changed = true
+			}
 		}
-		return nil
+		return changed, nil
 	})
 }
 
@@ -956,16 +967,20 @@ func (h *adminHandler) syncManagedAgentModelsToProvider(
 	cfg *config.Config,
 	provider string,
 	targetModelName string,
-) {
+) bool {
+	changed := false
 	targetModelName = strings.TrimSpace(targetModelName)
 	if targetModelName == "" {
-		return
+		return false
 	}
 
 	defaultModelName := strings.TrimSpace(cfg.Agents.Defaults.GetModelName())
 	if shouldSwitchManagedModelToProvider(cfg, provider, defaultModelName) {
-		cfg.Agents.Defaults.ModelName = targetModelName
-		cfg.Agents.Defaults.Model = ""
+		if cfg.Agents.Defaults.ModelName != targetModelName || cfg.Agents.Defaults.Model != "" {
+			cfg.Agents.Defaults.ModelName = targetModelName
+			cfg.Agents.Defaults.Model = ""
+			changed = true
+		}
 	}
 
 	for i := range cfg.Agents.List {
@@ -985,10 +1000,18 @@ func (h *adminHandler) syncManagedAgentModelsToProvider(
 
 		if agent.Model == nil {
 			agent.Model = &config.AgentModelConfig{}
+			changed = true
 		}
-		agent.Model.Primary = targetModelName
-		agent.Model.Fallbacks = nil
+		if agent.Model.Primary != targetModelName {
+			agent.Model.Primary = targetModelName
+			changed = true
+		}
+		if len(agent.Model.Fallbacks) > 0 {
+			agent.Model.Fallbacks = nil
+			changed = true
+		}
 	}
+	return changed
 }
 
 func shouldSwitchManagedModelToProvider(cfg *config.Config, provider, modelName string) bool {

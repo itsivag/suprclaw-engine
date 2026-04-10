@@ -244,6 +244,26 @@ func (h *adminHandler) mutateCfg(fn func(*config.Config) error) error {
 	return config.SaveConfig(h.configPath, cfg)
 }
 
+// mutateCfgIfChanged loads config, calls fn to modify it, and only saves
+// when fn reports an effective change.
+func (h *adminHandler) mutateCfgIfChanged(fn func(*config.Config) (bool, error)) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return err
+	}
+	changed, err := fn(cfg)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	return config.SaveConfig(h.configPath, cfg)
+}
+
 // applyMergePatch applies a JSON Merge Patch to cfg in-place via round-trip.
 func applyMergePatch(cfg *config.Config, patch map[string]any) error {
 	raw, err := json.Marshal(cfg)

@@ -890,7 +890,7 @@ func TestAdminOAuthCallbackSuccessSwitchesManagedLeadModelToOpenAI(t *testing.T)
 	}
 }
 
-func TestAdminOAuthProvidersSyncStoredCredentialConfigForManagedModel(t *testing.T) {
+func TestAdminOAuthProvidersReturnsConnectedState(t *testing.T) {
 	configPath, cleanup := setupAdminOAuthManagedRuntimeTestEnv(t)
 	defer cleanup()
 	resetAdminOAuthHooks(t)
@@ -916,28 +916,77 @@ func TestAdminOAuthProvidersSyncStoredCredentialConfigForManagedModel(t *testing
 		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
-	updated, err := config.LoadConfig(configPath)
-	if err != nil {
-		t.Fatalf("LoadConfig error: %v", err)
+	var payload struct {
+		Providers []oauthProviderStatus `json:"providers"`
 	}
-	if got := updated.Agents.Defaults.GetModelName(); got != "gpt-5.4" {
-		t.Fatalf("agents.defaults.model_name = %q, want %q", got, "gpt-5.4")
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal providers response: %v", err)
 	}
-	if len(updated.Agents.List) == 0 || updated.Agents.List[0].Model == nil {
-		t.Fatalf("expected main agent model to be set")
+	if len(payload.Providers) == 0 {
+		t.Fatalf("providers list is empty")
 	}
-	if got := updated.Agents.List[0].Model.Primary; got != "gpt-5.4" {
-		t.Fatalf("main agent model primary = %q, want %q", got, "gpt-5.4")
+	if payload.Providers[0].Provider != oauthProviderOpenAI {
+		t.Fatalf("first provider = %q, want %q", payload.Providers[0].Provider, oauthProviderOpenAI)
+	}
+	if !payload.Providers[0].LoggedIn {
+		t.Fatalf("openai provider logged_in = false, want true")
+	}
+	if payload.Providers[0].Status != "connected" {
+		t.Fatalf("openai provider status = %q, want %q", payload.Providers[0].Status, "connected")
+	}
+}
+
+func TestAdminOAuthProvidersNoopWhenConfigAlreadySynced(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthManagedRuntimeTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	if err := auth.SetCredential(oauthProviderOpenAI, &auth.AuthCredential{
+		AccessToken: "access-token-sync-noop",
+		Provider:    oauthProviderOpenAI,
+		AuthMethod:  "oauth",
+	}); err != nil {
+		t.Fatalf("SetCredential error: %v", err)
 	}
 
-	hasOAuthModel := false
-	for _, modelCfg := range updated.ModelList {
-		if modelCfg.Model == "openai/gpt-5.4" && modelCfg.AuthMethod == "oauth" {
-			hasOAuthModel = true
-		}
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	if err := h.syncProviderAuthMethod(oauthProviderOpenAI, "oauth"); err != nil {
+		t.Fatalf("syncProviderAuthMethod error: %v", err)
 	}
-	if !hasOAuthModel {
-		t.Fatalf("expected openai/gpt-5.4 oauth model in config")
+
+	statBefore, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat config before providers calls: %v", err)
+	}
+
+	// Ensure mtime granularity differences are observable on filesystems with 1s resolution.
+	time.Sleep(1100 * time.Millisecond)
+
+	firstRec := httptest.NewRecorder()
+	firstReq := httptest.NewRequest(http.MethodGet, "/api/oauth/providers", nil)
+	firstReq.Header.Set("Authorization", "Bearer test-secret")
+	mux.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first providers status = %d, want %d, body=%s", firstRec.Code, http.StatusOK, firstRec.Body.String())
+	}
+
+	secondRec := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodGet, "/api/oauth/providers", nil)
+	secondReq.Header.Set("Authorization", "Bearer test-secret")
+	mux.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("second providers status = %d, want %d, body=%s", secondRec.Code, http.StatusOK, secondRec.Body.String())
+	}
+
+	statAfter, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat config after second providers call: %v", err)
+	}
+	if !statAfter.ModTime().Equal(statBefore.ModTime()) {
+		t.Fatalf("config file was rewritten on noop providers sync: before=%s after=%s", statBefore.ModTime(), statAfter.ModTime())
 	}
 }
 
