@@ -9,6 +9,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/itsivag/suprclaw/pkg/config"
@@ -34,40 +35,52 @@ var newMCPManagerRuntime = func() mcpManagerRuntime {
 }
 
 type mcpRuntime struct {
-	mu      sync.Mutex
-	manager mcpManagerRuntime
+	mu          sync.Mutex
+	initialized bool
+	managers    map[string]mcpManagerRuntime
 }
 
-func (r *mcpRuntime) takeManager() mcpManagerRuntime {
+func (r *mcpRuntime) takeManagers() map[string]mcpManagerRuntime {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	manager := r.manager
-	r.manager = nil
-	return manager
+	managers := r.managers
+	r.managers = nil
+	r.initialized = false
+	return managers
 }
 
-func (r *mcpRuntime) swapManager(manager mcpManagerRuntime) mcpManagerRuntime {
+func (r *mcpRuntime) swapState(managers map[string]mcpManagerRuntime, initialized bool) map[string]mcpManagerRuntime {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	old := r.manager
-	r.manager = manager
+	old := r.managers
+	r.managers = managers
+	r.initialized = initialized
 	return old
 }
 
 func (r *mcpRuntime) hasManager() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.manager != nil
+	return len(r.managers) > 0
 }
 
-func hasEnabledMCPServers(cfg *config.Config) bool {
-	if cfg == nil {
+func (r *mcpRuntime) hasManagerForAgent(agentID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.managers) == 0 {
 		return false
 	}
-	if !cfg.Tools.IsToolEnabled("mcp") {
-		return false
-	}
-	mcpCfg := cfg.Tools.MCP
+	_, ok := r.managers[agentID]
+	return ok
+}
+
+func (r *mcpRuntime) isInitialized() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.initialized
+}
+
+func hasEnabledMCPServers(mcpCfg config.MCPConfig) bool {
 	if mcpCfg.Servers == nil || len(mcpCfg.Servers) == 0 {
 		return false
 	}
@@ -79,11 +92,11 @@ func hasEnabledMCPServers(cfg *config.Config) bool {
 	return false
 }
 
-func (al *AgentLoop) buildAndRegisterMCPManager(
+func (al *AgentLoop) buildAndRegisterMCPManagers(
 	ctx context.Context,
 	cfg *config.Config,
 	registry *AgentRegistry,
-) (mcpManagerRuntime, error) {
+) (map[string]mcpManagerRuntime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
@@ -91,149 +104,180 @@ func (al *AgentLoop) buildAndRegisterMCPManager(
 		return nil, fmt.Errorf("registry cannot be nil")
 	}
 
-	if !cfg.Tools.IsToolEnabled("mcp") {
+	if !cfg.Tools.IsToolEnabled("mcp") && !cfg.Tools.IsToolEnabled("agent_browser") {
 		return nil, nil
 	}
 
-	mcpCfg := cfg.Tools.MCP
-	if mcpCfg.Servers == nil || len(mcpCfg.Servers) == 0 {
-		logger.WarnCF("agent", "MCP is enabled but no servers are configured, skipping MCP initialization", nil)
-		return nil, nil
-	}
-
-	if !hasEnabledMCPServers(cfg) {
-		logger.WarnCF("agent", "MCP is enabled but no valid servers are configured, skipping MCP initialization", nil)
-		return nil, nil
-	}
-
-	mcpManager := newMCPManagerRuntime()
-	defaultAgent := registry.GetDefaultAgent()
-	workspacePath := cfg.WorkspacePath()
-	if defaultAgent != nil && defaultAgent.Workspace != "" {
-		workspacePath = defaultAgent.Workspace
-	}
-
-	if err := mcpManager.LoadFromMCPConfig(ctx, mcpCfg, workspacePath); err != nil {
-		logger.WarnCF("agent", "Failed to load MCP servers, MCP tools will not be available",
-			map[string]any{
-				"error": err.Error(),
-			})
-		if closeErr := mcpManager.Close(); closeErr != nil {
-			logger.ErrorCF("agent", "Failed to close MCP manager",
-				map[string]any{
-					"error": closeErr.Error(),
-				})
-		}
-		return nil, fmt.Errorf("failed to load MCP servers: %w", err)
-	}
-
-	// Register MCP tools for all agents
-	servers := mcpManager.GetServers()
-	uniqueTools := 0
-	totalRegistrations := 0
+	managers := make(map[string]mcpManagerRuntime)
 	agentIDs := registry.ListAgentIDs()
-	agentCount := len(agentIDs)
 
-	for serverName, conn := range servers {
-		uniqueTools += len(conn.Tools)
-		for _, tool := range conn.Tools {
+	if cfg.Tools.IsToolEnabled("mcp") {
+		mcpCfg := cfg.Tools.MCP
+		if mcpCfg.Servers == nil || len(mcpCfg.Servers) == 0 {
+			logger.WarnCF("agent", "MCP is enabled but no servers are configured, skipping MCP initialization", nil)
+		} else if !hasEnabledMCPServers(mcpCfg) {
+			logger.WarnCF("agent", "MCP is enabled but no valid servers are configured, skipping MCP initialization", nil)
+		} else {
+			uniqueTools := 0
+			totalRegistrations := 0
+			connectedManagers := 0
+
 			for _, agentID := range agentIDs {
 				agent, ok := registry.GetAgent(agentID)
 				if !ok {
 					continue
 				}
+				agentCfg, err := resolveAgentConfigForRuntime(cfg, agentID)
+				if err != nil {
+					return nil, err
+				}
+				resolvedMCPConfig, err := cfg.ResolvedMCPConfigForAgent(agentCfg)
+				if err != nil {
+					return nil, fmt.Errorf("failed to resolve MCP config for agent %q: %w", agentID, err)
+				}
+				manager := newMCPManagerRuntime()
+				if err := manager.LoadFromMCPConfig(ctx, resolvedMCPConfig, agent.Workspace); err != nil {
+					logger.WarnCF("agent", "Failed to load MCP servers for agent",
+						map[string]any{
+							"agent_id": agentID,
+							"error":    err.Error(),
+						})
+					if closeErr := manager.Close(); closeErr != nil {
+						logger.ErrorCF("agent", "Failed to close MCP manager",
+							map[string]any{
+								"agent_id": agentID,
+								"error":    closeErr.Error(),
+							})
+					}
+					return nil, fmt.Errorf("failed to load MCP servers for agent %q: %w", agentID, err)
+				}
+				managers[agentID] = manager
+				connectedManagers++
 
-				mcpTool := tools.NewMCPTool(mcpManager, serverName, tool)
-
-				if cfg.Tools.MCP.Discovery.Enabled {
-					agent.Tools.RegisterHidden(mcpTool)
-				} else {
-					agent.Tools.Register(mcpTool)
+				servers := manager.GetServers()
+				for serverName, conn := range servers {
+					uniqueTools += len(conn.Tools)
+					for _, tool := range conn.Tools {
+						mcpTool := tools.NewMCPTool(manager, serverName, tool)
+						if resolvedMCPConfig.Discovery.Enabled {
+							agent.Tools.RegisterHidden(mcpTool)
+						} else {
+							agent.Tools.Register(mcpTool)
+						}
+						totalRegistrations++
+						logger.DebugCF("agent", "Registered MCP tool",
+							map[string]any{
+								"agent_id": agentID,
+								"server":   serverName,
+								"tool":     tool.Name,
+								"name":     mcpTool.Name(),
+							})
+					}
 				}
 
-				totalRegistrations++
-				logger.DebugCF("agent", "Registered MCP tool",
-					map[string]any{
-						"agent_id": agentID,
-						"server":   serverName,
-						"tool":     tool.Name,
-						"name":     mcpTool.Name(),
-					})
+				if resolvedMCPConfig.Enabled && resolvedMCPConfig.Discovery.Enabled {
+					useBM25 := resolvedMCPConfig.Discovery.UseBM25
+					useRegex := resolvedMCPConfig.Discovery.UseRegex
+					if !useBM25 && !useRegex {
+						if closeErr := manager.Close(); closeErr != nil {
+							logger.ErrorCF("agent", "Failed to close MCP manager",
+								map[string]any{
+									"agent_id": agentID,
+									"error":    closeErr.Error(),
+								})
+						}
+						return nil, fmt.Errorf(
+							"tool discovery is enabled but neither 'use_bm25' nor 'use_regex' is set to true in the configuration",
+						)
+					}
+					maxSearchResults := resolvedMCPConfig.Discovery.MaxSearchResults
+					if maxSearchResults <= 0 {
+						maxSearchResults = 5
+					}
+					if useRegex {
+						agent.Tools.Register(tools.NewRegexSearchTool(agent.Tools, maxSearchResults))
+					}
+					if useBM25 {
+						agent.Tools.Register(tools.NewBM25SearchTool(agent.Tools, maxSearchResults))
+					}
+				}
 			}
+
+			logger.InfoCF("agent", "MCP tools registered successfully",
+				map[string]any{
+					"manager_count":       connectedManagers,
+					"unique_tools":        uniqueTools,
+					"total_registrations": totalRegistrations,
+					"agent_count":         len(agentIDs),
+				})
 		}
 	}
-	logger.InfoCF("agent", "MCP tools registered successfully",
-		map[string]any{
-			"server_count":        len(servers),
-			"unique_tools":        uniqueTools,
-			"total_registrations": totalRegistrations,
-			"agent_count":         agentCount,
-		})
 
-	// Initializes Discovery Tools only if enabled by configuration.
-	if cfg.Tools.MCP.Enabled && cfg.Tools.MCP.Discovery.Enabled {
-		useBM25 := cfg.Tools.MCP.Discovery.UseBM25
-		useRegex := cfg.Tools.MCP.Discovery.UseRegex
-
-		// Fail fast: If discovery is enabled but no search method is turned on.
-		if !useBM25 && !useRegex {
-			if closeErr := mcpManager.Close(); closeErr != nil {
-				logger.ErrorCF("agent", "Failed to close MCP manager",
-					map[string]any{
-						"error": closeErr.Error(),
-					})
-			}
-			return nil, fmt.Errorf(
-				"tool discovery is enabled but neither 'use_bm25' nor 'use_regex' is set to true in the configuration",
-			)
-		}
-
-		maxSearchResults := cfg.Tools.MCP.Discovery.MaxSearchResults
-		if maxSearchResults <= 0 {
-			maxSearchResults = 5 // Default value.
-		}
-
-		logger.InfoCF("agent", "Initializing tool discovery", map[string]any{
-			"bm25": useBM25, "regex": useRegex, "max_results": maxSearchResults,
-		})
-
+	if cfg.Tools.IsToolEnabled("agent_browser") {
+		totalTools := 0
 		for _, agentID := range agentIDs {
 			agent, ok := registry.GetAgent(agentID)
 			if !ok {
 				continue
 			}
-
-			if useRegex {
-				agent.Tools.Register(tools.NewRegexSearchTool(agent.Tools, maxSearchResults))
+			agentCfg, err := resolveAgentConfigForRuntime(cfg, agentID)
+			if err != nil {
+				return nil, err
 			}
-			if useBM25 {
-				agent.Tools.Register(tools.NewBM25SearchTool(agent.Tools, maxSearchResults))
+			agentBrowserTools, err := tools.NewAgentBrowserMCPTools(cfg, agentCfg)
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize agent browser tools for agent %q: %w", agentID, err)
 			}
+			for _, agentBrowserTool := range agentBrowserTools {
+				agent.Tools.Register(agentBrowserTool)
+				totalTools++
+			}
+		}
+		if totalTools > 0 {
+			logger.InfoCF("agent", "Agent Browser MCP tools registered successfully",
+				map[string]any{
+					"tool_registrations": totalTools,
+					"agent_count":        len(agentIDs),
+				})
 		}
 	}
 
-	return mcpManager, nil
+	return managers, nil
 }
 
 // ensureMCPInitialized loads MCP servers/tools for the current config and
 // registry if MCP has not been initialized for the active runtime state yet.
 func (al *AgentLoop) ensureMCPInitialized(ctx context.Context) error {
 	cfg := al.GetConfig()
-	if !cfg.Tools.IsToolEnabled("mcp") {
+	if !cfg.Tools.IsToolEnabled("mcp") && !cfg.Tools.IsToolEnabled("agent_browser") {
 		return nil
 	}
 	registry := al.GetRegistry()
 
 	al.mcp.mu.Lock()
 	defer al.mcp.mu.Unlock()
-	if al.mcp.manager != nil {
+	if al.mcp.initialized {
 		return nil
 	}
 
-	manager, err := al.buildAndRegisterMCPManager(ctx, cfg, registry)
+	managers, err := al.buildAndRegisterMCPManagers(ctx, cfg, registry)
 	if err != nil {
 		return err
 	}
-	al.mcp.manager = manager
+	al.mcp.managers = managers
+	al.mcp.initialized = true
 	return nil
+}
+
+func resolveAgentConfigForRuntime(cfg *config.Config, agentID string) (config.AgentConfig, error) {
+	if cfg == nil {
+		return config.AgentConfig{}, fmt.Errorf("config cannot be nil")
+	}
+	if agentCfg, ok := cfg.FindAgentConfig(agentID); ok {
+		return *agentCfg, nil
+	}
+	if strings.TrimSpace(agentID) == "" {
+		return config.AgentConfig{}, fmt.Errorf("agent id is required")
+	}
+	return config.AgentConfig{ID: agentID}, nil
 }

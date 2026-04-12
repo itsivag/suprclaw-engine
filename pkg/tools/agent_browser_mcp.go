@@ -50,10 +50,13 @@ type AgentBrowserMCPOptions struct {
 }
 
 // NewAgentBrowserMCPTools registers strict Agent Browser tools only.
-func NewAgentBrowserMCPTools(cfg *config.Config) []Tool {
-	opts, ok := ResolveAgentBrowserMCPOptions(cfg)
+func NewAgentBrowserMCPTools(cfg *config.Config, agentCfg config.AgentConfig) ([]Tool, error) {
+	opts, ok, err := ResolveAgentBrowserMCPOptions(cfg, agentCfg)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	client := &http.Client{Timeout: opts.Timeout}
 	return []Tool{
@@ -72,23 +75,29 @@ func NewAgentBrowserMCPTools(cfg *config.Config) []Tool {
 			headers:     cloneStringMap(opts.Headers),
 			client:      client,
 		},
-	}
+	}, nil
 }
 
 // ResolveAgentBrowserMCPOptions resolves connectivity details for Agent Browser actions.
 // This is a hard V2 migration path: Agent Browser tools are registered only when
 // tools.mcp.servers.agent_browser.url is configured and valid.
-func ResolveAgentBrowserMCPOptions(cfg *config.Config) (AgentBrowserMCPOptions, bool) {
+func ResolveAgentBrowserMCPOptions(cfg *config.Config, agentCfg config.AgentConfig) (AgentBrowserMCPOptions, bool, error) {
 	if cfg == nil || !cfg.Tools.AgentBrowser.Enabled {
-		return AgentBrowserMCPOptions{}, false
+		return AgentBrowserMCPOptions{}, false, nil
 	}
-	server, ok := cfg.Tools.MCP.Servers["agent_browser"]
-	if !ok || strings.TrimSpace(server.URL) == "" {
-		return AgentBrowserMCPOptions{}, false
+	server, err := cfg.ResolvedMCPServerConfigForAgent("agent_browser", agentCfg)
+	if err != nil {
+		if _, ok := cfg.Tools.MCP.Servers["agent_browser"]; !ok {
+			return AgentBrowserMCPOptions{}, false, nil
+		}
+		return AgentBrowserMCPOptions{}, false, err
+	}
+	if strings.TrimSpace(server.URL) == "" {
+		return AgentBrowserMCPOptions{}, false, fmt.Errorf("tools.mcp.servers.agent_browser.url is required")
 	}
 	endpointURL := normalizeAgentBrowserMCPEndpointURL(server.URL)
 	if endpointURL == "" {
-		return AgentBrowserMCPOptions{}, false
+		return AgentBrowserMCPOptions{}, false, fmt.Errorf("tools.mcp.servers.agent_browser.url must resolve to /api/mcp/agent-browser")
 	}
 	headers := map[string]string{
 		"Content-Type": "application/json",
@@ -105,7 +114,7 @@ func ResolveAgentBrowserMCPOptions(cfg *config.Config) (AgentBrowserMCPOptions, 
 		EndpointURL: endpointURL,
 		Headers:     headers,
 		Timeout:     defaultAgentBrowserMCPTimeout,
-	}, true
+	}, true, nil
 }
 
 func normalizeAgentBrowserMCPEndpointURL(raw string) string {

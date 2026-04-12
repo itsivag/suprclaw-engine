@@ -140,8 +140,9 @@ func newTestConfigWithEnabledMCP(workspace string) *config.Config {
 				},
 				Servers: map[string]config.MCPServerConfig{
 					"supabase": {
-						Enabled: true,
-						Command: "fake-mcp-command",
+						Enabled:  true,
+						AuthMode: config.MCPAuthModeStaticHeaders,
+						Command:  "fake-mcp-command",
 					},
 				},
 			},
@@ -155,6 +156,7 @@ func newTestReloadConfigWithWriter(workspace string) *config.Config {
 		{
 			ID:        "main",
 			Default:   true,
+			Scope:     config.AgentScopeWorkforce,
 			Workspace: workspace,
 			Model: &config.AgentModelConfig{
 				Primary: "test-model",
@@ -162,6 +164,7 @@ func newTestReloadConfigWithWriter(workspace string) *config.Config {
 		},
 		{
 			ID:        "writer",
+			Scope:     config.AgentScopeWorkforce,
 			Workspace: filepath.Join(workspace, "writer"),
 			Model: &config.AgentModelConfig{
 				Primary: "test-model",
@@ -3490,7 +3493,8 @@ func TestReloadProviderAndConfig_RebindsMCPTools(t *testing.T) {
 
 	firstManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
 	secondManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
-	managerQueue := []mcpManagerRuntime{firstManager, secondManager}
+	thirdManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	managerQueue := []mcpManagerRuntime{firstManager, secondManager, thirdManager}
 	oldFactory := newMCPManagerRuntime
 	newMCPManagerRuntime = func() mcpManagerRuntime {
 		if len(managerQueue) == 0 {
@@ -3541,6 +3545,9 @@ func TestReloadProviderAndConfig_RebindsMCPTools(t *testing.T) {
 	if secondManager.closeCalls != 0 {
 		t.Fatalf("expected second MCP manager to remain active during test, got close count %d", secondManager.closeCalls)
 	}
+	if thirdManager.closeCalls != 0 {
+		t.Fatalf("expected third MCP manager to remain active during test, got close count %d", thirdManager.closeCalls)
+	}
 }
 
 func TestReloadProviderAndConfig_RepeatedReloadsCloseOnlySupersededManagers(t *testing.T) {
@@ -3554,7 +3561,9 @@ func TestReloadProviderAndConfig_RepeatedReloadsCloseOnlySupersededManagers(t *t
 	firstManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
 	secondManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
 	thirdManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
-	managerQueue := []mcpManagerRuntime{firstManager, secondManager, thirdManager}
+	fourthManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	fifthManager := newFakeLoopMCPManagerWithSupabaseTool("execute_sql")
+	managerQueue := []mcpManagerRuntime{firstManager, secondManager, thirdManager, fourthManager, fifthManager}
 	oldFactory := newMCPManagerRuntime
 	newMCPManagerRuntime = func() mcpManagerRuntime {
 		if len(managerQueue) == 0 {
@@ -3600,8 +3609,14 @@ func TestReloadProviderAndConfig_RepeatedReloadsCloseOnlySupersededManagers(t *t
 	if secondManager.closeCalls != 1 {
 		t.Fatalf("expected second MCP manager to be closed once, got %d", secondManager.closeCalls)
 	}
-	if thirdManager.closeCalls != 0 {
-		t.Fatalf("expected third MCP manager to remain active, got close count %d", thirdManager.closeCalls)
+	if thirdManager.closeCalls != 1 {
+		t.Fatalf("expected third MCP manager to be closed once, got %d", thirdManager.closeCalls)
+	}
+	if fourthManager.closeCalls != 0 {
+		t.Fatalf("expected fourth MCP manager to remain active, got close count %d", fourthManager.closeCalls)
+	}
+	if fifthManager.closeCalls != 0 {
+		t.Fatalf("expected fifth MCP manager to remain active, got close count %d", fifthManager.closeCalls)
 	}
 }
 

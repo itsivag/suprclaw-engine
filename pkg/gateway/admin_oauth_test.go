@@ -1565,12 +1565,14 @@ func setupAdminOAuthManagedRuntimeTestEnv(t *testing.T) (string, func()) {
 		{
 			ID:      "main",
 			Default: true,
+			Scope:   config.AgentScopeWorkforce,
 			Model: &config.AgentModelConfig{
 				Primary: "suprclaw-fast",
 			},
 		},
 		{
-			ID: "content-writer",
+			ID:    "content-writer",
+			Scope: config.AgentScopeWorkforce,
 			Model: &config.AgentModelConfig{
 				Primary: "suprclaw-default",
 			},

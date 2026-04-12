@@ -60,6 +60,7 @@ type upsertAgentRequest struct {
 	AgentID       string `json:"agentId"`
 	WorkspacePath string `json:"workspacePath"`
 	Model         string `json:"model"`
+	Scope         string `json:"scope"`
 	DefaultAgent  bool   `json:"defaultAgent"`
 }
 
@@ -104,6 +105,10 @@ func (h *adminHandler) upsertAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model contains invalid characters"})
 		return
 	}
+	if strings.TrimSpace(req.Scope) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope is required"})
+		return
+	}
 
 	var result *config.AgentConfig
 	created := false
@@ -111,6 +116,7 @@ func (h *adminHandler) upsertAgent(w http.ResponseWriter, r *http.Request) {
 		entry := config.AgentConfig{
 			ID:        req.AgentID,
 			Default:   req.DefaultAgent,
+			Scope:     config.AgentScope(strings.TrimSpace(req.Scope)),
 			Workspace: req.WorkspacePath,
 		}
 		if req.Model != "" {
@@ -756,16 +762,25 @@ func copyDir(src, dst string) error {
 // --- POST /api/admin/mcp/configure ---
 
 func (h *adminHandler) mcpConfigure(w http.ResponseWriter, r *http.Request) {
-	var servers map[string]config.MCPServerConfig
-	if err := json.NewDecoder(r.Body).Decode(&servers); err != nil {
+	var req struct {
+		Servers     map[string]config.MCPServerConfig `json:"servers"`
+		RuntimeAuth *config.MCPRuntimeAuthConfig      `json:"runtimeAuth"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
 	if err := h.mutateCfg(func(cfg *config.Config) error {
-		cfg.Tools.MCP.Servers = servers
+		cfg.Tools.MCP.Servers = req.Servers
+		cfg.Tools.MCP.RuntimeAuth = req.RuntimeAuth
+		if err := cfg.Validate(); err != nil {
+			return &adminBadRequestError{msg: err.Error()}
+		}
 		return nil
 	}); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeAdminConfigMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

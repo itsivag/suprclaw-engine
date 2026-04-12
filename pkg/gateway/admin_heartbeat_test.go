@@ -258,7 +258,10 @@ func minimalAdminConfig(workspace string) *config.Config {
 				MaxTokens:         4096,
 				MaxToolIterations: 10,
 			},
-			List: []config.AgentConfig{{ID: "main", Default: true}, {ID: "writer"}},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
+			},
 		},
 		ModelList: []config.ModelConfig{
 			{

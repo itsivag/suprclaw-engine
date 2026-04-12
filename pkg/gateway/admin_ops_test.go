@@ -30,7 +30,7 @@ func TestAdminUpsertAgent_SyncsRuntimeRegistry(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
 			},
 		},
 	}
@@ -43,7 +43,7 @@ func TestAdminUpsertAgent_SyncsRuntimeRegistry(t *testing.T) {
 	mux := http.NewServeMux()
 	h.registerRoutes(mux)
 
-	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer","model":"test-model"}`)
+	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer","model":"test-model","scope":"workforce"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-secret")
 	rec := httptest.NewRecorder()
@@ -76,6 +76,46 @@ func TestAdminUpsertAgent_SyncsRuntimeRegistry(t *testing.T) {
 	}
 }
 
+func TestAdminUpsertAgent_RejectsMissingScope(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+			},
+		},
+	}
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{configPath: cfgPath, secret: "test-secret", agentLoop: loop}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer","model":"test-model"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "scope is required") {
+		t.Fatalf("expected missing scope error, got body=%s", rec.Body.String())
+	}
+}
+
 func TestAdminWakeAgent_PassesPathAgentIDToCLI(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{
@@ -87,8 +127,8 @@ func TestAdminWakeAgent_PassesPathAgentIDToCLI(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
-				{ID: "writer"},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
 			},
 		},
 	}
@@ -135,6 +175,46 @@ func TestAdminWakeAgent_PassesPathAgentIDToCLI(t *testing.T) {
 	t.Fatalf("did not find --agent-id value in args: %v", capturedArgs)
 }
 
+func TestAdminMcpConfigure_RejectsLegacyFlatPayload(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+			},
+		},
+	}
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{configPath: cfgPath, secret: "test-secret", agentLoop: loop}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"memory":{"enabled":true,"auth_mode":"static_headers","command":"fake"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/mcp/configure", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "unknown field") {
+		t.Fatalf("expected unknown field error, got body=%s", rec.Body.String())
+	}
+}
+
 func TestAdminWakeAgent_UnknownAgentReturnsNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{
@@ -146,7 +226,7 @@ func TestAdminWakeAgent_UnknownAgentReturnsNotFound(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
 			},
 		},
 	}
@@ -192,8 +272,8 @@ func TestAdminDeleteAgent_SyncsRuntimeRegistry(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
-				{ID: "writer"},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
 			},
 		},
 		Heartbeat: config.HeartbeatConfig{
@@ -257,8 +337,8 @@ func TestAdminUpsertAgent_UpdateDoesNotDuplicateHeartbeatJob(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
-				{ID: "writer"},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
 			},
 		},
 		Heartbeat: config.HeartbeatConfig{
@@ -278,7 +358,7 @@ func TestAdminUpsertAgent_UpdateDoesNotDuplicateHeartbeatJob(t *testing.T) {
 	mux := http.NewServeMux()
 	h.registerRoutes(mux)
 
-	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer-updated","model":"test-model"}`)
+	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer-updated","model":"test-model","scope":"workforce"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-secret")
 	rec := httptest.NewRecorder()
@@ -315,8 +395,8 @@ func TestAdminDeleteAgent_DisablesHeartbeatWhenLastJobRemoved(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
-				{ID: "writer"},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
 			},
 		},
 		Heartbeat: config.HeartbeatConfig{
@@ -372,8 +452,8 @@ func TestAdminDeleteAgent_RejectsDeletingMain(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
-				{ID: "writer"},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
 			},
 		},
 	}
@@ -419,7 +499,7 @@ func TestAdminUpsertAgent_RuntimeSyncFailurePersistsHeartbeatAutoSync(t *testing
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
 			},
 		},
 	}
@@ -431,7 +511,7 @@ func TestAdminUpsertAgent_RuntimeSyncFailurePersistsHeartbeatAutoSync(t *testing
 	mux := http.NewServeMux()
 	h.registerRoutes(mux)
 
-	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer","model":"test-model"}`)
+	body := []byte(`{"agentId":"writer","workspacePath":"` + tmpDir + `/workspace-writer","model":"test-model","scope":"workforce"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-secret")
 	rec := httptest.NewRecorder()
@@ -468,8 +548,8 @@ func TestVerifyAgentRegistrySync_DetectsStaleAgents(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
-				{ID: "writer"},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
 			},
 		},
 	}
@@ -479,7 +559,7 @@ func TestVerifyAgentRegistrySync_DetectsStaleAgents(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: runtimeCfg.Agents.Defaults,
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
 			},
 		},
 	}
@@ -502,7 +582,7 @@ func TestAdminReloadRuntime_ReloadsRegistryFromConfig(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
 			},
 		},
 	}
@@ -516,8 +596,8 @@ func TestAdminReloadRuntime_ReloadsRegistryFromConfig(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: initialCfg.Agents.Defaults,
 			List: []config.AgentConfig{
-				{ID: "main", Default: true},
-				{ID: "writer"},
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
 			},
 		},
 	}

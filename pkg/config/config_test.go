@@ -249,6 +249,46 @@ func TestResolveAgentWorkspaceByID_ConfiguredAgents(t *testing.T) {
 	}
 }
 
+func TestValidate_RejectsMissingAgentScope(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.List = []AgentConfig{
+		{ID: "main", Default: true},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected Validate to reject missing agent scope")
+	}
+	if !strings.Contains(err.Error(), "agents.list[0].scope is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_RejectsRuntimeScopedMCPWithoutRuntimeAuth(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agents.List = []AgentConfig{
+		{ID: "main", Default: true, Scope: AgentScopeWorkforce},
+	}
+	cfg.Tools.MCP.Enabled = true
+	cfg.Tools.MCP.Servers = map[string]MCPServerConfig{
+		"memory": {
+			Enabled:  true,
+			AuthMode: MCPAuthModeRuntimeScoped,
+			Type:     "http",
+			URL:      "https://example.com/api/mcp/memory",
+		},
+	}
+	cfg.Tools.MCP.RuntimeAuth = nil
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected Validate to reject missing runtime_auth")
+	}
+	if !strings.Contains(err.Error(), "tools.mcp.runtime_auth is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // TestDefaultConfig_Model verifies model is set
 func TestDefaultConfig_Model(t *testing.T) {
 	cfg := DefaultConfig()
@@ -757,7 +797,7 @@ func TestLoadConfig_HeartbeatMultiJobValid(t *testing.T) {
 	configJSON := `{
   "agents": {
     "defaults": {"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20},
-    "list": [{"id":"main"},{"id":"ops"}]
+    "list": [{"id":"main","scope":"workforce"},{"id":"ops","scope":"workforce"}]
   },
   "timezone": "UTC",
   "heartbeat": {
@@ -933,7 +973,7 @@ func TestLoadConfig_HeartbeatRejectsInvalidStates(t *testing.T) {
 			configJSON := `{
   "agents": {
     "defaults":{"workspace":"./workspace","model":"gpt4","max_tokens":8192,"max_tool_iterations":20},
-    "list": [{"id":"main"}]
+    "list": [{"id":"main","scope":"workforce"}]
   },
   "timezone": ` + tc.timezone + `,
   "heartbeat": ` + tc.heartbeat + `,

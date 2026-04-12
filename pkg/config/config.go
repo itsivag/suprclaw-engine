@@ -294,11 +294,28 @@ type AgentConfig struct {
 	ID        string            `json:"id"`
 	Default   bool              `json:"default,omitempty"`
 	Name      string            `json:"name,omitempty"`
+	Scope     AgentScope        `json:"scope"`
 	Workspace string            `json:"workspace,omitempty"`
 	Model     *AgentModelConfig `json:"model,omitempty"`
 	Skills    []string          `json:"skills,omitempty"`
 	Tools     *AgentToolsConfig `json:"tools,omitempty"`
 	Subagents *SubagentsConfig  `json:"subagents,omitempty"`
+}
+
+type AgentScope string
+
+const (
+	AgentScopeWorkforce AgentScope = "workforce"
+	AgentScopeSupra     AgentScope = "supra"
+)
+
+func (s AgentScope) Validate() error {
+	switch s {
+	case AgentScopeWorkforce, AgentScopeSupra:
+		return nil
+	default:
+		return fmt.Errorf("must be one of %q or %q", AgentScopeWorkforce, AgentScopeSupra)
+	}
 }
 
 type AgentToolsConfig struct {
@@ -856,6 +873,8 @@ type ClawHubRegistryConfig struct {
 type MCPServerConfig struct {
 	// Enabled indicates whether this MCP server is active
 	Enabled bool `json:"enabled"`
+	// AuthMode controls how HTTP/SSE authentication is applied for this server
+	AuthMode MCPAuthMode `json:"auth_mode"`
 	// Command is the executable to run (e.g., "npx", "python", "/path/to/server")
 	Command string `json:"command"`
 	// Args are the arguments to pass to the command
@@ -872,10 +891,53 @@ type MCPServerConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
+type MCPAuthMode string
+
+const (
+	MCPAuthModeStaticHeaders MCPAuthMode = "static_headers"
+	MCPAuthModeRuntimeScoped MCPAuthMode = "runtime_scoped"
+)
+
+func (m MCPAuthMode) Validate() error {
+	switch m {
+	case MCPAuthModeStaticHeaders, MCPAuthModeRuntimeScoped:
+		return nil
+	default:
+		return fmt.Errorf("must be one of %q or %q", MCPAuthModeStaticHeaders, MCPAuthModeRuntimeScoped)
+	}
+}
+
+type MCPRuntimeAuthConfig struct {
+	ProjectRef           string `json:"project_ref"`
+	RuntimeSecret        string `json:"runtime_secret"`
+	WorkforceScopeSecret string `json:"workforce_scope_secret"`
+	SupraScopeSecret     string `json:"supra_scope_secret"`
+}
+
+func (c *MCPRuntimeAuthConfig) Validate() error {
+	if c == nil {
+		return fmt.Errorf("is required")
+	}
+	if strings.TrimSpace(c.ProjectRef) == "" {
+		return fmt.Errorf("project_ref is required")
+	}
+	if strings.TrimSpace(c.RuntimeSecret) == "" {
+		return fmt.Errorf("runtime_secret is required")
+	}
+	if strings.TrimSpace(c.WorkforceScopeSecret) == "" {
+		return fmt.Errorf("workforce_scope_secret is required")
+	}
+	if strings.TrimSpace(c.SupraScopeSecret) == "" {
+		return fmt.Errorf("supra_scope_secret is required")
+	}
+	return nil
+}
+
 // MCPConfig defines configuration for all MCP servers
 type MCPConfig struct {
-	ToolConfig `                    envPrefix:"SUPRCLAW_TOOLS_MCP_"`
-	Discovery  ToolDiscoveryConfig `                                json:"discovery"`
+	ToolConfig  `                    envPrefix:"SUPRCLAW_TOOLS_MCP_"`
+	Discovery   ToolDiscoveryConfig   `                                json:"discovery"`
+	RuntimeAuth *MCPRuntimeAuthConfig `json:"runtime_auth,omitempty"`
 	// Servers is a map of server name to server configuration
 	Servers map[string]MCPServerConfig `json:"servers,omitempty"`
 }
@@ -973,8 +1035,26 @@ func (c *Config) validateAgentsConfig() error {
 	if err := c.validateMainAgentInvariant(); err != nil {
 		return err
 	}
+	if err := c.validateAgentScopes(); err != nil {
+		return err
+	}
 	if err := c.validateHeartbeatConfig(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (c *Config) validateAgentScopes() error {
+	for i, agentCfg := range c.Agents.List {
+		if strings.TrimSpace(agentCfg.ID) == "" {
+			return fmt.Errorf("agents.list[%d].id is required", i)
+		}
+		if strings.TrimSpace(string(agentCfg.Scope)) == "" {
+			return fmt.Errorf("agents.list[%d].scope is required", i)
+		}
+		if err := agentCfg.Scope.Validate(); err != nil {
+			return fmt.Errorf("agents.list[%d].scope %q %w", i, agentCfg.Scope, err)
+		}
 	}
 	return nil
 }
@@ -1325,7 +1405,150 @@ func (c *Config) Validate() error {
 	if err := c.validateAgentsConfig(); err != nil {
 		return err
 	}
+	if err := c.validateMCPConfig(); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (c *Config) validateMCPConfig() error {
+	var runtimeScopedServers []string
+	for name, serverCfg := range c.Tools.MCP.Servers {
+		if strings.TrimSpace(string(serverCfg.AuthMode)) == "" {
+			return fmt.Errorf("tools.mcp.servers.%s.auth_mode is required", name)
+		}
+		if err := serverCfg.AuthMode.Validate(); err != nil {
+			return fmt.Errorf("tools.mcp.servers.%s.auth_mode %q %w", name, serverCfg.AuthMode, err)
+		}
+		if serverCfg.AuthMode != MCPAuthModeRuntimeScoped {
+			continue
+		}
+		runtimeScopedServers = append(runtimeScopedServers, name)
+		transportType := serverCfg.TransportType()
+		if transportType != "http" && transportType != "sse" {
+			return fmt.Errorf(
+				"tools.mcp.servers.%s.auth_mode %q requires HTTP or SSE transport, got %q",
+				name,
+				serverCfg.AuthMode,
+				transportType,
+			)
+		}
+		if strings.TrimSpace(serverCfg.URL) == "" {
+			return fmt.Errorf("tools.mcp.servers.%s.url is required for runtime_scoped transport", name)
+		}
+	}
+	if len(runtimeScopedServers) == 0 {
+		if c.Tools.MCP.RuntimeAuth != nil {
+			if err := c.Tools.MCP.RuntimeAuth.Validate(); err != nil {
+				return fmt.Errorf("tools.mcp.runtime_auth %w", err)
+			}
+		}
+		return nil
+	}
+	if err := c.Tools.MCP.RuntimeAuth.Validate(); err != nil {
+		return fmt.Errorf("tools.mcp.runtime_auth %w", err)
+	}
+	return nil
+}
+
+func (c *Config) FindAgentConfig(agentID string) (*AgentConfig, bool) {
+	normalized := strings.TrimSpace(strings.ToLower(agentID))
+	for i := range c.Agents.List {
+		if strings.TrimSpace(strings.ToLower(c.Agents.List[i].ID)) == normalized {
+			return &c.Agents.List[i], true
+		}
+	}
+	return nil, false
+}
+
+func (c *Config) ResolvedMCPConfigForAgent(agentCfg AgentConfig) (MCPConfig, error) {
+	resolved := c.Tools.MCP
+	if len(c.Tools.MCP.Servers) == 0 {
+		return resolved, nil
+	}
+	resolved.Servers = make(map[string]MCPServerConfig, len(c.Tools.MCP.Servers))
+	for name := range c.Tools.MCP.Servers {
+		serverCfg, err := c.ResolvedMCPServerConfigForAgent(name, agentCfg)
+		if err != nil {
+			return MCPConfig{}, err
+		}
+		resolved.Servers[name] = serverCfg
+	}
+	return resolved, nil
+}
+
+func (c *Config) ResolvedMCPServerConfigForAgent(serverName string, agentCfg AgentConfig) (MCPServerConfig, error) {
+	serverCfg, ok := c.Tools.MCP.Servers[serverName]
+	if !ok {
+		return MCPServerConfig{}, fmt.Errorf("tools.mcp.servers.%s is not configured", serverName)
+	}
+	resolved := serverCfg
+	resolved.Headers = cloneStringMap(serverCfg.Headers)
+	if strings.TrimSpace(string(resolved.AuthMode)) == "" {
+		return MCPServerConfig{}, fmt.Errorf("tools.mcp.servers.%s.auth_mode is required", serverName)
+	}
+	if err := resolved.AuthMode.Validate(); err != nil {
+		return MCPServerConfig{}, fmt.Errorf("tools.mcp.servers.%s.auth_mode %q %w", serverName, resolved.AuthMode, err)
+	}
+	if resolved.AuthMode != MCPAuthModeRuntimeScoped {
+		return resolved, nil
+	}
+	if err := c.Tools.MCP.RuntimeAuth.Validate(); err != nil {
+		return MCPServerConfig{}, fmt.Errorf("tools.mcp.runtime_auth %w", err)
+	}
+	agentID := strings.TrimSpace(agentCfg.ID)
+	if agentID == "" {
+		return MCPServerConfig{}, fmt.Errorf("agent id is required for runtime-scoped MCP server %q", serverName)
+	}
+	if strings.TrimSpace(string(agentCfg.Scope)) == "" {
+		return MCPServerConfig{}, fmt.Errorf("agent %q scope is required for runtime-scoped MCP server %q", agentID, serverName)
+	}
+	if err := agentCfg.Scope.Validate(); err != nil {
+		return MCPServerConfig{}, fmt.Errorf("agent %q scope %q %w", agentID, agentCfg.Scope, err)
+	}
+	if resolved.Headers == nil {
+		resolved.Headers = make(map[string]string, 5)
+	}
+	resolved.Headers["Authorization"] = "Bearer " + strings.TrimSpace(c.Tools.MCP.RuntimeAuth.RuntimeSecret)
+	resolved.Headers["X-Suprclaw-Project-Ref"] = strings.TrimSpace(c.Tools.MCP.RuntimeAuth.ProjectRef)
+	resolved.Headers["X-Suprclaw-Agent-Id"] = agentID
+	resolved.Headers["X-Suprclaw-Mcp-Scope-Secret"] = c.Tools.MCP.RuntimeAuth.ScopeSecretFor(agentCfg.Scope)
+	return resolved, nil
+}
+
+func (c MCPServerConfig) TransportType() string {
+	if strings.TrimSpace(c.Type) != "" {
+		return strings.TrimSpace(c.Type)
+	}
+	if strings.TrimSpace(c.URL) != "" {
+		return "sse"
+	}
+	if strings.TrimSpace(c.Command) != "" {
+		return "stdio"
+	}
+	return ""
+}
+
+func (c *MCPRuntimeAuthConfig) ScopeSecretFor(scope AgentScope) string {
+	switch scope {
+	case AgentScopeWorkforce:
+		return strings.TrimSpace(c.WorkforceScopeSecret)
+	case AgentScopeSupra:
+		return strings.TrimSpace(c.SupraScopeSecret)
+	default:
+		return ""
+	}
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
 
 func MergeAPIKeys(apiKey string, apiKeys []string) []string {

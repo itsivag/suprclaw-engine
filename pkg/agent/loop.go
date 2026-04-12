@@ -212,12 +212,6 @@ func registerSharedTools(
 			}
 		}
 
-		if cfg.Tools.IsToolEnabled("agent_browser") {
-			for _, agentBrowserTool := range tools.NewAgentBrowserMCPTools(cfg) {
-				agent.Tools.Register(agentBrowserTool)
-			}
-		}
-
 		// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
 		if cfg.Tools.IsToolEnabled("i2c") {
 			agent.Tools.Register(tools.NewI2CTool())
@@ -474,13 +468,14 @@ func (al *AgentLoop) Stop() {
 
 // Close releases resources held by agent session stores. Call after Stop.
 func (al *AgentLoop) Close() {
-	mcpManager := al.mcp.takeManager()
+	mcpManagers := al.mcp.takeManagers()
 
-	if mcpManager != nil {
+	for agentID, mcpManager := range mcpManagers {
 		if err := mcpManager.Close(); err != nil {
 			logger.ErrorCF("agent", "Failed to close MCP manager",
 				map[string]any{
-					"error": err.Error(),
+					"agent_id": agentID,
+					"error":    err.Error(),
 				})
 		}
 	}
@@ -562,15 +557,15 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 
 	// MCP tools are bound to the active registry and must be rebuilt on every
 	// reload to avoid stale/missing MCP tool registrations after config changes.
-	newMCPManager, err := al.buildAndRegisterMCPManager(ctx, cfg, registry)
+	newMCPManagers, err := al.buildAndRegisterMCPManagers(ctx, cfg, registry)
 	if err != nil {
 		return fmt.Errorf("MCP initialization failed during reload: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		if newMCPManager != nil {
-			if closeErr := newMCPManager.Close(); closeErr != nil {
+		for agentID, manager := range newMCPManagers {
+			if closeErr := manager.Close(); closeErr != nil {
 				logger.ErrorCF("agent", "Failed to close MCP manager after canceled reload",
-					map[string]any{"error": closeErr.Error()})
+					map[string]any{"agent_id": agentID, "error": closeErr.Error()})
 			}
 		}
 		return fmt.Errorf("context canceled before reload commit: %w", err)
@@ -590,11 +585,11 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 
 	al.mu.Unlock()
 
-	oldMCPManager := al.mcp.swapManager(newMCPManager)
-	if oldMCPManager != nil {
-		if err := oldMCPManager.Close(); err != nil {
+	oldMCPManagers := al.mcp.swapState(newMCPManagers, true)
+	for agentID, manager := range oldMCPManagers {
+		if err := manager.Close(); err != nil {
 			logger.ErrorCF("agent", "Failed to close previous MCP manager during reload",
-				map[string]any{"error": err.Error()})
+				map[string]any{"agent_id": agentID, "error": err.Error()})
 		}
 	}
 
