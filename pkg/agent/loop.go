@@ -97,6 +97,7 @@ type processOptions struct {
 	ResolvedAgentID   string   // Route metadata for this request (if available)
 	RouteMatchedBy    string   // Route metadata for this request (if available)
 	TrackRunControl   bool     // Whether this run participates in channel/chat run.stop tracking
+	RunID             string   // Optional explicit run ID for observability correlation
 }
 
 const (
@@ -910,6 +911,90 @@ func (al *AgentLoop) ProcessHeartbeat(
 	return content, err
 }
 
+// ProcessWebhook runs one detached webhook wake turn in a reserved hook session.
+// It bypasses message routing and agent-level admission locks so interactive chat
+// runs on the same agent are not blocked.
+func (al *AgentLoop) ProcessWebhook(
+	ctx context.Context,
+	agentID string,
+	sessionKey string,
+	message string,
+) (string, error) {
+	if err := al.ensureMCPInitialized(ctx); err != nil {
+		return "", err
+	}
+
+	registry := al.GetRegistry()
+	var agentInst *AgentInstance
+	if agentID != "" {
+		if a, ok := registry.GetAgent(agentID); ok {
+			agentInst = a
+		}
+	}
+	if agentInst == nil {
+		agentInst = registry.GetDefaultAgent()
+	}
+	if agentInst == nil {
+		return "", fmt.Errorf("no agent available for webhook")
+	}
+
+	normalizedSessionKey := strings.ToLower(strings.TrimSpace(sessionKey))
+	if normalizedSessionKey == "" {
+		return "", fmt.Errorf("webhook session key is required")
+	}
+	if !strings.HasPrefix(normalizedSessionKey, "hook:") {
+		return "", fmt.Errorf("session key %q is outside hook namespace", normalizedSessionKey)
+	}
+	if strings.TrimSpace(message) == "" {
+		return "", fmt.Errorf("webhook message is required")
+	}
+
+	runID := newActivityRunID()
+	taskID := strings.TrimSpace(strings.TrimPrefix(normalizedSessionKey, "hook:task:"))
+	if taskID == normalizedSessionKey {
+		taskID = ""
+	}
+
+	logger.InfoCF("webhook", "Detached webhook wake started", map[string]any{
+		"agent_id":    agentInst.ID,
+		"session_key": normalizedSessionKey,
+		"task_id":     taskID,
+		"run_id":      runID,
+	})
+
+	content, _, err := al.runAgentLoop(ctx, agentInst, processOptions{
+		SessionKey:      normalizedSessionKey,
+		Channel:         "",
+		ChatID:          "",
+		UserMessage:     message,
+		DefaultResponse: defaultResponse,
+		EnableSummary:   true,
+		SendResponse:    false,
+		ResolvedAgentID: agentInst.ID,
+		RouteMatchedBy:  "webhook",
+		TrackRunControl: false,
+		RunID:           runID,
+	})
+	if err != nil {
+		logger.ErrorCF("webhook", "Detached webhook wake failed", map[string]any{
+			"agent_id":    agentInst.ID,
+			"session_key": normalizedSessionKey,
+			"task_id":     taskID,
+			"run_id":      runID,
+			"error":       err.Error(),
+		})
+		return "", err
+	}
+
+	logger.InfoCF("webhook", "Detached webhook wake completed", map[string]any{
+		"agent_id":    agentInst.ID,
+		"session_key": normalizedSessionKey,
+		"task_id":     taskID,
+		"run_id":      runID,
+	})
+	return content, nil
+}
+
 // PruneLastTurn removes the most recent user+assistant exchange from the session
 // history when a heartbeat produces HEARTBEAT_OK. This prevents idle turns from
 // accumulating and consuming context window tokens in future runs.
@@ -1271,7 +1356,10 @@ func (al *AgentLoop) runAgentLoop(
 	// Serialize concurrent callers for the same session to prevent history interleaving.
 	defer al.acquireSessionLock(opts.SessionKey)()
 
-	runID := newActivityRunID()
+	runID := strings.TrimSpace(opts.RunID)
+	if runID == "" {
+		runID = newActivityRunID()
+	}
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 	if opts.TrackRunControl {

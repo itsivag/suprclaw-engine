@@ -18,6 +18,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/agent"
 	"github.com/itsivag/suprclaw/pkg/config"
 	"github.com/itsivag/suprclaw/pkg/fileutil"
+	"github.com/itsivag/suprclaw/pkg/logger"
 	"github.com/itsivag/suprclaw/pkg/routing"
 )
 
@@ -284,6 +285,71 @@ func (h *adminHandler) wakeAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"output": string(out)})
+}
+
+func (h *adminHandler) wakeAgentDetached(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	if err := validateAgentID(agentID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if h.agentLoop == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "agent loop not initialized"})
+		return
+	}
+	if _, ok := h.agentLoop.GetRegistry().GetAgent(agentID); !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("agent %q not found", agentID)})
+		return
+	}
+
+	var req wakeAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+
+	sessionKey := strings.ToLower(strings.TrimSpace(req.SessionKey))
+	if sessionKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sessionKey is required"})
+		return
+	}
+	if !strings.HasPrefix(sessionKey, "hook:") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sessionKey must use reserved hook: namespace"})
+		return
+	}
+	message := strings.TrimSpace(req.Message)
+	if message == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
+		return
+	}
+
+	taskID := strings.TrimSpace(strings.TrimPrefix(sessionKey, "hook:task:"))
+	if taskID == sessionKey {
+		taskID = ""
+	}
+
+	logger.InfoCF("webhook", "Detached wake queued", map[string]any{
+		"agent_id":    agentID,
+		"session_key": sessionKey,
+		"task_id":     taskID,
+	})
+
+	go func() {
+		if _, err := h.agentLoop.ProcessWebhook(context.Background(), agentID, sessionKey, message); err != nil {
+			logger.ErrorCF("webhook", "Detached wake execution failed", map[string]any{
+				"agent_id":    agentID,
+				"session_key": sessionKey,
+				"task_id":     taskID,
+				"error":       err.Error(),
+			})
+		}
+	}()
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":     "queued",
+		"agentId":    agentID,
+		"sessionKey": sessionKey,
+	})
 }
 
 func (h *adminHandler) runCombinedOutput(name string, args ...string) ([]byte, error) {

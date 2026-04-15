@@ -59,6 +59,7 @@ func (h *adminHandler) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin/agents", h.auth(h.upsertAgent))
 	mux.HandleFunc("DELETE /api/admin/agents/{agentId}", h.auth(h.deleteAgent))
 	mux.HandleFunc("POST /api/admin/agents/{agentId}/wake", h.auth(h.wakeAgent))
+	mux.HandleFunc("POST /api/admin/agents/{agentId}/wake-detached", h.auth(h.wakeAgentDetached))
 	mux.HandleFunc("POST /api/admin/agents/{agentId}/sessions/new", h.auth(h.newSession))
 	mux.HandleFunc("POST /api/admin/agents/{agentId}/sessions/compact", h.auth(h.compactSession))
 

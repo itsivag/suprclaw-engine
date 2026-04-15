@@ -1992,6 +1992,230 @@ func TestAgentLoopRunStop_OnlyCancelsChatWhenHeartbeatOverlaps(t *testing.T) {
 	}
 }
 
+func TestProcessWebhook_UsesHookSessionIsolation(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "mock-model"
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingProvider{})
+	hookSession := "hook:task:test-task"
+
+	if _, err := al.ProcessWebhook(context.Background(), "main", hookSession, "webhook prompt"); err != nil {
+		t.Fatalf("ProcessWebhook() error = %v", err)
+	}
+
+	agent := al.GetRegistry().GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("default agent is nil")
+	}
+	mainSession := routing.BuildAgentMainSessionKey(agent.ID)
+
+	if got := len(agent.Sessions.GetHistory(hookSession)); got == 0 {
+		t.Fatalf("hook session history len = %d, want > 0", got)
+	}
+	if got := len(agent.Sessions.GetHistory(mainSession)); got != 0 {
+		t.Fatalf("main session history len = %d, want 0", got)
+	}
+}
+
+func TestProcessWebhook_RejectsNonHookSessionKey(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "mock-model"
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &recordingProvider{})
+	if _, err := al.ProcessWebhook(context.Background(), "main", "agent:main:main", "webhook prompt"); err == nil {
+		t.Fatal("ProcessWebhook() error = nil, want non-hook session key error")
+	}
+}
+
+func TestAgentLoopRun_WebhookAndChatSameAgentRunConcurrently(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.MaxParallelRuns = 2
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "gated-model"
+	cfg.Agents.Defaults.MaxToolIterations = 2
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+	cfg.Session.DMScope = "main"
+
+	msgBus := bus.NewMessageBus()
+	release := make(chan struct{})
+	provider := &gatedProvider{
+		started: make(chan string, 4),
+		release: release,
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(runCtx) }()
+
+	webhookDone := make(chan error, 1)
+	go func() {
+		_, err := al.ProcessWebhook(
+			context.Background(),
+			"main",
+			"hook:task:webhook-concurrent",
+			"webhook probe",
+		)
+		webhookDone <- err
+	}()
+
+	waitForStartedMessage(t, provider.started, "webhook probe", 2*time.Second)
+
+	if err := msgBus.PublishInbound(context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user-2",
+		ChatID:   "chat-main",
+		Content:  "live user chat",
+		Metadata: map[string]string{
+			metadataKeyRequestedAgentID: "main",
+		},
+	}); err != nil {
+		t.Fatalf("PublishInbound(chat) error = %v", err)
+	}
+
+	waitForStartedMessage(t, provider.started, "live user chat", 2*time.Second)
+
+	select {
+	case out := <-msgBus.OutboundChan():
+		if out.ChatID == "chat-main" && out.ErrorCode == ErrCodeRunInProgress {
+			t.Fatalf("unexpected run-in-progress while webhook active: %+v", out)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case err := <-webhookDone:
+		if err != nil {
+			t.Fatalf("webhook error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for webhook completion")
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop after cancel")
+	}
+}
+
+func TestProcessWebhook_SameHookSessionSerializesRuns(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "gated-model"
+	cfg.Agents.Defaults.MaxToolIterations = 2
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+
+	release := make(chan struct{})
+	provider := &gatedProvider{
+		started: make(chan string, 4),
+		release: release,
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+
+	doneA := make(chan error, 1)
+	doneB := make(chan error, 1)
+
+	go func() {
+		_, err := al.ProcessWebhook(context.Background(), "main", "hook:task:serial", "hook run A")
+		doneA <- err
+	}()
+	waitForStartedMessage(t, provider.started, "hook run A", 2*time.Second)
+
+	go func() {
+		_, err := al.ProcessWebhook(context.Background(), "main", "hook:task:serial", "hook run B")
+		doneB <- err
+	}()
+
+	select {
+	case got := <-provider.started:
+		t.Fatalf("unexpected second webhook start before first release: %q", got)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+
+	waitForStartedMessage(t, provider.started, "hook run B", 2*time.Second)
+
+	select {
+	case err := <-doneA:
+		if err != nil {
+			t.Fatalf("hook run A error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for hook run A completion")
+	}
+
+	select {
+	case err := <-doneB:
+		if err != nil {
+			t.Fatalf("hook run B error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for hook run B completion")
+	}
+}
+
+func TestProcessWebhook_DifferentHookSessionsRunConcurrently(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Agents.Defaults.Model = "gated-model"
+	cfg.Agents.Defaults.MaxToolIterations = 2
+	cfg.Agents.Defaults.ContextGuard.Enabled = false
+
+	release := make(chan struct{})
+	provider := &gatedProvider{
+		started: make(chan string, 4),
+		release: release,
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+
+	doneA := make(chan error, 1)
+	doneB := make(chan error, 1)
+
+	go func() {
+		_, err := al.ProcessWebhook(context.Background(), "main", "hook:task:a", "hook run A")
+		doneA <- err
+	}()
+	go func() {
+		_, err := al.ProcessWebhook(context.Background(), "main", "hook:task:b", "hook run B")
+		doneB <- err
+	}()
+
+	waitForStartedMessages(t, provider.started, []string{"hook run A", "hook run B"}, 2*time.Second)
+
+	close(release)
+
+	select {
+	case err := <-doneA:
+		if err != nil {
+			t.Fatalf("hook run A error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for hook run A completion")
+	}
+
+	select {
+	case err := <-doneB:
+		if err != nil {
+			t.Fatalf("hook run B error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for hook run B completion")
+	}
+}
+
 func TestAgentLoopRun_WorkersShutdownOnCancelAndBusClose(t *testing.T) {
 	baseConfig := func(tmp string) *config.Config {
 		cfg := config.DefaultConfig()
@@ -2462,6 +2686,27 @@ func waitForStartedMessage(t *testing.T, started <-chan string, want string, tim
 			}
 		case <-deadline:
 			t.Fatalf("timed out waiting for provider started message %q", want)
+		}
+	}
+}
+
+func waitForStartedMessages(t *testing.T, started <-chan string, wants []string, timeout time.Duration) {
+	t.Helper()
+	remaining := make(map[string]struct{}, len(wants))
+	for _, want := range wants {
+		remaining[want] = struct{}{}
+	}
+	deadline := time.After(timeout)
+	for len(remaining) > 0 {
+		select {
+		case got := <-started:
+			delete(remaining, got)
+		case <-deadline:
+			missing := make([]string, 0, len(remaining))
+			for msg := range remaining {
+				missing = append(missing, msg)
+			}
+			t.Fatalf("timed out waiting for provider started messages: %v", missing)
 		}
 	}
 }

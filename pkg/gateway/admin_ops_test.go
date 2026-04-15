@@ -259,6 +259,115 @@ func TestAdminWakeAgent_UnknownAgentReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestAdminWakeAgentDetached_ReturnsAccepted(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
+			},
+		},
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{
+		secret:    "test-secret",
+		agentLoop: loop,
+		commandRunner: func(name string, args ...string) ([]byte, error) {
+			t.Fatalf("command runner must not be called for detached wake")
+			return nil, nil
+		},
+	}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"sessionKey":"hook:task:task-1","message":"hello detached"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents/writer/wake-detached", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminWakeAgentDetached_RejectsNonHookSessionKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+				{ID: "writer", Scope: config.AgentScopeWorkforce},
+			},
+		},
+	}
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{secret: "test-secret", agentLoop: loop}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"sessionKey":"agent:writer:main","message":"hello"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents/writer/wake-detached", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "hook: namespace") {
+		t.Fatalf("unexpected body: %s", rec.Body.String())
+	}
+}
+
+func TestAdminWakeAgentDetached_UnknownAgentReturnsNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+			},
+		},
+	}
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{secret: "test-secret", agentLoop: loop}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := []byte(`{"sessionKey":"hook:task:missing","message":"hello"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/agents/missing/wake-detached", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminDeleteAgent_SyncsRuntimeRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.json")
