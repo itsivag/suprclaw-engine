@@ -159,6 +159,28 @@ Example:
 }
 ```
 
+## `run.status.get`
+
+Requests current run status for the session.
+
+Payload fields:
+
+- `run_id?: string` (optional specific run lookup)
+
+Response is typed `run.status` with:
+
+- `run_id: string` (empty when no run is known)
+- `status: "in_progress" | "completed" | "failed" | "unknown"`
+
+Example:
+
+```json
+{
+  "type": "run.status.get",
+  "id": "status-1"
+}
+```
+
 ## Server -> client messages
 
 ## Typed frames
@@ -167,6 +189,7 @@ Example:
 - `pong`
 - `error`
 - `media.create`
+- `run.status`
 
 ### `agent.list` example
 
@@ -219,6 +242,21 @@ Common protocol error codes:
     "filename": "diagram.png",
     "content_type": "image/png",
     "caption": "optional"
+  }
+}
+```
+
+### `run.status` example
+
+```json
+{
+  "type": "run.status",
+  "id": "status-1",
+  "session_id": "sess-123",
+  "timestamp": 1710000000000,
+  "payload": {
+    "run_id": "run_abc123",
+    "status": "in_progress"
   }
 }
 ```

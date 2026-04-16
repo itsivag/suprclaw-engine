@@ -803,6 +803,9 @@ func (c *SuprChannel) handleMessage(pc *suprConn, msg SuprMessage) {
 	case TypeRunStop:
 		c.handleRunStop(pc, msg)
 
+	case TypeRunStatusGet:
+		c.handleRunStatusGet(pc, msg)
+
 	default:
 		errMsg := newError("unknown_type", fmt.Sprintf("unknown message type: %s", msg.Type))
 		pc.writeJSON(errMsg)
@@ -1148,6 +1151,35 @@ func (c *SuprChannel) handleRunStop(pc *suprConn, msg SuprMessage) {
 		"requested_run_id": requestedRunID,
 		"resolved_run_id":  resolvedRunID,
 	})
+}
+
+// handleRunStatusGet processes an inbound run.status.get frame from a client.
+func (c *SuprChannel) handleRunStatusGet(pc *suprConn, msg SuprMessage) {
+	sessionID := strings.TrimSpace(msg.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(pc.sessionID)
+	}
+	if sessionID == "" {
+		pc.writeJSON(newError("invalid_session", "session_id is required"))
+		return
+	}
+
+	requestedRunID := strings.TrimSpace(stringField(msg.Payload, "run_id"))
+	runID, status := c.resolveRunStatus(sessionID, requestedRunID)
+
+	response := newMessage(TypeRunStatus, map[string]any{
+		"run_id": runID,
+		"status": status,
+	})
+	response.ID = msg.ID
+	response.SessionID = sessionID
+	if route := c.routeMetadataPayload("supr:" + sessionID); route != nil {
+		for key, value := range route {
+			response.Payload[key] = value
+		}
+	}
+
+	pc.writeJSON(response)
 }
 
 func parseReasoningOverride(payload map[string]any) (string, error) {

@@ -397,3 +397,72 @@ func TestSuprRunStop_RunMismatchReturnsTypedError(t *testing.T) {
 		t.Fatalf("code = %q, want %q", got, "run_mismatch")
 	}
 }
+
+func TestSuprRunStatusGet_ReturnsUnknownWhenNoTrackedRun(t *testing.T) {
+	_, conn, cleanup := openSuprTestSocket(t)
+	defer cleanup()
+
+	if err := conn.WriteJSON(SuprMessage{
+		Type: TypeRunStatusGet,
+		ID:   "status-1",
+	}); err != nil {
+		t.Fatalf("WriteJSON(run.status.get) error = %v", err)
+	}
+
+	var frame map[string]any
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("ReadJSON(run.status) error = %v", err)
+	}
+
+	if got, _ := frame["type"].(string); got != TypeRunStatus {
+		t.Fatalf("type = %q, want %q", got, TypeRunStatus)
+	}
+	if got, _ := frame["id"].(string); got != "status-1" {
+		t.Fatalf("id = %q, want %q", got, "status-1")
+	}
+	payload, _ := frame["payload"].(map[string]any)
+	if got, _ := payload["status"].(string); got != runStatusUnknown {
+		t.Fatalf("status = %q, want %q", got, runStatusUnknown)
+	}
+}
+
+func TestSuprRunStatusGet_ReturnsTrackedRunStatus(t *testing.T) {
+	ch, conn, cleanup := openSuprTestSocket(t)
+	defer cleanup()
+
+	ch.rememberRunStatus("supr:sess-1", bus.ActivityEventEnvelope{
+		EventType: "run.started",
+		RunID:     "run-42",
+		SessionID: "sess-1",
+		Sequence:  1,
+	})
+
+	if err := conn.WriteJSON(SuprMessage{
+		Type: TypeRunStatusGet,
+		ID:   "status-2",
+		Payload: map[string]any{
+			"run_id": "run-42",
+		},
+	}); err != nil {
+		t.Fatalf("WriteJSON(run.status.get) error = %v", err)
+	}
+
+	var frame map[string]any
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("ReadJSON(run.status) error = %v", err)
+	}
+
+	if got, _ := frame["type"].(string); got != TypeRunStatus {
+		t.Fatalf("type = %q, want %q", got, TypeRunStatus)
+	}
+	if got, _ := frame["id"].(string); got != "status-2" {
+		t.Fatalf("id = %q, want %q", got, "status-2")
+	}
+	payload, _ := frame["payload"].(map[string]any)
+	if got, _ := payload["run_id"].(string); got != "run-42" {
+		t.Fatalf("run_id = %q, want %q", got, "run-42")
+	}
+	if got, _ := payload["status"].(string); got != runStatusInProgress {
+		t.Fatalf("status = %q, want %q", got, runStatusInProgress)
+	}
+}

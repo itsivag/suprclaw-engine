@@ -166,6 +166,28 @@ Example:
 }
 ```
 
+## `type: "run.status.get"`
+
+Requests current run status for the session.
+
+Payload fields:
+
+- `run_id?: string` (optional specific run lookup)
+
+Response is typed `run.status` with:
+
+- `run_id: string` (empty when no run is known)
+- `status: "in_progress" | "completed" | "failed" | "unknown"`
+
+Example request:
+
+```json
+{
+  "type": "run.status.get",
+  "id": "status-1"
+}
+```
+
 ## Server -> client frame types
 
 ## Typed control/data frames
@@ -235,6 +257,21 @@ Outbound media delivery to client:
     "filename": "diagram.png",
     "content_type": "image/png",
     "caption": "optional"
+  }
+}
+```
+
+### `type: "run.status"`
+
+```json
+{
+  "type": "run.status",
+  "id": "status-1",
+  "session_id": "sess-123",
+  "timestamp": 1710000000000,
+  "payload": {
+    "run_id": "run_abc123",
+    "status": "in_progress"
   }
 }
 ```

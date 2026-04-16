@@ -8,9 +8,11 @@ const (
 	TypeMessageSend = "message.send"
 	TypeMediaSend   = "media.send"
 	TypeRunStop     = "run.stop"
+	TypeRunStatusGet = "run.status.get"
 	TypePing        = "ping"
 
 	// Legacy typed control frames still used for handshake/errors/media transport.
+	TypeRunStatus  = "run.status"
 	TypeMediaCreate = "media.create"
 	TypeError       = "error"
 	TypePong        = "pong"
