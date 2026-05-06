@@ -6,12 +6,14 @@
 package providers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/itsivag/suprclaw/pkg/auth"
 	"github.com/itsivag/suprclaw/pkg/config"
 )
 
@@ -154,6 +156,88 @@ func TestCreateProviderFromConfig_DefaultAPIBase(t *testing.T) {
 func TestGetDefaultAPIBase_LiteLLM(t *testing.T) {
 	if got := getDefaultAPIBase("litellm"); got != "http://localhost:4000/v1" {
 		t.Fatalf("getDefaultAPIBase(%q) = %q, want %q", "litellm", got, "http://localhost:4000/v1")
+	}
+}
+
+func TestCreateProviderFromConfig_NVIDIATokenAuthUsesStoredCredential(t *testing.T) {
+	originalGetCredential := getCredential
+	t.Cleanup(func() { getCredential = originalGetCredential })
+
+	getCredential = func(provider string) (*auth.AuthCredential, error) {
+		if provider != "nvidia" {
+			t.Fatalf("provider = %q, want nvidia", provider)
+		}
+		return &auth.AuthCredential{AccessToken: "nvidia-token"}, nil
+	}
+
+	var gotAuthorization string
+	var gotModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		gotModel = body.Model
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	cfg := &config.ModelConfig{
+		ModelName:  "nvidia/deepseek-ai/deepseek-v4-pro",
+		Model:      "nvidia/deepseek-ai/deepseek-v4-pro",
+		APIBase:    server.URL,
+		AuthMethod: "token",
+	}
+
+	provider, modelID, err := CreateProviderFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("CreateProviderFromConfig() error = %v", err)
+	}
+	if modelID != "deepseek-ai/deepseek-v4-pro" {
+		t.Fatalf("modelID = %q, want %q", modelID, "deepseek-ai/deepseek-v4-pro")
+	}
+
+	if _, err = provider.Chat(t.Context(), []Message{{Role: "user", Content: "ping"}}, nil, modelID, nil); err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if gotAuthorization != "Bearer nvidia-token" {
+		t.Fatalf("Authorization = %q, want %q", gotAuthorization, "Bearer nvidia-token")
+	}
+	if gotModel != "deepseek-ai/deepseek-v4-pro" {
+		t.Fatalf("request model = %q, want %q", gotModel, "deepseek-ai/deepseek-v4-pro")
+	}
+}
+
+func TestCreateProviderFromConfig_NVIDIATokenAuthUsesDefaultAPIBase(t *testing.T) {
+	originalGetCredential := getCredential
+	t.Cleanup(func() { getCredential = originalGetCredential })
+
+	getCredential = func(provider string) (*auth.AuthCredential, error) {
+		if provider != "nvidia" {
+			t.Fatalf("provider = %q, want nvidia", provider)
+		}
+		return &auth.AuthCredential{AccessToken: "nvidia-token"}, nil
+	}
+
+	cfg := &config.ModelConfig{
+		ModelName:  "nvidia/deepseek-ai/deepseek-v4-pro",
+		Model:      "nvidia/deepseek-ai/deepseek-v4-pro",
+		AuthMethod: "token",
+	}
+
+	provider, modelID, err := CreateProviderFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("CreateProviderFromConfig() error = %v", err)
+	}
+	if _, ok := provider.(*HTTPProvider); !ok {
+		t.Fatalf("expected *HTTPProvider, got %T", provider)
+	}
+	if modelID != "deepseek-ai/deepseek-v4-pro" {
+		t.Fatalf("modelID = %q, want %q", modelID, "deepseek-ai/deepseek-v4-pro")
 	}
 }
 

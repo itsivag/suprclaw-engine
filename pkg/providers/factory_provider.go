@@ -38,6 +38,21 @@ func createCodexAuthProvider() (LLMProvider, error) {
 	return NewCodexProviderWithTokenSource(cred.AccessToken, cred.AccountID, createCodexTokenSource()), nil
 }
 
+func resolveHTTPTokenAuth(protocol string) (string, error) {
+	cred, err := getCredential(protocol)
+	if err != nil {
+		return "", fmt.Errorf("loading auth credentials: %w", err)
+	}
+	if cred == nil {
+		return "", fmt.Errorf("no credentials for %s", protocol)
+	}
+	accessToken := strings.TrimSpace(cred.AccessToken)
+	if accessToken == "" {
+		return "", fmt.Errorf("credential for %s is missing access token", protocol)
+	}
+	return accessToken, nil
+}
+
 // ExtractProtocol extracts the protocol prefix and model identifier from a model string.
 // If no prefix is specified, it defaults to "openai".
 // Examples:
@@ -136,7 +151,18 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		"vivgrid", "volcengine", "vllm", "qwen", "mistral", "avian",
 		"minimax", "longcat", "modelscope":
 		// All other OpenAI-compatible HTTP providers
-		if cfg.APIKey == "" && cfg.APIBase == "" {
+		apiKey := cfg.APIKey
+		if cfg.AuthMethod != "" {
+			if cfg.AuthMethod != "token" {
+				return nil, "", fmt.Errorf("unsupported auth_method %q for HTTP-based protocol %q", cfg.AuthMethod, protocol)
+			}
+			var err error
+			apiKey, err = resolveHTTPTokenAuth(protocol)
+			if err != nil {
+				return nil, "", err
+			}
+		}
+		if apiKey == "" && cfg.APIBase == "" {
 			return nil, "", fmt.Errorf("api_key or api_base is required for HTTP-based protocol %q", protocol)
 		}
 		apiBase := cfg.APIBase
@@ -144,7 +170,7 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 			apiBase = getDefaultAPIBase(protocol)
 		}
 		return NewHTTPProviderWithMaxTokensFieldAndRequestTimeout(
-			cfg.APIKey,
+			apiKey,
 			apiBase,
 			cfg.Proxy,
 			cfg.MaxTokensField,
