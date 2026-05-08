@@ -236,7 +236,12 @@ func (sl *SkillsLoader) ValidateSkillNameCollisions() error {
 
 func (sl *SkillsLoader) ListSkills() []SkillInfo {
 	if err := sl.ValidateSkillNameCollisions(); err != nil {
-		panic(fmt.Errorf("skill collision validation failed: %w", err))
+		logger.ErrorCF("skills", "Skill collision validation failed; suppressing skills list",
+			map[string]any{
+				"error": err.Error(),
+			},
+		)
+		return []SkillInfo{}
 	}
 
 	skills := make([]SkillInfo, 0)
@@ -297,6 +302,13 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 	})
 
 	return skills
+}
+
+// ReadSkillMetadata reads structured metadata from a SKILL.md file.
+// It uses the same extraction logic as the runtime skill loader.
+func ReadSkillMetadata(skillPath string) *SkillMetadata {
+	sl := &SkillsLoader{}
+	return sl.getSkillMetadata(skillPath)
 }
 
 func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {

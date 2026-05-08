@@ -248,6 +248,9 @@ func (al *AgentLoop) buildAndRegisterMCPManagers(
 // ensureMCPInitialized loads MCP servers/tools for the current config and
 // registry if MCP has not been initialized for the active runtime state yet.
 func (al *AgentLoop) ensureMCPInitialized(ctx context.Context) error {
+	if al.isSkillCollisionBlocked() {
+		return nil
+	}
 	cfg := al.GetConfig()
 	if !cfg.Tools.IsToolEnabled("mcp") && !cfg.Tools.IsToolEnabled("agent_browser") {
 		return nil

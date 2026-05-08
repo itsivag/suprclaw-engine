@@ -20,6 +20,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/fileutil"
 	"github.com/itsivag/suprclaw/pkg/logger"
 	"github.com/itsivag/suprclaw/pkg/routing"
+	"github.com/itsivag/suprclaw/pkg/skills"
 )
 
 // Input validation regexes.
@@ -47,12 +48,28 @@ func validateAgentID(id string) error {
 }
 
 func writeAdminConfigMutationError(w http.ResponseWriter, err error) {
+	if writeSkillCollisionHTTPError(w, err) {
+		return
+	}
 	var badReqErr *adminBadRequestError
 	if errors.As(err, &badReqErr) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": badReqErr.Error()})
 		return
 	}
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+}
+
+func writeSkillCollisionHTTPError(w http.ResponseWriter, err error) bool {
+	collisionErr := skills.AsSkillScopeCollisionError(err)
+	if collisionErr == nil {
+		return false
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"code":       collisionErr.Code,
+		"error":      collisionErr.ErrMessage,
+		"collisions": collisionErr.Collisions,
+	})
+	return true
 }
 
 // --- POST /api/admin/agents ---
@@ -158,6 +175,9 @@ func (h *adminHandler) upsertAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.reloadAgentLoopFromConfig(); err != nil {
+		if writeSkillCollisionHTTPError(w, err) {
+			return
+		}
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "agent saved to config but runtime sync failed: " + err.Error(),
 		})
@@ -212,6 +232,9 @@ func (h *adminHandler) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.reloadAgentLoopFromConfig(); err != nil {
+		if writeSkillCollisionHTTPError(w, err) {
+			return
+		}
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "agent removed from config but runtime sync failed: " + err.Error(),
 		})
@@ -432,21 +455,17 @@ func (h *adminHandler) compactSession(w http.ResponseWriter, r *http.Request) {
 // --- POST /api/admin/runtime/reload ---
 
 func (h *adminHandler) reloadRuntime(w http.ResponseWriter, r *http.Request) {
-	if err := h.reloadAgentLoopFromConfig(); err == nil {
+	err := h.reloadAgentLoopFromConfig()
+	if err == nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
 		return
 	}
-
-	// Fallback: fire-and-forget supervisor restart when in-process reload fails.
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		exec.Command("supervisorctl", "restart", "suprclaw-engine-gateway").Run() //nolint:errcheck
-	}()
-	writeJSON(
-		w,
-		http.StatusAccepted,
-		map[string]string{"status": "restarting", "error": "in-process reload failed; falling back to supervisor restart"},
-	)
+	if writeSkillCollisionHTTPError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+		"error": "runtime reload failed: " + err.Error(),
+	})
 }
 
 func (h *adminHandler) reloadAgentLoopFromConfig() error {

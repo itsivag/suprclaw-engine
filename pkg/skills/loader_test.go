@@ -198,6 +198,19 @@ func TestValidateSkillNameCollisions_MetadataNameConflict(t *testing.T) {
 	assert.ErrorContains(t, err, filepath.Join(global, "dir-b", "SKILL.md"))
 }
 
+func TestListSkills_CollisionReturnsEmptyWithoutPanic(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "workspace")
+	global := filepath.Join(tmp, "global")
+
+	createSkillDir(t, filepath.Join(ws, "skills"), "my-skill", "my-skill", "workspace version")
+	createSkillDir(t, global, "my-skill", "my-skill", "global version")
+
+	sl := NewSkillsLoader(ws, global, "")
+	got := sl.ListSkills()
+	assert.Len(t, got, 0)
+}
+
 func TestListSkillsMultipleDistinctSkills(t *testing.T) {
 	tmp := t.TempDir()
 	ws := filepath.Join(tmp, "workspace")

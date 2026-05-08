@@ -611,7 +611,30 @@ func registerRuntimeHealthChecks(hs *health.Server, al *agent.AgentLoop, cm *cha
 		if al.IsReloading() {
 			return false, "reload in progress"
 		}
+		if collisionErr := al.GetSkillCollisionError(); collisionErr != nil {
+			return false, fmt.Sprintf("collision_blocked:%d", len(collisionErr.Collisions))
+		}
 		return true, "idle"
+	})
+
+	hs.RegisterCheck("skill_collision", func() (bool, string) {
+		if al == nil {
+			return false, "agent loop unavailable"
+		}
+		counters := al.SkillCollisionRejectCounters()
+		if collisionErr := al.GetSkillCollisionError(); collisionErr != nil {
+			return false, fmt.Sprintf(
+				"blocked collisions=%d preflight_rejects=%d reload_rejects=%d",
+				len(collisionErr.Collisions),
+				counters["preflight_rejects"],
+				counters["reload_rejects"],
+			)
+		}
+		return true, fmt.Sprintf(
+			"clear preflight_rejects=%d reload_rejects=%d",
+			counters["preflight_rejects"],
+			counters["reload_rejects"],
+		)
 	})
 
 	hs.RegisterCheck("channel_manager", func() (bool, string) {

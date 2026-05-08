@@ -15,6 +15,7 @@ import (
 	"github.com/itsivag/suprclaw/pkg/agent"
 	"github.com/itsivag/suprclaw/pkg/bus"
 	"github.com/itsivag/suprclaw/pkg/config"
+	"github.com/itsivag/suprclaw/pkg/skills"
 )
 
 func TestAdminUpsertAgent_SyncsRuntimeRegistry(t *testing.T) {
@@ -729,6 +730,80 @@ func TestAdminReloadRuntime_ReloadsRegistryFromConfig(t *testing.T) {
 
 	if _, ok := loop.GetRegistry().GetAgent("writer"); !ok {
 		t.Fatal("writer should be present in runtime registry after reload")
+	}
+}
+
+func TestAdminReloadRuntime_ReturnsConflictOnSkillScopeCollision(t *testing.T) {
+	tmpDir := t.TempDir()
+	homeDir := filepath.Join(tmpDir, "home")
+	t.Setenv("SUPRCLAW_HOME", homeDir)
+
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	workspace := filepath.Join(tmpDir, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "skills", "shared-skill"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(workspace skill): %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(workspace, "skills", "shared-skill", "SKILL.md"),
+		[]byte("---\nname: shared-skill\ndescription: workspace\n---\n\n# shared"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(workspace SKILL.md): %v", err)
+	}
+
+	globalSkill := filepath.Join(homeDir, "shared-skills", "shared-skill")
+	if err := os.MkdirAll(globalSkill, 0o755); err != nil {
+		t.Fatalf("MkdirAll(global skill): %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(globalSkill, "SKILL.md"),
+		[]byte("---\nname: shared-skill\ndescription: global\n---\n\n# shared"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(global SKILL.md): %v", err)
+	}
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         workspace,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+			},
+		},
+		Tools: config.ToolsConfig{
+			Skills: config.SkillsToolsConfig{
+				GlobalDir: "shared-skills",
+			},
+		},
+	}
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	loop := agent.NewAgentLoop(cfg, bus.NewMessageBus(), &gatewayMockProvider{response: "ok"})
+	h := &adminHandler{configPath: cfgPath, secret: "test-secret", agentLoop: loop}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/runtime/reload", nil)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+	}
+	body := decodeJSONMap(t, rec.Body.String())
+	if got, _ := body["code"].(string); got != skills.SkillScopeCollisionCode {
+		t.Fatalf("code = %v, want %s", body["code"], skills.SkillScopeCollisionCode)
+	}
+	if _, ok := body["collisions"]; !ok {
+		t.Fatalf("expected collisions field in response body: %v", body)
 	}
 }
 

@@ -8,6 +8,7 @@ const (
 	ErrCodeAgentNotFound            = "AGENT_NOT_FOUND"
 	ErrCodeRunInProgress            = "RUN_IN_PROGRESS"
 	ErrCodeInvalidSessionKey        = "INVALID_SESSION_KEY"
+	ErrCodeSkillScopeCollision      = "SKILL_SCOPE_COLLISION"
 )
 
 // RequestError is a typed, client-visible error for per-request validation failures.

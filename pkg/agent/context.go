@@ -126,7 +126,12 @@ func NewContextBuilderWithSkillDirs(workspace, globalSkillsDir, builtinSkillsDir
 
 	loader := skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir)
 	if err := loader.ValidateSkillNameCollisions(); err != nil {
-		panic(fmt.Errorf("skill loader collision error: %w", err))
+		logger.WarnCF("agent", "Skill loader collision detected during context builder initialization",
+			map[string]any{
+				"workspace": workspace,
+				"error":     err.Error(),
+			},
+		)
 	}
 
 	builder := &ContextBuilder{

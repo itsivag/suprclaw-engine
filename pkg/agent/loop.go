@@ -36,20 +36,24 @@ import (
 )
 
 type AgentLoop struct {
-	bus            *bus.MessageBus
-	cfg            *config.Config
-	registry       *AgentRegistry
-	state          *state.Manager
-	running        atomic.Bool
-	reloading      atomic.Bool
-	summarizing    sync.Map
-	fallback       *providers.FallbackChain
-	channelManager *channels.Manager
-	mediaStore     media.MediaStore
-	transcriber    voice.Transcriber
-	cmdRegistry    *commands.Registry
-	mcp            mcpRuntime
-	mu             sync.RWMutex
+	bus                            *bus.MessageBus
+	cfg                            *config.Config
+	registry                       *AgentRegistry
+	state                          *state.Manager
+	running                        atomic.Bool
+	reloading                      atomic.Bool
+	summarizing                    sync.Map
+	fallback                       *providers.FallbackChain
+	channelManager                 *channels.Manager
+	mediaStore                     media.MediaStore
+	transcriber                    voice.Transcriber
+	cmdRegistry                    *commands.Registry
+	mcp                            mcpRuntime
+	mu                             sync.RWMutex
+	skillCollisionMu               sync.RWMutex
+	skillCollisionErr              *skills.SkillScopeCollisionError
+	skillCollisionPreflightRejects atomic.Uint64
+	skillCollisionReloadRejects    atomic.Uint64
 	// Track active requests for safe provider cleanup
 	activeRequests sync.WaitGroup
 	// sessionLocks serializes concurrent runAgentLoop calls for the same session key
@@ -147,6 +151,8 @@ func NewAgentLoop(
 		toolSchemaCache:     NewToolSchemaCache(),
 		promptCacheDetector: NewPromptCacheBreakDetector(),
 	}
+
+	al.refreshSkillCollisionStateForRegistry(cfg, registry)
 
 	return al
 }
@@ -379,6 +385,16 @@ func (al *AgentLoop) handleInboundMessage(ctx context.Context, msg bus.InboundMe
 	messageRoundState := tools.NewMessageRoundState()
 	ctx = tools.WithMessageRoundState(ctx, messageRoundState)
 
+	if reqErr := al.skillCollisionRequestError(); reqErr != nil {
+		al.bus.PublishOutbound(ctx, bus.OutboundMessage{
+			Channel:      msg.Channel,
+			ChatID:       msg.ChatID,
+			ErrorCode:    reqErr.Code,
+			ErrorMessage: reqErr.Message,
+		})
+		return
+	}
+
 	// Process message
 	// TODO: Re-enable media cleanup after inbound media is properly consumed by the agent.
 	// Currently disabled because files are deleted before the LLM can access their content.
@@ -556,6 +572,22 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 	// Ensure shared tools are re-registered on the new registry
 	registerSharedTools(cfg, al.bus, registry, provider)
 
+	inventory, err := buildSkillScopeInventoryForRegistry(cfg, registry)
+	if err != nil {
+		return fmt.Errorf("failed to evaluate skill scope collisions during reload: %w", err)
+	}
+	if collisionErr := inventory.CollisionError(); collisionErr != nil {
+		al.setSkillCollisionError(collisionErr)
+		al.skillCollisionReloadRejects.Add(1)
+		logger.WarnCF("agent", "event=skill_scope_collision_reload_reject reload rejected due to skill scope collision",
+			map[string]any{
+				"code":            collisionErr.Code,
+				"collision_count": len(collisionErr.Collisions),
+			},
+		)
+		return collisionErr
+	}
+
 	// MCP tools are bound to the active registry and must be rebuilt on every
 	// reload to avoid stale/missing MCP tool registrations after config changes.
 	newMCPManagers, err := al.buildAndRegisterMCPManagers(ctx, cfg, registry)
@@ -585,6 +617,8 @@ func (al *AgentLoop) ReloadProviderAndConfig(
 	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker())
 
 	al.mu.Unlock()
+
+	al.setSkillCollisionError(nil)
 
 	oldMCPManagers := al.mcp.swapState(newMCPManagers, true)
 	for agentID, manager := range oldMCPManagers {
@@ -840,6 +874,9 @@ func (al *AgentLoop) ProcessDirectWithChannelAndAgent(
 	ctx context.Context,
 	content, sessionKey, channel, chatID, requestedAgentID string,
 ) (string, error) {
+	if reqErr := al.skillCollisionRequestError(); reqErr != nil {
+		return "", reqErr
+	}
 	if err := al.ensureMCPInitialized(ctx); err != nil {
 		return "", err
 	}
@@ -872,6 +909,9 @@ func (al *AgentLoop) ProcessHeartbeat(
 	deliverChannel, deliverChatID string,
 	maxTokens int,
 ) (string, error) {
+	if reqErr := al.skillCollisionRequestError(); reqErr != nil {
+		return "", reqErr
+	}
 	if err := al.ensureMCPInitialized(ctx); err != nil {
 		return "", err
 	}
@@ -920,6 +960,9 @@ func (al *AgentLoop) ProcessWebhook(
 	sessionKey string,
 	message string,
 ) (string, error) {
+	if reqErr := al.skillCollisionRequestError(); reqErr != nil {
+		return "", reqErr
+	}
 	if err := al.ensureMCPInitialized(ctx); err != nil {
 		return "", err
 	}
@@ -2789,6 +2832,16 @@ func (al *AgentLoop) GetStartupInfo() map[string]any {
 
 	// Skills info
 	info["skills"] = agent.ContextBuilder.GetSkillsInfo()
+	if collisionErr := al.GetSkillCollisionError(); collisionErr != nil {
+		info["skill_collision"] = map[string]any{
+			"blocked":    true,
+			"code":       collisionErr.Code,
+			"error":      collisionErr.ErrMessage,
+			"collisions": collisionErr.Collisions,
+		}
+	} else {
+		info["skill_collision"] = map[string]any{"blocked": false}
+	}
 	if al.promptCacheDetector != nil {
 		info["cache_break_diagnostics"] = al.promptCacheDetector.SnapshotDiagnostics()
 	}
