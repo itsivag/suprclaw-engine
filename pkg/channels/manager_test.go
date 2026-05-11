@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -48,6 +49,7 @@ func newTestManager() *Manager {
 	return &Manager{
 		channels: make(map[string]Channel),
 		workers:  make(map[string]*channelWorker),
+		bus:      bus.NewMessageBus(),
 	}
 }
 
@@ -1188,5 +1190,51 @@ func TestManager_SendPlaceholder(t *testing.T) {
 	ok = mgr.SendPlaceholder(ctx, "unknown", "chat-1")
 	if ok {
 		t.Error("expected SendPlaceholder to fail for unknown channel")
+	}
+}
+
+func TestStartStopSharedHTTPServer_RapidCycles_NoPanic(t *testing.T) {
+	m := newTestManager()
+	ctx := t.Context()
+
+	for range 100 {
+		m.SetupHTTPServer("127.0.0.1:0", nil)
+		if err := m.StartAll(ctx); err != nil {
+			t.Fatalf("StartAll failed: %v", err)
+		}
+		stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		if err := m.StopAll(stopCtx); err != nil {
+			cancel()
+			t.Fatalf("StopAll failed: %v", err)
+		}
+		cancel()
+	}
+}
+
+func TestStartAll_SharedHTTPServerBindError_IsNonFatal(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to reserve listener: %v", err)
+	}
+	defer listener.Close()
+
+	m := newTestManager()
+	ctx := t.Context()
+	m.SetupHTTPServer(listener.Addr().String(), nil)
+
+	if err := m.StartAll(ctx); err != nil {
+		t.Fatalf("StartAll failed: %v", err)
+	}
+
+	// Give the server goroutine time to hit bind failure.
+	time.Sleep(100 * time.Millisecond)
+
+	stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := m.StopAll(stopCtx); err != nil {
+		t.Fatalf("StopAll failed: %v", err)
+	}
+	if m.httpServer != nil {
+		t.Fatal("expected shared HTTP server pointer to be cleared after StopAll")
 	}
 }

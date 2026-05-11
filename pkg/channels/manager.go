@@ -383,16 +383,17 @@ func (m *Manager) StartAll(ctx context.Context) error {
 
 	// Start shared HTTP server if configured
 	if m.httpServer != nil {
-		go func() {
+		server := m.httpServer
+		go func(srv *http.Server) {
 			logger.InfoCF("channels", "Shared HTTP server listening", map[string]any{
-				"addr": m.httpServer.Addr,
+				"addr": srv.Addr,
 			})
-			if err := m.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				logger.FatalCF("channels", "Shared HTTP server error", map[string]any{
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.ErrorCF("channels", "Shared HTTP server error", map[string]any{
 					"error": err.Error(),
 				})
 			}
-		}()
+		}(server)
 	}
 
 	logger.InfoC("channels", "All channels started")
@@ -407,14 +408,15 @@ func (m *Manager) StopAll(ctx context.Context) error {
 
 	// Shutdown shared HTTP server first
 	if m.httpServer != nil {
+		server := m.httpServer
+		m.httpServer = nil
 		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		if err := m.httpServer.Shutdown(shutdownCtx); err != nil {
+		if err := server.Shutdown(shutdownCtx); err != nil {
 			logger.ErrorCF("channels", "Shared HTTP server shutdown error", map[string]any{
 				"error": err.Error(),
 			})
 		}
-		m.httpServer = nil
 	}
 
 	// Cancel dispatcher
