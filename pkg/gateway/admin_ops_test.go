@@ -372,6 +372,10 @@ func TestAdminWakeAgentDetached_UnknownAgentReturnsNotFound(t *testing.T) {
 func TestAdminDeleteAgent_SyncsRuntimeRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.json")
+	writerWorkspaceDir := filepath.Join(tmpDir, "workspace-writer")
+	if err := os.MkdirAll(writerWorkspaceDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -432,6 +436,9 @@ func TestAdminDeleteAgent_SyncsRuntimeRegistry(t *testing.T) {
 	}
 	if _, found := findHeartbeatJobByAgentID(updated.Heartbeat.Jobs, "main"); !found {
 		t.Fatal("main heartbeat job should remain after deleting writer")
+	}
+	if _, err := os.Stat(writerWorkspaceDir); !os.IsNotExist(err) {
+		t.Fatalf("writer workspace should be removed on agent delete, stat err=%v", err)
 	}
 }
 

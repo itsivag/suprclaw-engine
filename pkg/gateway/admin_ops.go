@@ -246,6 +246,14 @@ func (h *adminHandler) deleteAgent(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	workspaceDir := h.workspaceDir(agentID)
+	if err := os.RemoveAll(workspaceDir); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent removed from config but workspace cleanup failed: " + err.Error(),
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
