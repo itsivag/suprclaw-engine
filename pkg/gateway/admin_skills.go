@@ -180,34 +180,65 @@ func findPreflightScopeCollisions(
 	inv *skills.SkillScopeInventory,
 	agentID string,
 	expectedNames []string,
+	targetScope skills.SkillScope,
 ) *skills.SkillScopeCollisionError {
-	if inv == nil || len(inv.GlobalSkills) == 0 || len(expectedNames) == 0 {
+	if inv == nil || len(expectedNames) == 0 {
 		return nil
 	}
 
-	globalByName := make(map[string][]skills.SkillScopeRef)
-	for _, g := range inv.GlobalSkills {
-		globalByName[g.Name] = append(globalByName[g.Name], g)
-	}
-
 	collisions := make([]skills.SkillScopeCollision, 0)
-	for _, name := range expectedNames {
-		globals := globalByName[name]
-		if len(globals) == 0 {
-			continue
+	switch targetScope {
+	case skills.SkillScopeGlobal:
+		workspaceByName := make(map[string][]skills.SkillScopeRef)
+		for _, refs := range inv.WorkspaceSkillsByAgent {
+			for _, ref := range refs {
+				workspaceByName[ref.Name] = append(workspaceByName[ref.Name], ref)
+			}
 		}
-		for _, g := range globals {
-			collisions = append(collisions, skills.SkillScopeCollision{
-				Name: name,
-				Winner: skills.SkillScopeRef{
-					Name:    name,
-					Source:  string(skills.SkillScopeWorkspace),
-					Scope:   skills.SkillScopeWorkspace,
-					Path:    filepath.Join("<pending-install>", name, "SKILL.md"),
-					AgentID: agentID,
-				},
-				Conflict: g,
-			})
+		for _, name := range expectedNames {
+			conflicts := workspaceByName[name]
+			if len(conflicts) == 0 {
+				continue
+			}
+			for _, conflict := range conflicts {
+				collisions = append(collisions, skills.SkillScopeCollision{
+					Name: name,
+					Winner: skills.SkillScopeRef{
+						Name:   name,
+						Source: string(skills.SkillScopeGlobal),
+						Scope:  skills.SkillScopeGlobal,
+						Path:   filepath.Join("<pending-install-global>", name, "SKILL.md"),
+					},
+					Conflict: conflict,
+				})
+			}
+		}
+	default:
+		if len(inv.GlobalSkills) == 0 {
+			return nil
+		}
+		globalByName := make(map[string][]skills.SkillScopeRef)
+		for _, g := range inv.GlobalSkills {
+			globalByName[g.Name] = append(globalByName[g.Name], g)
+		}
+		for _, name := range expectedNames {
+			globals := globalByName[name]
+			if len(globals) == 0 {
+				continue
+			}
+			for _, g := range globals {
+				collisions = append(collisions, skills.SkillScopeCollision{
+					Name: name,
+					Winner: skills.SkillScopeRef{
+						Name:    name,
+						Source:  string(skills.SkillScopeWorkspace),
+						Scope:   skills.SkillScopeWorkspace,
+						Path:    filepath.Join("<pending-install>", name, "SKILL.md"),
+						AgentID: agentID,
+					},
+					Conflict: g,
+				})
+			}
 		}
 	}
 
@@ -218,6 +249,7 @@ func (h *adminHandler) validateCollisionPreflightAndPost(
 	extraWorkspaceByAgent map[string]string,
 	pendingAgentID string,
 	expectedInstallNames []string,
+	targetScope skills.SkillScope,
 	stage string,
 ) error {
 	inv, err := h.buildSkillScopeInventory(extraWorkspaceByAgent)
@@ -226,7 +258,7 @@ func (h *adminHandler) validateCollisionPreflightAndPost(
 	}
 
 	if stage == "preflight" {
-		if preflightErr := findPreflightScopeCollisions(inv, pendingAgentID, expectedInstallNames); preflightErr != nil {
+		if preflightErr := findPreflightScopeCollisions(inv, pendingAgentID, expectedInstallNames, targetScope); preflightErr != nil {
 			logger.WarnCF("gateway",
 				"event=skill_scope_collision_preflight_reject skill mutation rejected by preflight",
 				map[string]any{
@@ -251,6 +283,32 @@ func (h *adminHandler) validateCollisionPreflightAndPost(
 		return collisionErr
 	}
 	return nil
+}
+
+func (h *adminHandler) resolveSkillInstallTargetScope(resolvedWorkspace string) (skills.SkillScope, error) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		return skills.SkillScopeWorkspace, err
+	}
+	globalSkillsRoot := filepath.Clean(filepath.Dir(config.ResolveGlobalSkillsDir(cfg.Tools.Skills.GlobalDir)))
+	workspaceRoot := filepath.Clean(resolvedWorkspace)
+	if workspaceRoot == globalSkillsRoot {
+		return skills.SkillScopeGlobal, nil
+	}
+	return skills.SkillScopeWorkspace, nil
+}
+
+func preflightWorkspaceContext(agentID, resolvedWorkspace string, targetScope skills.SkillScope) (string, map[string]string) {
+	normalizedAgentID := strings.TrimSpace(agentID)
+	if normalizedAgentID != "" {
+		return normalizedAgentID, nil
+	}
+	if targetScope == skills.SkillScopeGlobal {
+		return "global_override", nil
+	}
+	return "workspace_override", map[string]string{
+		"workspace_override": resolvedWorkspace,
+	}
 }
 
 // --- GET /api/admin/skills/inventory ---
@@ -425,13 +483,14 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	preflightAgentID := strings.TrimSpace(req.AgentID)
-	if preflightAgentID == "" {
-		preflightAgentID = "workspace_override"
+	targetScope, err := h.resolveSkillInstallTargetScope(ws)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
-	extraWorkspaces := map[string]string{preflightAgentID: ws}
+	preflightAgentID, extraWorkspaces := preflightWorkspaceContext(req.AgentID, ws, targetScope)
 	expectedNames := expectedInstallNamesFromRequest(req)
-	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, expectedNames, "preflight"); err != nil {
+	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, expectedNames, targetScope, "preflight"); err != nil {
 		if writeSkillCollisionHTTPError(w, err) {
 			return
 		}
@@ -440,7 +499,7 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Registry != "" {
-		h.installSkillFromRegistry(w, r, req, ws)
+		h.installSkillFromRegistry(w, r, req, ws, targetScope, preflightAgentID, extraWorkspaces)
 		return
 	}
 
@@ -467,7 +526,7 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, nil, "post-state"); err != nil {
+		if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, nil, targetScope, "post-state"); err != nil {
 			if writeSkillCollisionHTTPError(w, err) {
 				return
 			}
@@ -505,7 +564,7 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, nil, "post-state"); err != nil {
+	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, nil, targetScope, "post-state"); err != nil {
 		if writeSkillCollisionHTTPError(w, err) {
 			return
 		}
@@ -531,7 +590,15 @@ func (h *adminHandler) installSkill(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *adminHandler) installSkillFromRegistry(w http.ResponseWriter, r *http.Request, req skillInstallRequest, ws string) {
+func (h *adminHandler) installSkillFromRegistry(
+	w http.ResponseWriter,
+	r *http.Request,
+	req skillInstallRequest,
+	ws string,
+	targetScope skills.SkillScope,
+	preflightAgentID string,
+	extraWorkspaces map[string]string,
+) {
 	if req.Slug == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug is required for registry installs"})
 		return
@@ -575,12 +642,7 @@ func (h *adminHandler) installSkillFromRegistry(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "skill '" + req.Slug + "' is flagged as malicious"})
 		return
 	}
-	preflightAgentID := strings.TrimSpace(req.AgentID)
-	if preflightAgentID == "" {
-		preflightAgentID = "workspace_override"
-	}
-	extraWorkspaces := map[string]string{preflightAgentID: ws}
-	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, nil, "post-state"); err != nil {
+	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, nil, targetScope, "post-state"); err != nil {
 		if writeSkillCollisionHTTPError(w, err) {
 			return
 		}
@@ -624,11 +686,12 @@ func (h *adminHandler) installBuiltinSkills(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	preflightAgentID := strings.TrimSpace(req.AgentID)
-	if preflightAgentID == "" {
-		preflightAgentID = "workspace_override"
+	targetScope, err := h.resolveSkillInstallTargetScope(ws)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
-	extraWorkspaces := map[string]string{preflightAgentID: ws}
+	preflightAgentID, extraWorkspaces := preflightWorkspaceContext(req.AgentID, ws, targetScope)
 
 	builtinDir := h.builtinSkillsDir()
 	workspaceSkillsDir := filepath.Join(ws, "skills")
@@ -654,7 +717,7 @@ func (h *adminHandler) installBuiltinSkills(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	sort.Strings(expectedBuiltinNames)
-	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, expectedBuiltinNames, "preflight"); err != nil {
+	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, expectedBuiltinNames, targetScope, "preflight"); err != nil {
 		if writeSkillCollisionHTTPError(w, err) {
 			return
 		}
@@ -681,7 +744,7 @@ func (h *adminHandler) installBuiltinSkills(w http.ResponseWriter, r *http.Reque
 		}
 		installed = append(installed, entry.Name())
 	}
-	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, nil, "post-state"); err != nil {
+	if err := h.validateCollisionPreflightAndPost(extraWorkspaces, preflightAgentID, nil, targetScope, "post-state"); err != nil {
 		if writeSkillCollisionHTTPError(w, err) {
 			return
 		}

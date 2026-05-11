@@ -192,3 +192,146 @@ func TestSkillsInventoryEndpoint_ReturnsGlobalWorkspaceAndCollisions(t *testing.
 		t.Fatalf("expected shared-skill in response: %s", body)
 	}
 }
+
+func TestInstallBuiltinSkills_GlobalWorkspacePath_DoesNotSelfCollide(t *testing.T) {
+	tmpDir := t.TempDir()
+	homeDir := filepath.Join(tmpDir, "home")
+	t.Setenv("SUPRCLAW_HOME", homeDir)
+
+	globalSkillsDir := filepath.Join(homeDir, "skills")
+	mainWorkspace := filepath.Join(tmpDir, "workspace-main")
+	if err := os.MkdirAll(mainWorkspace, 0o755); err != nil {
+		t.Fatalf("MkdirAll(main workspace) error = %v", err)
+	}
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         mainWorkspace,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+			},
+		},
+		Tools: config.ToolsConfig{
+			Skills: config.SkillsToolsConfig{
+				GlobalDir: "skills",
+			},
+		},
+	}
+	configPath := filepath.Join(tmpDir, "config.json")
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	builtinSkillDir := filepath.Join(tmpDir, "suprclaw", "skills", "suprclaw-memory")
+	if err := os.MkdirAll(builtinSkillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(builtin skill) error = %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(builtinSkillDir, "SKILL.md"),
+		[]byte("---\nname: suprclaw-memory\ndescription: memory\n---\n\n# memory"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(builtin SKILL.md) error = %v", err)
+	}
+
+	h := &adminHandler{configPath: configPath, secret: "test-secret"}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := `{"workspacePath":"` + globalSkillsDir + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/skills/install-builtin", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"ok"`) {
+		t.Fatalf("expected ok status in response body: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "suprclaw-memory") {
+		t.Fatalf("expected installed skill in response body: %s", rec.Body.String())
+	}
+}
+
+func TestInstallBuiltinSkills_GlobalWorkspacePath_RejectsWorkspaceCollision(t *testing.T) {
+	tmpDir := t.TempDir()
+	homeDir := filepath.Join(tmpDir, "home")
+	t.Setenv("SUPRCLAW_HOME", homeDir)
+
+	globalSkillsDir := filepath.Join(homeDir, "skills")
+	mainWorkspace := filepath.Join(tmpDir, "workspace-main")
+	if err := os.MkdirAll(filepath.Join(mainWorkspace, "skills", "suprclaw-memory"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(workspace skill) error = %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(mainWorkspace, "skills", "suprclaw-memory", "SKILL.md"),
+		[]byte("---\nname: suprclaw-memory\ndescription: workspace\n---\n\n# memory"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(workspace SKILL.md) error = %v", err)
+	}
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         mainWorkspace,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Scope: config.AgentScopeWorkforce},
+			},
+		},
+		Tools: config.ToolsConfig{
+			Skills: config.SkillsToolsConfig{
+				GlobalDir: "skills",
+			},
+		},
+	}
+	configPath := filepath.Join(tmpDir, "config.json")
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	builtinSkillDir := filepath.Join(tmpDir, "suprclaw", "skills", "suprclaw-memory")
+	if err := os.MkdirAll(builtinSkillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(builtin skill) error = %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(builtinSkillDir, "SKILL.md"),
+		[]byte("---\nname: suprclaw-memory\ndescription: memory\n---\n\n# memory"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(builtin SKILL.md) error = %v", err)
+	}
+
+	h := &adminHandler{configPath: configPath, secret: "test-secret"}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	body := `{"workspacePath":"` + globalSkillsDir + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/skills/install-builtin", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "SKILL_SCOPE_COLLISION") {
+		t.Fatalf("expected SKILL_SCOPE_COLLISION in response body: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "suprclaw-memory") {
+		t.Fatalf("expected colliding skill name in response body: %s", rec.Body.String())
+	}
+}
