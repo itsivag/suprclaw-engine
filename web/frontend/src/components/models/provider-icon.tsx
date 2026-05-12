@@ -18,10 +18,6 @@ const PROVIDER_ICON_SLUGS: Record<string, string> = {
   zhipu: "zhipu",
 }
 
-const PROVIDER_DIRECT_ICONS: Record<string, string> = {
-  "opencode-go": "/opencode-logo.png",
-}
-
 const PROVIDER_DOMAINS: Record<string, string> = {
   openai: "openai.com",
   anthropic: "anthropic.com",
@@ -58,13 +54,9 @@ export function ProviderIcon({
   const [loadFailed, setLoadFailed] = useState(false)
   const initial = providerLabel.trim().charAt(0).toUpperCase() || "?"
   const iconUrls = useMemo(() => {
-    const directIcon = PROVIDER_DIRECT_ICONS[providerKey]
     const slug = PROVIDER_ICON_SLUGS[providerKey]
     const domain = PROVIDER_DOMAINS[providerKey]
     const urls: string[] = []
-    if (directIcon) {
-      urls.push(directIcon)
-    }
     if (slug) {
       urls.push(`https://cdn.simpleicons.org/${slug}`)
     }
