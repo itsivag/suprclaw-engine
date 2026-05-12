@@ -707,6 +707,60 @@ func TestAdminOAuthOpenRouterTokenLoginWithModelOverrideSwitchesManagedLeadModel
 	t.Fatalf("expected OpenRouter model auth_method %q in model_list", oauthMethodToken)
 }
 
+func TestAdminOAuthOpenCodeGoTokenLoginWithModelOverrideSwitchesManagedLeadModel(t *testing.T) {
+	configPath, cleanup := setupAdminOAuthManagedRuntimeTestEnv(t)
+	defer cleanup()
+	resetAdminOAuthHooks(t)
+
+	appendOAuthTestModel(t, configPath, config.ModelConfig{
+		ModelName: "opencode-go/deepseek-v4-pro",
+		Model:     "opencode-go/deepseek-v4-pro",
+	})
+
+	h := newAdminHandler(configPath, nil, "test-secret", nil, nil)
+	mux := http.NewServeMux()
+	h.registerRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/oauth/login",
+		strings.NewReader(`{"provider":"opencode-go","method":"token","token":"test-token","model":"opencode-go/deepseek-v4-pro"}`),
+	)
+	req.Header.Set("Authorization", "Bearer test-secret")
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	cred, err := auth.GetCredential(oauthProviderOpenCodeGo)
+	if err != nil {
+		t.Fatalf("GetCredential error: %v", err)
+	}
+	if cred == nil {
+		t.Fatalf("expected OpenCode Go credential")
+	}
+	if cred.AuthMethod != oauthMethodToken {
+		t.Fatalf("credential auth_method = %q, want %q", cred.AuthMethod, oauthMethodToken)
+	}
+
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	if got := updated.Agents.Defaults.GetModelName(); got != "opencode-go/deepseek-v4-pro" {
+		t.Fatalf("agents.defaults.model_name = %q, want %q", got, "opencode-go/deepseek-v4-pro")
+	}
+	assertAllOAuthAgentModels(t, updated, "opencode-go/deepseek-v4-pro")
+	for _, modelCfg := range updated.ModelList {
+		if modelCfg.Model == "opencode-go/deepseek-v4-pro" && modelCfg.AuthMethod == oauthMethodToken {
+			return
+		}
+	}
+	t.Fatalf("expected OpenCode Go model auth_method %q in model_list", oauthMethodToken)
+}
+
 func TestAdminOAuthFlowExpiresWhenQueried(t *testing.T) {
 	configPath, cleanup := setupAdminOAuthTestEnv(t)
 	defer cleanup()

@@ -7,6 +7,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   moonshot: "Moonshot (月之暗面)",
   groq: "Groq",
   openrouter: "OpenRouter",
+  "opencode-go": "OpenCode Go",
   nvidia: "NVIDIA",
   cerebras: "Cerebras",
   volcengine: "Volcengine (火山引擎)",

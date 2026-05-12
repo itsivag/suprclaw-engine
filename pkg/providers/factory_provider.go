@@ -146,7 +146,7 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 			cfg.RequestTimeout,
 		), modelID, nil
 
-	case "openrouter", "groq", "zhipu", "gemini", "nvidia",
+	case "openrouter", "opencode-go", "groq", "zhipu", "gemini", "nvidia",
 		"ollama", "moonshot", "shengsuanyun", "deepseek", "cerebras",
 		"vivgrid", "volcengine", "vllm", "qwen", "mistral", "avian",
 		"minimax", "longcat", "modelscope":
@@ -261,6 +261,8 @@ func getDefaultAPIBase(protocol string) string {
 		return "https://api.openai.com/v1"
 	case "openrouter":
 		return "https://openrouter.ai/api/v1"
+	case "opencode-go":
+		return "https://opencode.ai/zen/go/v1"
 	case "litellm":
 		return "http://localhost:4000/v1"
 	case "groq":

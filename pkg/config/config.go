@@ -580,6 +580,7 @@ type ProvidersConfig struct {
 	OpenAI        OpenAIProviderConfig `json:"openai"`
 	LiteLLM       ProviderConfig       `json:"litellm"`
 	OpenRouter    ProviderConfig       `json:"openrouter"`
+	OpenCodeGo    ProviderConfig       `json:"opencode-go"`
 	Groq          ProviderConfig       `json:"groq"`
 	Zhipu         ProviderConfig       `json:"zhipu"`
 	VLLM          ProviderConfig       `json:"vllm"`
@@ -609,6 +610,7 @@ func (p ProvidersConfig) IsEmpty() bool {
 		p.OpenAI.APIKey == "" && p.OpenAI.APIBase == "" &&
 		p.LiteLLM.APIKey == "" && p.LiteLLM.APIBase == "" &&
 		p.OpenRouter.APIKey == "" && p.OpenRouter.APIBase == "" &&
+		p.OpenCodeGo.APIKey == "" && p.OpenCodeGo.APIBase == "" &&
 		p.Groq.APIKey == "" && p.Groq.APIBase == "" &&
 		p.Zhipu.APIKey == "" && p.Zhipu.APIBase == "" &&
 		p.VLLM.APIKey == "" && p.VLLM.APIBase == "" &&

@@ -25,6 +25,7 @@ const (
 	oauthProviderGoogleAntigravity = "google-antigravity"
 	oauthProviderNVIDIA            = "nvidia"
 	oauthProviderOpenRouter        = "openrouter"
+	oauthProviderOpenCodeGo        = "opencode-go"
 
 	oauthMethodBrowser    = "browser"
 	oauthMethodDeviceCode = "device_code"
@@ -48,6 +49,7 @@ var oauthProviderOrder = []string{
 	oauthProviderGoogleAntigravity,
 	oauthProviderNVIDIA,
 	oauthProviderOpenRouter,
+	oauthProviderOpenCodeGo,
 }
 
 var oauthProviderMethods = map[string][]string{
@@ -56,6 +58,7 @@ var oauthProviderMethods = map[string][]string{
 	oauthProviderGoogleAntigravity: {oauthMethodBrowser},
 	oauthProviderNVIDIA:            {oauthMethodToken},
 	oauthProviderOpenRouter:        {oauthMethodToken},
+	oauthProviderOpenCodeGo:        {oauthMethodToken},
 }
 
 var oauthProviderLabels = map[string]string{
@@ -64,6 +67,7 @@ var oauthProviderLabels = map[string]string{
 	oauthProviderGoogleAntigravity: "Google Antigravity",
 	oauthProviderNVIDIA:            "NVIDIA",
 	oauthProviderOpenRouter:        "OpenRouter",
+	oauthProviderOpenCodeGo:        "OpenCode Go",
 }
 
 var (
@@ -741,7 +745,7 @@ func normalizeOAuthProvider(raw string) (string, error) {
 	switch provider {
 	case "antigravity", "google":
 		return oauthProviderGoogleAntigravity, nil
-	case oauthProviderOpenAI, oauthProviderAnthropic, oauthProviderGoogleAntigravity, oauthProviderNVIDIA, oauthProviderOpenRouter:
+	case oauthProviderOpenAI, oauthProviderAnthropic, oauthProviderGoogleAntigravity, oauthProviderNVIDIA, oauthProviderOpenRouter, oauthProviderOpenCodeGo:
 		return provider, nil
 	default:
 		return "", fmt.Errorf("unsupported provider %q", raw)
@@ -1102,6 +1106,11 @@ func (h *adminHandler) syncProviderAuthMethod(provider, authMethod, selectedMode
 				cfg.Providers.OpenRouter.AuthMethod = authMethod
 				changed = true
 			}
+		case oauthProviderOpenCodeGo:
+			if cfg.Providers.OpenCodeGo.AuthMethod != authMethod {
+				cfg.Providers.OpenCodeGo.AuthMethod = authMethod
+				changed = true
+			}
 		default:
 			return false, fmt.Errorf("unsupported provider %q", provider)
 		}
@@ -1233,6 +1242,8 @@ func modelBelongsToProvider(provider, model string) bool {
 		return lower == "nvidia" || strings.HasPrefix(lower, "nvidia/")
 	case oauthProviderOpenRouter:
 		return lower == "openrouter" || strings.HasPrefix(lower, "openrouter/")
+	case oauthProviderOpenCodeGo:
+		return lower == "opencode-go" || strings.HasPrefix(lower, "opencode-go/")
 	default:
 		return false
 	}
@@ -1268,6 +1279,12 @@ func defaultModelConfigForProvider(provider, authMethod string) config.ModelConf
 		return config.ModelConfig{
 			ModelName:  "openrouter/auto",
 			Model:      "openrouter/auto",
+			AuthMethod: authMethod,
+		}
+	case oauthProviderOpenCodeGo:
+		return config.ModelConfig{
+			ModelName:  "opencode-go/deepseek-v4-pro",
+			Model:      "opencode-go/deepseek-v4-pro",
 			AuthMethod: authMethod,
 		}
 	default:

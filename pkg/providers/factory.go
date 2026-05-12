@@ -106,6 +106,16 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 					sel.apiBase = "https://openrouter.ai/api/v1"
 				}
 			}
+		case "opencode-go":
+			if cfg.Providers.OpenCodeGo.APIKey != "" {
+				sel.apiKey = cfg.Providers.OpenCodeGo.APIKey
+				sel.proxy = cfg.Providers.OpenCodeGo.Proxy
+				if cfg.Providers.OpenCodeGo.APIBase != "" {
+					sel.apiBase = cfg.Providers.OpenCodeGo.APIBase
+				} else {
+					sel.apiBase = "https://opencode.ai/zen/go/v1"
+				}
+			}
 		case "litellm":
 			if cfg.Providers.LiteLLM.APIKey != "" || cfg.Providers.LiteLLM.APIBase != "" {
 				sel.apiKey = cfg.Providers.LiteLLM.APIKey
@@ -253,6 +263,7 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 				sel.apiBase = "https://api.moonshot.cn/v1"
 			}
 		case strings.HasPrefix(model, "openrouter/") ||
+			strings.HasPrefix(model, "opencode-go/") ||
 			strings.HasPrefix(model, "anthropic/") ||
 			strings.HasPrefix(model, "openai/") ||
 			strings.HasPrefix(model, "meta-llama/") ||
