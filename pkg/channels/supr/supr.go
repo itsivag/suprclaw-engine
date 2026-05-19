@@ -996,6 +996,8 @@ func stringField(m map[string]any, key string) string {
 	return v
 }
 
+const mediaModelOverride = "litellm/suprclaw-media"
+
 // handleMediaSend processes an inbound media.send frame from a client.
 func (c *SuprChannel) handleMediaSend(pc *suprConn, msg SuprMessage) {
 	store := c.GetMediaStore()
@@ -1090,9 +1092,8 @@ func (c *SuprChannel) handleMediaSend(pc *suprConn, msg SuprMessage) {
 		metadata["requested_agent_id"] = agentID
 	}
 
-	if model, _ := msg.Payload["model"].(string); model != "" {
-		metadata["model_override"] = model
-	}
+	// Media turns are always routed through the dedicated LiteLLM media alias.
+	metadata["model_override"] = mediaModelOverride
 	if reasoningOverride != "" {
 		metadata["reasoning_override"] = reasoningOverride
 	}

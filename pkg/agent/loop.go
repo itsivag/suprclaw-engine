@@ -118,6 +118,8 @@ const (
 	metadataKeyReasoningOverride = "reasoning_override"
 )
 
+var createProviderFromModelConfig = providers.CreateProviderFromConfig
+
 func NewAgentLoop(
 	cfg *config.Config,
 	msgBus *bus.MessageBus,
@@ -1681,6 +1683,56 @@ func candidateProviderName(candidates []providers.FallbackCandidate, model strin
 	return candidates[0].Provider
 }
 
+func (al *AgentLoop) buildProviderForOverride(providerName, modelName string) (providers.LLMProvider, string, error) {
+	normalizedProvider := strings.ToLower(strings.TrimSpace(providerName))
+	normalizedModel := strings.TrimSpace(modelName)
+	if normalizedProvider == "" {
+		return nil, "", fmt.Errorf("override provider is empty")
+	}
+	if normalizedModel == "" {
+		return nil, "", fmt.Errorf("override model is empty")
+	}
+
+	fullModel := normalizedProvider + "/" + normalizedModel
+
+	var candidateCfg *config.ModelConfig
+	for i := range al.cfg.ModelList {
+		entry := al.cfg.ModelList[i]
+		if strings.EqualFold(strings.TrimSpace(entry.Model), fullModel) {
+			copied := entry
+			candidateCfg = &copied
+			break
+		}
+	}
+
+	if candidateCfg == nil {
+		converted := config.ConvertProvidersToModelList(al.cfg)
+		for i := range converted {
+			entry := converted[i]
+			ref := providers.ParseModelRef(entry.Model, "")
+			if ref == nil {
+				continue
+			}
+			if strings.EqualFold(ref.Provider, normalizedProvider) {
+				entry.ModelName = normalizedModel
+				entry.Model = fullModel
+				candidateCfg = &entry
+				break
+			}
+		}
+	}
+
+	if candidateCfg == nil {
+		return nil, "", fmt.Errorf("no provider configuration available for override provider %q", normalizedProvider)
+	}
+
+	provider, resolvedModel, err := createProviderFromModelConfig(candidateCfg)
+	if err != nil {
+		return nil, "", err
+	}
+	return provider, resolvedModel, nil
+}
+
 func appendUniqueString(dst []string, v string) []string {
 	for _, existing := range dst {
 		if existing == v {
@@ -1712,23 +1764,35 @@ func (al *AgentLoop) runLLMIteration(
 	// all tool-follow-up iterations within the same turn so that a multi-step
 	// tool chain doesn't switch models mid-way through.
 	activeCandidates, activeModel := al.selectCandidates(agent, opts.UserMessage, messages)
+	defaultProviderName := candidateProviderName(agent.Candidates, agent.Model)
 
 	if opts.ModelOverride != "" {
+		ref := providers.ParseModelRef(opts.ModelOverride, defaultProviderName)
+		if ref == nil || strings.TrimSpace(ref.Model) == "" {
+			return "", nil, 0, "", &RequestError{
+				Code:    ErrCodeModelUnavailable,
+				Message: fmt.Sprintf("invalid model override %q", opts.ModelOverride),
+			}
+		}
+		overrideProvider := strings.TrimSpace(ref.Provider)
+		if overrideProvider == "" {
+			overrideProvider = defaultProviderName
+		}
 		// Modality check: fail fast if media present and model is known text-only
-		if len(opts.Media) > 0 {
+		if len(opts.Media) > 0 && strings.EqualFold(overrideProvider, defaultProviderName) {
 			if vc, ok := agent.Provider.(providers.VisionCapable); ok {
-				if !vc.SupportsVision(opts.ModelOverride) {
+				if !vc.SupportsVision(ref.Model) {
 					return "", nil, 0, "", &RequestError{
 						Code:    ErrCodeModelModalityUnsupported,
-						Message: fmt.Sprintf("model %q does not support image content", opts.ModelOverride),
+						Message: fmt.Sprintf("model %q does not support image content", ref.Model),
 					}
 				}
 			}
 			// If provider doesn't implement VisionCapable, fail-open (assume vision supported)
 		}
 		// Single-candidate override — bypasses fallback routing for this turn
-		activeModel = opts.ModelOverride
-		activeCandidates = []providers.FallbackCandidate{{Model: opts.ModelOverride}}
+		activeModel = ref.Model
+		activeCandidates = []providers.FallbackCandidate{{Provider: overrideProvider, Model: ref.Model}}
 	}
 
 	activeCandidates = al.orderCandidatesByContextWindow(agent, activeCandidates)
@@ -1928,12 +1992,45 @@ func (al *AgentLoop) runLLMIteration(
 			al.activeRequests.Add(1)
 			defer al.activeRequests.Done()
 
+			providerCache := make(map[string]providers.LLMProvider)
+			resolveProviderForCandidate := func(providerName, modelName string) (providers.LLMProvider, string, error) {
+				normalizedProvider := strings.ToLower(strings.TrimSpace(providerName))
+				normalizedModel := strings.TrimSpace(modelName)
+				if normalizedModel == "" {
+					return nil, "", fmt.Errorf("model is required")
+				}
+				if normalizedProvider == "" || strings.EqualFold(normalizedProvider, defaultProviderName) {
+					return agent.Provider, normalizedModel, nil
+				}
+
+				cacheKey := normalizedProvider + "/" + normalizedModel
+				if cached, ok := providerCache[cacheKey]; ok {
+					return cached, normalizedModel, nil
+				}
+
+				overrideProvider, resolvedModel, err := al.buildProviderForOverride(normalizedProvider, normalizedModel)
+				if err != nil {
+					return nil, "", fmt.Errorf(
+						"failed to resolve override provider %q for model %q: %w",
+						normalizedProvider,
+						normalizedModel,
+						err,
+					)
+				}
+				providerCache[cacheKey] = overrideProvider
+				return overrideProvider, resolvedModel, nil
+			}
+
 			if len(activeCandidates) > 1 && al.fallback != nil {
 				fbResult, fbErr := al.fallback.Execute(
 					ctx,
 					activeCandidates,
 					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-						return agent.Provider.Chat(ctx, messages, providerToolDefs, model, llmOpts)
+						selectedProvider, selectedModel, err := resolveProviderForCandidate(provider, model)
+						if err != nil {
+							return nil, err
+						}
+						return selectedProvider.Chat(ctx, messages, providerToolDefs, selectedModel, llmOpts)
 					},
 				)
 				if fbErr != nil {
@@ -1949,7 +2046,14 @@ func (al *AgentLoop) runLLMIteration(
 				}
 				return fbResult.Response, nil
 			}
-			return agent.Provider.Chat(ctx, messages, providerToolDefs, activeModel, llmOpts)
+			selectedProvider, selectedModel, err := resolveProviderForCandidate(
+				candidateProviderName(activeCandidates, activeModel),
+				activeModel,
+			)
+			if err != nil {
+				return nil, err
+			}
+			return selectedProvider.Chat(ctx, messages, providerToolDefs, selectedModel, llmOpts)
 		}
 
 		// Retry loop for context/token errors

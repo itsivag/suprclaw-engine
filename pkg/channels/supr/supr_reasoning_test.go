@@ -155,6 +155,9 @@ func TestSuprMediaSend_ValidReasoningMetadata(t *testing.T) {
 	if got := inbound.Metadata["reasoning_override"]; got != "xhigh" {
 		t.Fatalf("reasoning_override = %q, want %q", got, "xhigh")
 	}
+	if got := inbound.Metadata["model_override"]; got != mediaModelOverride {
+		t.Fatalf("model_override = %q, want %q", got, mediaModelOverride)
+	}
 }
 
 func TestSuprMediaSend_InvalidReasoningRejected(t *testing.T) {
