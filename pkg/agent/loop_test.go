@@ -3436,6 +3436,84 @@ func TestProcessMessage_MediaModelOverrideUsesOverrideProvider(t *testing.T) {
 	}
 }
 
+func TestProcessMessage_MediaModelOverrideUsesConfiguredMediaProviderWhenDefaultProviderIsLiteLLM(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Provider:          "litellm",
+				Model:             "litellm/suprclaw-default",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "suprclaw-default",
+				Model:     "litellm/suprclaw-default",
+				APIKey:    "litellm-default-key",
+				APIBase:   "http://litellm.test/v1",
+			},
+			{
+				ModelName: "suprclaw-media",
+				Model:     "litellm/suprclaw-media",
+				APIKey:    "litellm-media-key",
+				APIBase:   "http://litellm.test/v1",
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	defaultProvider := &thinkingCaptureProvider{response: "default-provider-response", supportsThinking: true}
+	overrideProvider := &thinkingCaptureProvider{response: "override-provider-response", supportsThinking: true}
+
+	origCreateProvider := createProviderFromModelConfig
+	createProviderFromModelConfig = func(modelCfg *config.ModelConfig) (providers.LLMProvider, string, error) {
+		if strings.EqualFold(strings.TrimSpace(modelCfg.Model), "litellm/suprclaw-media") {
+			return overrideProvider, "suprclaw-media", nil
+		}
+		return nil, "", fmt.Errorf("unexpected provider build for model %q", modelCfg.Model)
+	}
+	defer func() { createProviderFromModelConfig = origCreateProvider }()
+
+	al := NewAgentLoop(cfg, msgBus, defaultProvider)
+	helper := testHelper{al: al}
+
+	resp := helper.executeAndGetResponse(t, context.Background(), bus.InboundMessage{
+		Channel:  "telegram",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "[image: test.png]",
+		Peer: bus.Peer{
+			Kind: "direct",
+			ID:   "user1",
+		},
+		Media: []string{"media://test-image"},
+		Metadata: map[string]string{
+			metadataKeyModelOverride: "litellm/suprclaw-media",
+		},
+	})
+
+	if resp != "override-provider-response" {
+		t.Fatalf("unexpected response: %q", resp)
+	}
+	if defaultProvider.calls != 0 {
+		t.Fatalf("default provider should not be used for media override, calls=%d", defaultProvider.calls)
+	}
+	if overrideProvider.calls != 1 {
+		t.Fatalf("override provider calls = %d, want 1", overrideProvider.calls)
+	}
+	if overrideProvider.lastModel != "suprclaw-media" {
+		t.Fatalf("override provider model = %q, want %q", overrideProvider.lastModel, "suprclaw-media")
+	}
+}
+
 func TestProcessMessage_SwitchReasoningPersistsOnAgent(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {

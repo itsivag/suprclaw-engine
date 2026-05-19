@@ -1794,6 +1794,16 @@ func (al *AgentLoop) runLLMIteration(
 		activeModel = ref.Model
 		activeCandidates = []providers.FallbackCandidate{{Provider: overrideProvider, Model: ref.Model}}
 	}
+	explicitOverrideProvider := ""
+	if strings.TrimSpace(opts.ModelOverride) != "" {
+		trimmedOverride := strings.TrimSpace(opts.ModelOverride)
+		if strings.Contains(trimmedOverride, "/") {
+			ref := providers.ParseModelRef(trimmedOverride, defaultProviderName)
+			if ref != nil {
+				explicitOverrideProvider = strings.ToLower(strings.TrimSpace(ref.Provider))
+			}
+		}
+	}
 
 	activeCandidates = al.orderCandidatesByContextWindow(agent, activeCandidates)
 	if len(activeCandidates) == 1 {
@@ -1999,7 +2009,12 @@ func (al *AgentLoop) runLLMIteration(
 				if normalizedModel == "" {
 					return nil, "", fmt.Errorf("model is required")
 				}
-				if normalizedProvider == "" || strings.EqualFold(normalizedProvider, defaultProviderName) {
+				if normalizedProvider == "" {
+					return agent.Provider, normalizedModel, nil
+				}
+				forceExplicitOverrideProvider := explicitOverrideProvider != "" &&
+					strings.EqualFold(normalizedProvider, explicitOverrideProvider)
+				if strings.EqualFold(normalizedProvider, defaultProviderName) && !forceExplicitOverrideProvider {
 					return agent.Provider, normalizedModel, nil
 				}
 
