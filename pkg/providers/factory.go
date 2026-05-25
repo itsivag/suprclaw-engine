@@ -200,7 +200,10 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 				if sel.apiBase == "" {
 					sel.apiBase = "https://api.deepseek.com/v1"
 				}
-				if model != "deepseek-chat" && model != "deepseek-reasoner" {
+				if model != "deepseek-chat" &&
+					model != "deepseek-reasoner" &&
+					!strings.HasPrefix(model, "deepseek/") &&
+					!strings.HasPrefix(model, "deepseek-") {
 					sel.model = "deepseek-chat"
 				}
 			}

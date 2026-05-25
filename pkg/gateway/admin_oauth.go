@@ -23,6 +23,7 @@ const (
 	oauthProviderOpenAI            = "openai"
 	oauthProviderAnthropic         = "anthropic"
 	oauthProviderGoogleAntigravity = "google-antigravity"
+	oauthProviderDeepSeek          = "deepseek"
 	oauthProviderNVIDIA            = "nvidia"
 	oauthProviderOpenRouter        = "openrouter"
 	oauthProviderOpenCodeGo        = "opencode-go"
@@ -47,6 +48,7 @@ var oauthProviderOrder = []string{
 	oauthProviderOpenAI,
 	oauthProviderAnthropic,
 	oauthProviderGoogleAntigravity,
+	oauthProviderDeepSeek,
 	oauthProviderNVIDIA,
 	oauthProviderOpenRouter,
 	oauthProviderOpenCodeGo,
@@ -56,6 +58,7 @@ var oauthProviderMethods = map[string][]string{
 	oauthProviderOpenAI:            {oauthMethodBrowser, oauthMethodDeviceCode, oauthMethodToken},
 	oauthProviderAnthropic:         {oauthMethodToken},
 	oauthProviderGoogleAntigravity: {oauthMethodBrowser},
+	oauthProviderDeepSeek:          {oauthMethodToken},
 	oauthProviderNVIDIA:            {oauthMethodToken},
 	oauthProviderOpenRouter:        {oauthMethodToken},
 	oauthProviderOpenCodeGo:        {oauthMethodToken},
@@ -65,6 +68,7 @@ var oauthProviderLabels = map[string]string{
 	oauthProviderOpenAI:            "OpenAI",
 	oauthProviderAnthropic:         "Anthropic",
 	oauthProviderGoogleAntigravity: "Google Antigravity",
+	oauthProviderDeepSeek:          "DeepSeek",
 	oauthProviderNVIDIA:            "NVIDIA",
 	oauthProviderOpenRouter:        "OpenRouter",
 	oauthProviderOpenCodeGo:        "OpenCode Go",
@@ -745,7 +749,7 @@ func normalizeOAuthProvider(raw string) (string, error) {
 	switch provider {
 	case "antigravity", "google":
 		return oauthProviderGoogleAntigravity, nil
-	case oauthProviderOpenAI, oauthProviderAnthropic, oauthProviderGoogleAntigravity, oauthProviderNVIDIA, oauthProviderOpenRouter, oauthProviderOpenCodeGo:
+	case oauthProviderOpenAI, oauthProviderAnthropic, oauthProviderGoogleAntigravity, oauthProviderDeepSeek, oauthProviderNVIDIA, oauthProviderOpenRouter, oauthProviderOpenCodeGo:
 		return provider, nil
 	default:
 		return "", fmt.Errorf("unsupported provider %q", raw)
@@ -1096,6 +1100,11 @@ func (h *adminHandler) syncProviderAuthMethod(provider, authMethod, selectedMode
 				cfg.Providers.Antigravity.AuthMethod = authMethod
 				changed = true
 			}
+		case oauthProviderDeepSeek:
+			if cfg.Providers.DeepSeek.AuthMethod != authMethod {
+				cfg.Providers.DeepSeek.AuthMethod = authMethod
+				changed = true
+			}
 		case oauthProviderNVIDIA:
 			if cfg.Providers.Nvidia.AuthMethod != authMethod {
 				cfg.Providers.Nvidia.AuthMethod = authMethod
@@ -1238,6 +1247,11 @@ func modelBelongsToProvider(provider, model string) bool {
 			lower == "google-antigravity" ||
 			strings.HasPrefix(lower, "antigravity/") ||
 			strings.HasPrefix(lower, "google-antigravity/")
+	case oauthProviderDeepSeek:
+		return lower == "deepseek" ||
+			lower == "deepseek-chat" ||
+			lower == "deepseek-reasoner" ||
+			strings.HasPrefix(lower, "deepseek/")
 	case oauthProviderNVIDIA:
 		return lower == "nvidia" || strings.HasPrefix(lower, "nvidia/")
 	case oauthProviderOpenRouter:
@@ -1267,6 +1281,12 @@ func defaultModelConfigForProvider(provider, authMethod string) config.ModelConf
 		return config.ModelConfig{
 			ModelName:  "gemini-flash",
 			Model:      "antigravity/gemini-3-flash",
+			AuthMethod: authMethod,
+		}
+	case oauthProviderDeepSeek:
+		return config.ModelConfig{
+			ModelName:  "deepseek/deepseek-v4-pro",
+			Model:      "deepseek/deepseek-v4-pro",
 			AuthMethod: authMethod,
 		}
 	case oauthProviderNVIDIA:

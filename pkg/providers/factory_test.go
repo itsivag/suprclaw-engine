@@ -67,6 +67,16 @@ func TestResolveProviderSelection(t *testing.T) {
 			wantProxy:   "http://127.0.0.1:7890",
 		},
 		{
+			name: "explicit deepseek provider preserves explicit v4 pro model",
+			setup: func(cfg *config.Config) {
+				cfg.Agents.Defaults.Provider = "deepseek"
+				cfg.Agents.Defaults.Model = "deepseek/deepseek-v4-pro"
+				cfg.Providers.DeepSeek.APIKey = "deepseek-key"
+			},
+			wantType:    providerTypeHTTPCompat,
+			wantAPIBase: "https://api.deepseek.com/v1",
+		},
+		{
 			name: "explicit shengsuanyun provider uses defaults",
 			setup: func(cfg *config.Config) {
 				cfg.Agents.Defaults.Provider = "shengsuanyun"

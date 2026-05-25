@@ -150,6 +150,12 @@ func DefaultConfig() *Config {
 				APIBase:   "https://api.deepseek.com/v1",
 				APIKey:    "",
 			},
+			{
+				ModelName: "deepseek/deepseek-v4-pro",
+				Model:     "deepseek/deepseek-v4-pro",
+				APIBase:   "https://api.deepseek.com/v1",
+				APIKey:    "",
+			},
 
 			// Google Gemini - https://ai.google.dev/
 			{
