@@ -2278,6 +2278,7 @@ func (al *AgentLoop) runLLMIteration(
 		if usageErr := validateUsageContract(promptSnapshot, response.Usage); usageErr != nil {
 			return "", nil, iteration, activeModel, usageErr
 		}
+		reportHostedUsageAsync(ctx, activeModel, response.Usage)
 
 		if al.promptCacheDetector != nil {
 			detectorKey := agent.ID + ":" + opts.SessionKey
